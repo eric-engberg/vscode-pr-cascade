@@ -68,7 +68,7 @@ src/extension.ts     entry point — wires core to VS Code
 src/core/            pure logic + git runner; no VS Code imports (enforced by lint)
 src/vscode/          adapters: tree view, diff content provider, commands, config
 test/unit, test/git  Vitest (see vitest.config.mts)
-test/helpers/        the fake git runner (and, later, the fixture builder)
+test/helpers/        the fake git runner and the fixture builder (a real throwaway stack)
 test/ext             Mocha inside VS Code (see .vscode-test.mjs)
 docs/                reading order and the TypeScript primer
 scripts/             developer tooling (never shipped)

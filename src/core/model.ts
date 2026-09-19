@@ -2,10 +2,12 @@
  * core/model.ts — the shared types (data shapes) the core logic passes around.
  *
  * Layer: core (no VS Code imports; plan §4.1). This file holds no logic, only descriptions
- * of shapes, so every other core file can import them without importing each other. In
- * this PR it defines just GitRunner, the one interface every git-reading module is written
- * against; PR 5 adds StackLayer, ChangedFile and RepoState. Depends on: nothing. Depended
- * on by: core/git.ts (implements GitRunner) and every later core module. Plan: §4.3.
+ * of shapes, so every other core file can import them without importing each other: the
+ * GitRunner interface every git-reading module is written against, and the data model the
+ * tree renders — StackLayer, RepoState, and the ChangedFile that M2 fills in. Depends on:
+ * nothing. Depended on by: every core module — core/git.ts implements GitRunner;
+ * core/discovery.ts, core/trunk.ts and core/stack.ts take one; core/stack.ts builds the
+ * RepoState. Plan: §4.3.
  */
 
 /**
@@ -48,4 +50,81 @@ export interface GitRunner {
    * repository look like "not a git repository" and hide the real problem.
    */
   tryRun(args: string[], cwd: string): Promise<string | null>;
+}
+
+/**
+ * One branch of the stack under HEAD, as the tree shows it: a row with a name, how far it
+ * is from trunk, and which row sits below it. core/stack.ts builds these; the tree view
+ * (PR 6) renders one node per layer, and M2's file list asks git what `parent..name`
+ * changes. The fields that depend on the neighbours — `parent`, `parentSha` — are what
+ * make the layers a *stack* rather than a bag of branches: every layer's diff is measured
+ * against the layer below it, never against trunk, which is what "stacked" means.
+ */
+// see primer §9 (interface) and §24 (boolean)
+export interface StackLayer {
+  /** The local branch name, exactly as `git branch` lists it: `feat/otel-ingress`. */
+  name: string;
+  /** The commit the branch points at, as the full 40-character SHA. */
+  sha: string;
+  /** The layer below: the previous layer's branch name, or the trunk ref for the bottom layer. */
+  parent: string;
+  /** The commit `parent` points at; `parentSha..sha` is exactly what this layer adds. */
+  parentSha: string;
+  /**
+   * How many commits are on the branch and not on trunk (`git rev-list --count
+   * trunk..name`) — the layer's distance from trunk, which is what orders the stack. Two
+   * branches on one commit have the same count (E6); a layer several commits above its
+   * parent has a higher count than the parent, never the same.
+   */
+  commitCount: number;
+  /** Whether HEAD is on this branch. At most one layer is current; none when HEAD is detached (E3). */
+  isCurrent: boolean;
+}
+
+/**
+ * How one file changed between a layer and its parent, in git's own letters
+ * (`git diff --name-status`): Added, Modified, Deleted, Renamed, Copied, Type changed
+ * (a file became a symlink, or the reverse). A union of exact strings rather than free
+ * text so a typo such as `'X'` is a compile error, and so the tree (M2) can branch on
+ * them with a plain `===`. Defined now, with the rest of the data model from plan §4.3,
+ * so the shape the tree is built around is in one place; core/changes.ts (M2) fills it in.
+ */
+// see primer §10 (union types: exact strings as members)
+export type FileStatus = 'A' | 'M' | 'D' | 'R' | 'C' | 'T';
+
+/**
+ * One file a layer changes relative to its parent — a row under the layer's node once M2
+ * lands. Part of the plan §4.3 data model, declared here with the rest of it; nothing
+ * builds one until core/changes.ts (M2).
+ */
+// see primer §11 (optional `?` fields)
+export interface ChangedFile {
+  status: FileStatus;
+  /** The path as it is on the layer's branch. */
+  path: string;
+  /** For a rename or copy (R/C): the path as it was on the parent. Absent otherwise. */
+  oldPath?: string;
+  /** git considers the file binary (E10): shown as a file, not opened in a diff editor. */
+  binary: boolean;
+}
+
+/**
+ * Everything the tree knows about one repository — the output of the whole core pipeline
+ * for one root: discovery finds `root`, detectTrunk finds `trunk`, computeStack fills in
+ * `head` and `layers`. One object rather than four loose values so the tree view receives
+ * one thing per repository and a test can assert on one thing (`toEqual`). The `null`
+ * cases are states the tree shows as a message instead of a stack: no trunk (E4, "set
+ * prCascade.trunk"), detached HEAD (E3). M4 adds `rebaseInProgress` here when it is
+ * computed and rendered (plan §5 "Rebase in progress").
+ */
+// see primer §10 (union types: `string | null`)
+export interface RepoState {
+  /** The repository root, as discovery found it (physical path, no trailing slash). */
+  root: string;
+  /** The ref the stack is measured against (`origin/main`, `main`), or null when none was found (E4). */
+  trunk: string | null;
+  /** The branch HEAD is on, or null when HEAD is detached (E3). */
+  head: string | null;
+  /** Bottom to top: the first element sits directly on trunk. Empty when HEAD is on trunk (E5). */
+  layers: StackLayer[];
 }

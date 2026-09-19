@@ -232,7 +232,8 @@ Two small things that appear alongside it:
   into one string with a space between each — `['rev-parse', 'HEAD']` becomes
   `'rev-parse HEAD'` — and `this.calls.push(...)` (in the fake runner) appends one element
   at the end. `Array.from(...)` (§19, §21) turns a Map's keys or a Set into an array. The
-  other Array methods get a section of their own when a later PR starts using them.
+  other Array methods — `filter`, `map`, `sort` — have sections of their own (§25, §26),
+  as does `split`, the string method that produces an array in the first place.
 - `import type { GitRunner } from './model'` (in `core/git.ts` and `test/helpers/fakeGit.ts`)
   — the `type` keyword says "I only need this name for type-checking". Because interfaces
   vanish at compile time, so does the import; there is nothing for esbuild to bundle. A
@@ -266,8 +267,9 @@ export type StartFailure = 'not-found' | 'not-executable' | 'unusable-directory'
 - The members can be **exact strings**, not only kinds of value. This union means "one of
   these three spellings, or `null`": a typo such as `'notfound'` is a compile error, and
   `failure.startFailure === 'not-found'` is how code branches on it. It is the type-level
-  version of a shell `case` over fixed words. PR 5's `FileStatus` (`'A' | 'M' | 'D' | ...`)
-  works the same way.
+  version of a shell `case` over fixed words. `FileStatus` in `core/model.ts`
+  (`'A' | 'M' | 'D' | ...`) and the fixture builder's `trunk?: 'main' | 'master'` work the
+  same way.
 - `type Name = ...` gives a type a **name**, so it is written once and used by name
   (`startFailure: StartFailure` in the interface, in the class, and as a function's return
   type). Like `interface` (§9), a `type` produces nothing at run time. The difference:
@@ -294,6 +296,14 @@ The class `GitError` holds the same value as `readonly detail: string | undefine
 form *without* `?` — on purpose: a class field is always present on the object, so the
 honest description is "a string, or `undefined` when the failure had no detail", not "may
 be left out".
+
+The same `?` on a function parameter means the argument may be left out. In the `Fixture`
+interface (`test/helpers/fixture.ts`), `addUnrelatedStack(name?: string): void` lets a test
+call `fixture.addUnrelatedStack()` with no name; the class that implements it writes the
+same thing with the blank filled in — `addUnrelatedStack(name: string = 'other-work')`, a
+default parameter (§13) — so callers may omit the argument and the method always has one.
+`FixtureOptions` is an interface made entirely of optional fields, which is what lets
+`buildStack({ remote: false })` name only the one thing that differs from the default.
 
 ## 12. Template strings
 
@@ -607,9 +617,10 @@ ordinary: the loop pauses at each git call and resumes when it answers, so the f
 asked one at a time, in order.
 
 Two look-alikes to keep apart: the older counted form
-`for (let i = 0; i < list.length; i++)` appears only when the index itself is needed, and
+`for (let index = 0; index < list.length; index++)` appears only when the index itself is
+needed (§29 — the fixture builder needs it to pick each layer's file name), and
 `for (const key in object)` — `in`, not `of` — walks an object's key names; this codebase
-uses neither so far.
+does not use it.
 
 ## 23. String methods: trim, endsWith, slice
 
@@ -623,11 +634,15 @@ if (printedRoot.endsWith('\n')) {
 
 Strings carry their own methods, called with a dot like a method on any object:
 
-- `endsWith('\n')` — true when the string ends in that text; `startsWith` is its mirror.
-  `'\n'` between quotes is one newline character, as `$'\n'` is in bash.
+- `endsWith('\n')` — true when the string ends in that text. `'\n'` between quotes is one
+  newline character, as `$'\n'` is in bash. `startsWith('refs/heads/')` is its mirror:
+  true when the string begins with that text (`core/stack.ts` asks it before cutting the
+  prefix off, below).
 - `slice(start, end)` — the characters from position `start` up to, but not including,
   `end`. Positions count from 0, and a negative number counts back from the end, so
-  `slice(0, -1)` is everything but the last character. Arrays have the same `slice`.
+  `slice(0, -1)` is everything but the last character. Leave `end` out and it runs to the
+  end of the string: `ref.slice('refs/heads/'.length)` in `core/stack.ts` is everything
+  after that prefix (checked first with `startsWith`). Arrays have the same `slice`.
 - `trim()` — a copy with whitespace (spaces, tabs, newlines) removed from both ends.
   `core/git.ts` uses it on stderr, where whitespace around the message is noise. Discovery
   deliberately does *not* use it on the path git prints: a directory name may end in a
@@ -673,3 +688,195 @@ For "not", `trunk.ts` writes `if (targetExists === false)`, matching its `=== nu
 checks. JavaScript's shorthand is a prefix `!` (`!targetExists`, read "not
 targetExists"); it means the same and appears in later PRs where a spelled-out comparison
 would only add noise.
+
+## 25. Arrays: split, filter, map, push, length, and a typed empty array
+
+*First seen in `src/core/stack.ts`; `map` in `test/unit/stack.test.ts`.*
+
+```ts
+const lines = output.split('\n');
+const names = lines.filter((line) => line !== '');
+
+const measured: MeasuredBranch[] = [];
+measured.push(branch);
+if (measured.length === 0) { ... }
+
+const names = state.layers.map((layer) => layer.name);   // in the tests
+```
+
+§9 introduced `string[]`, `join` and `push`. Here are the rest of the array tools this
+codebase uses, all of them the same idea as a shell pipeline stage: a list goes in, a list
+(or one value) comes out.
+
+- `text.split('\n')` — a string method (§23) that cuts the text at every newline and
+  returns the pieces as an array, like reading lines with `IFS=$'\n'`. git ends its last
+  line with a newline too, so the last piece is an empty string — which the next line
+  removes.
+- `list.filter(fn)` — a new array holding only the elements for which `fn` returned true.
+  `fn` is an arrow function (§5) with an **expression body**: `(line) => line !== ''` has
+  no braces and no `return`; the expression's value is the result. `grep -v '^$'`.
+- `list.map(fn)` — a new array of the same length, holding `fn`'s result for each element.
+  `layers.map((layer) => layer.name)` turns a list of layers into a list of their names,
+  which is how the tests compare the order in one `toEqual`. `awk '{print $1}'`.
+- `list.length` — the number of elements; `list[0]` is the first (positions count from 0,
+  as with `slice` in §23), `list[1]` the second. Reading past the end gives `undefined`
+  rather than an error, so the code checks `length` first where it matters.
+- `const measured: MeasuredBranch[] = [];` — an empty array with its type written out.
+  The annotation is needed for the same reason `new Set<string>()` (§21) needed one: `[]`
+  on its own tells the compiler nothing about what will go in. With it, a later
+  `measured.push(...)` of the wrong shape is a compile error.
+
+Which of these change the array they are called on: `push` and `sort` (§26) do; `filter`,
+`map`, `slice` and `join` never do — they return something new and leave the original as it
+was, the same rule as for strings in §23.
+
+## 26. sort and comparison functions
+
+*First seen in `src/core/stack.ts`.*
+
+```ts
+measured.sort(compareByDistanceThenName);
+
+function compareByDistanceThenName(first: MeasuredBranch, second: MeasuredBranch): number {
+  if (first.commitCount !== second.commitCount) {
+    return first.commitCount - second.commitCount;
+  }
+  if (first.name < second.name) {
+    return -1;
+  }
+  if (first.name > second.name) {
+    return 1;
+  }
+  return 0;
+}
+```
+
+`list.sort(fn)` reorders the array **in place** — `measured` itself is now sorted; nothing
+is returned that needs keeping — using `fn` to decide the order of any two elements. It is
+`sort -k` with the key written as a function instead of a column number: `fn(first,
+second)` returns a **negative** number when `first` belongs before `second`, a **positive**
+one when it belongs after, and `0` when they tie. Subtracting two counts gives exactly that
+sign, which is what the first `return` does; the name comparison spells the three cases
+out.
+
+Two things worth knowing:
+
+- A function is a value like any other, so `sort(compareByDistanceThenName)` hands the
+  function over by name, the way `execFile(..., callback)` did in §15 — no parentheses,
+  because it is not being *called* here; `sort` will call it, many times.
+- **Always give `sort` a comparison function** for anything but plain strings. With no
+  argument, JavaScript sorts by converting every element to text, so `[10, 9, 1]` sorts to
+  `[1, 10, 9]`. It is a well-known trap; the function makes the order explicit.
+
+The name tie-break uses `<` and `>` on strings, which order by character code — plain, and
+the same on every machine. The alternative, `first.name.localeCompare(second.name)`, sorts
+the way the user's language does, and could put two branches in a different order on two
+developers' machines; the comment on the function says why that was not wanted.
+
+## 27. Number: text to number
+
+*First seen in `src/core/stack.ts` (`measureBranch`).*
+
+```ts
+const branchRef = LOCAL_BRANCH_PREFIX + name;
+const countOutput = await git.run(['rev-list', '--count', `${trunk}..${branchRef}`], root);
+const commitCount = Number(countOutput.trim());
+```
+
+(`branchRef` is `refs/heads/<name>` — the comment on `measureBranch` says why the bare
+name is not used.)
+
+Everything git prints is text, even when it is a count. `Number('3')` is the number `3`;
+the shell never needed this step because `$(( ... ))` converts on the fly, but here
+`'3' === 3` is false and `'10' < '9'` is true (text compares character by character), so
+the conversion has to be explicit before a count is compared or sorted (§26). `Number`
+tolerates surrounding whitespace, so the `trim()` is for the reader, not the machine.
+
+`Number('abc')` gives `NaN` — "not a number", a real value of type `number` that compares
+unequal to everything, itself included. Nothing here checks for it because `rev-list
+--count` prints only digits, and if git fails it exits non-zero, which `run` turns into a
+rejection before any conversion happens. `number` is the only numeric type: there is no
+separate integer type, and `3` and `3.0` are the same value.
+
+## 28. The Sync variants of Node's functions
+
+*First seen in `src/core/git.ts` (`existsSync`); throughout `test/helpers/fixture.ts`.*
+
+```ts
+import { execFileSync } from 'node:child_process';
+import * as fs from 'node:fs';
+
+const output = execFileSync('git', args, { cwd: this.dir, env: { ... }, encoding: 'utf8', ... });
+fs.writeFileSync(path.join(repoDir, 'f'), 'base\n');
+const temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-cascade-fixture-'));
+const scratchDir = fs.realpathSync(temporaryDir);
+```
+
+Node offers most file and process operations twice. The forms used so far in `src/` —
+`realpath` from `node:fs/promises` in `core/discovery.ts`, `execFile` wrapped in a Promise
+(§15) — hand the work off and let the program continue; `await` collects the result later. The
+**`Sync`** forms do the work right there: the call blocks until it is done and returns the
+result directly (or throws on failure, with `execFileSync` putting git's stderr into the
+error message). Each `Sync` function is the same operation as its non-`Sync` twin, with
+the same arguments, so nothing new has to be learned per call.
+
+The extension itself never blocks — VS Code's whole window would freeze for the duration
+— so `src/` uses the `Sync` form only for a single `existsSync` in `core/git.ts` where the
+answer is instant. The fixture builder is setup code: it runs some twenty git commands in
+a fixed order and nothing else is waiting, so the `Sync` forms make it a plain list of
+steps with no `async`, no `await`, and no Promise to hand back. That is also what lets PR
+6's `npm run fixture` script call `buildStack()` as an ordinary function.
+
+Three small Node helpers appear alongside: `path.join(a, b)` glues path pieces with the
+platform's separator; `os.tmpdir()` is the system temp directory (`$TMPDIR`);
+`fs.mkdtempSync(prefix)` creates a uniquely named directory starting with that prefix, the
+same as `mktemp -d`. The `execFileSync` options are commented in the fixture where they
+are set — `encoding` (text rather than raw bytes) and `stdio` (close stdin so no command
+can wait for input) are the two that matter. A few more of the same kind appear in the
+fixture and its test: `fs.rmSync(dir, { recursive: true, force: true })` is `rm -rf`;
+`fs.statSync(p).isFile()` is `test -f`; `path.resolve(base, p)` makes a relative path
+absolute (`realpath -m`), and `path.dirname(p)` is `dirname`.
+
+## 29. Counted for loops
+
+*First seen in `test/helpers/fixture.ts` (`buildStack`).*
+
+```ts
+for (let index = 0; index < layers.length; index++) {
+  const layerName = layers[index];
+  const fileName = FILE_NAMES.charAt(index);
+  ...
+}
+```
+
+§22's `for ... of` walks a list without ever naming a position. This older form does name
+one: the three parts in the parentheses are *start* (`let index = 0` — a `let`, §4,
+because it changes), *keep going while* (`index < layers.length`), and *after each pass*
+(`index++`, "add one to index"). It is `for ((i = 0; i < n; i++))` in bash, character for
+character. Use it only when the number itself is needed — here it is, twice: to pick the
+layer's name from one list and the file's letter from a string (`charAt(index)`, the
+character at that position, counted from 0). Everywhere the position is not needed,
+`for ... of` says less and is preferred.
+
+## 30. ?? — a default for a missing value
+
+*First seen in `test/helpers/fixture.ts` (`buildStack`).*
+
+```ts
+export function buildStack(options: FixtureOptions = {}): Fixture {
+  const trunk = options.trunk ?? 'main';
+  const withRemote = options.remote ?? true;
+```
+
+`a ?? b` is `a` — unless `a` is `null` or `undefined`, in which case it is `b`. An
+optional field (§11) that was left out reads as `undefined`, so this is the one-line way
+to fill in a default: `${trunk:-main}` in shell. The `= {}` on the parameter (a default
+parameter, §13) handles the case where no options object was passed at all, so
+`buildStack()` with nothing works too.
+
+The reason it is `??` and not `||` (§18): `||` treats `0`, `''` and `false` as "missing"
+as well, because they are falsy (§24). `options.remote ?? true` keeps a caller's
+`remote: false`; `options.remote || true` would silently turn it into `true`, and the "no
+remote" fixture (E25) could never be built. `??` looks only for the two "nothing" values,
+which is what "was this option given?" means. Its sibling `?.` — "read this field only if
+the thing before the dot is present" — is not used yet and gets its section when it is.

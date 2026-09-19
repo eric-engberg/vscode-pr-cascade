@@ -47,8 +47,10 @@ const AUTO_DETECT: TrunkOptions = { configured: '', remote: 'origin' };
 
 /**
  * Creates a repository at `dir` with one commit on `branch`. Inline, as in
- * test/git/discovery.git.test.ts: PR 5's fixture builder (test/helpers/fixture.ts) is the
- * shared version, and until then each real-git test file carries this small helper.
+ * test/git/discovery.git.test.ts, rather than the fixture builder
+ * (test/helpers/fixture.ts): the builder makes a stack on `main` or `master`, and the
+ * repositories here need a branch called `trunk`, a second remote, and `origin/HEAD`
+ * pointers set by hand.
  */
 // see primer §6 (async / await)
 async function initRepoWithOneCommit(dir: string, branch: string): Promise<void> {

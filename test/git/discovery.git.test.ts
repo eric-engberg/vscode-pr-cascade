@@ -39,8 +39,10 @@ const git = new RealGitRunner();
 
 /**
  * Creates a repository with one commit at `directory`. The commit matters: `git worktree
- * add` has to check something out. Inline rather than in a helper file on purpose — PR 5
- * adds the real fixture builder (test/helpers/fixture.ts), which may absorb this.
+ * add` has to check something out. Inline rather than the fixture builder
+ * (test/helpers/fixture.ts) on purpose: the builder always names its repository `repo`,
+ * and one repository here must have a name ending in a space. Three git calls are not
+ * worth a second builder.
  */
 // see primer §6 (async / await)
 async function initRepoWithOneCommit(directory: string): Promise<void> {
