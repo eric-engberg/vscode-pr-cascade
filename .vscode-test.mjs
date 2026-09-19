@@ -6,7 +6,7 @@
  * gitignored), launches it with this repo as the extension under development, and runs
  * the Mocha tests listed here inside it. Depends on: @vscode/test-cli, the compiled
  * fixture builder out/test/helpers/fixture.js. Depended on by: `npm run test:ext`.
- * Plan: §9.1 layer 3, §9.2, §8 E1/E2.
+ * Plan: §9.1 layer 3, §9.2, §8 E1b/E2.
  */
 import { defineConfig } from '@vscode/test-cli';
 import * as fs from 'node:fs';
@@ -18,7 +18,7 @@ import { buildStack } from './out/test/helpers/fixture.js';
 // imported above as the compiled copy under out/, which `tsc -p tsconfig.ext.json`
 // writes before this file is loaded). Below, the workspace lists the repository twice, as
 // a nested subfolder and as the root, so the tree must find the repository from a
-// subfolder (E1) and show it once (E2). Built in a temporary directory: `<scratch>/repo`
+// subfolder (E1b) and show it once (E2). Built in a temporary directory: `<scratch>/repo`
 // with `origin.git` beside it.
 const fixture = buildStack();
 // The CLI process that loads this file outlives the VS Code it launches, so the scratch
@@ -31,7 +31,7 @@ const fixture = buildStack();
 // in the temp folder.
 process.on('exit', () => fixture.cleanup());
 
-// An empty subfolder is enough for E1: git ignores empty directories, so the repository
+// An empty subfolder is enough for E1b: git ignores empty directories, so the repository
 // is unchanged, and opening it as a workspace folder is opening "a nested subfolder of
 // the repository".
 const nestedDir = path.join(fixture.dir, 'nested');
@@ -39,7 +39,7 @@ fs.mkdirSync(nestedDir);
 
 // A `.code-workspace` file is how VS Code opens several folders at once (a "multi-root
 // workspace"). Both entries resolve to the one repository; the nested one comes first
-// so discovery meets E1 before it meets the root.
+// so discovery meets E1b before it meets the root.
 const workspaceFile = path.join(path.dirname(fixture.dir), 'fixture.code-workspace');
 fs.writeFileSync(workspaceFile, JSON.stringify({ folders: [{ path: nestedDir }, { path: fixture.dir }] }));
 

@@ -54,22 +54,48 @@ the repository root; its §13 is the running log of decisions and deviations mad
    a non-zero exit, the environment variables observed from inside git, 2 MB of output, a
    missing executable, a directory in place of one, and a working directory that does not
    exist, cannot be entered, or is a file.
-8. **`src/core/discovery.ts`** — workspace folders in, repository roots out. Look for *why*
-   git is asked instead of looking for `.git` ourselves (`rev-parse --show-toplevel` walks
-   up from a subfolder, E1, and understands worktrees, E19), why a folder outside any
-   repository is `null` and skipped while a missing git still throws (E17), why only the
-   newline git prints is removed from the path (a directory name may end in a space), and
-   how `normalizeRoot` makes two spellings of one directory compare equal — symlinks, the
-   macOS `/tmp` → `/private/tmp` case, a trailing slash — so the `Set` counts them once (E2).
-9. **`test/unit/discovery.test.ts`** — the rules as a specification against the fake: a
-   nested folder (E1), one entry per repository (E2), skipped folders, workspace order, the
-   trailing-slash, newline-only and realpath-fallback rules, and E17 not hidden.
-10. **`test/git/discovery.git.test.ts`** — the same on a real filesystem: a repository built
-    inline with `git init`, a folder nested in it, a symlink to it, a linked worktree whose
-    `.git` is a file (E19), a plain folder beside it, and a second repository whose name
-    ends in a space. It keeps its own three-line `git init` helper rather than using the
-    fixture builder (item 16): the builder always names its repository `repo`, and the
-    trailing-space case needs a name of its own.
+8. **`src/core/discovery.ts`** — workspace folders in, repository roots out, looking in
+   both directions (plan §13.4). Read the doc comment on `discoverRepoRoots` for the six
+   *whys*: why the scan looks *down* as well as up (`rev-parse --show-toplevel` walks up
+   from a subfolder, E1b, but never down — and Ric keeps a parent folder open with the
+   repositories below it, E1); why the rules and the defaults are copied from VS Code's
+   built-in git extension (`git.repositoryScanMaxDepth`, `git.repositoryScanIgnoredFolders`);
+   why nothing here looks for a `.git` entry — every candidate directory is asked the same
+   git question and git decides, which is what makes a linked worktree work for free
+   (E19); why the probes run in parallel (`Promise.all`: twenty repositories under one
+   parent are twenty processes); why a repository's own subdirectories are asked too and
+   deduped; and why the depth is the safety valve. Then `DiscoveryOptions` and
+   `DEFAULT_DISCOVERY_OPTIONS` at the top (the one place the defaults live; PR 8 reads
+   them), `listCandidates` (a queue, one level at a time, children sorted by name, `.git`
+   / ignored names / symlinks / unreadable directories skipped, and why nothing is logged),
+   why only the newline git prints is removed from a root (a directory name may end in a
+   space), and how `normalizeRoot` makes two spellings of one directory compare equal —
+   symlinks, the macOS `/tmp` → `/private/tmp` case, a trailing slash — so the `Set`
+   counts them once (E2).
+9. **`test/unit/discovery.test.ts`** — the rules as a specification against the fake, in
+   two blocks. The first is the up direction on made-up paths: a folder inside a
+   repository (E1b), one entry per repository (E2), skipped folders, workspace order, the
+   trailing-slash, newline-only and realpath-fallback rules, an unreadable folder still
+   asked about, and E17 not hidden. The second builds a small directory layout in a
+   temporary directory (the scan needs something real to `readdir`) and asserts *which
+   directories were asked* through `git.calls`: depth 0, 1, 2 and -1; the defaults; the
+   ignore list; `.git`, a symbolic link and a file never entered; workspace order then
+   name order; a repository's own subdirectories deduped (E2); a failing probe below the
+   folder rejecting (E17).
+10. **`test/git/discovery.git.test.ts`** — the same on a real filesystem. First the up
+    direction: a repository built inline with `git init`, a folder nested in it (E1b), a
+    symlink to it, a linked worktree whose `.git` is a file (E19), a plain folder beside
+    it, and a second repository whose name ends in a space. Then Ric's layout (E1): a
+    parent folder that is not a repository with two repositories below it, found in name
+    order, and not found at depth 0; a repository under `node_modules` reached when nothing
+    is ignored and not found with the default ignore list (the pair scans to `-1`, because
+    at depth 1 it is out of reach either way); a linked worktree one level below a plain
+    folder found (E19); a repository nested inside another, both found; and the parent
+    plus one of its repositories open together, listed once (E2). It keeps its own
+    three-command `git init` helper rather than using the
+    fixture builder (item 16): the builder always names its repository `repo` inside the
+    directory it is given, which would put Ric's repositories two levels down and give
+    them all the same name; and the trailing-space case needs a name of its own.
 11. **`src/core/trunk.ts`** — which branch is "trunk", the base every stack is measured
     against. Read the doc comment on `detectTrunk` for the four-step order (plan §5) and
     the two decisions in it: a configured `prCascade.trunk` that does not exist gives
@@ -163,7 +189,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
     `mocha`).
 21. **`test/ext/tree.test.ts`** — the view over the fixture workspace, through the two
     calls VS Code itself makes (`getChildren`, `getTreeItem`): the workspace's two folders
-    — a nested subfolder and the root — are one repository, found (E1) and shown once (E2),
+    — a nested subfolder and the root — are one repository, found (E1b) and shown once (E2),
     so the layers sit at the top level; every label is a branch name, top first, with no
     SHA in any of them (E44); `3 commits · current`, `2 commits`, `1 commit`; the target
     icon and `stackBranchCurrent` on HEAD's layer; the SHAs in the tooltips, checked
@@ -212,8 +238,9 @@ the repository root; its §13 is the running log of decisions and deviations mad
 
 - `src/core/` — pure logic and the git runner. No VS Code imports. Fully testable under Node.
   `model.ts` (shared types, including the §4.3 data model), `git.ts` (the runner),
-  `discovery.ts` (workspace folders → repository roots), `trunk.ts` (which branch is
-  trunk) and `stack.ts` (the layers under HEAD). That is the whole M1 core.
+  `discovery.ts` (workspace folders, and the directories below them → repository roots),
+  `trunk.ts` (which branch is trunk) and `stack.ts` (the layers under HEAD). That is the
+  whole M1 core.
 - `src/vscode/` — adapters: `config.ts` (settings → plain values) and `tree.ts` (the Stack
   view). Later milestones add the diff content provider, commands, terminals, the status
   bar.

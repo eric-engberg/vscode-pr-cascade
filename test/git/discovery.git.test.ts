@@ -3,8 +3,10 @@
  * filesystem.
  *
  * Layer: test, git integration (plan §9.1 layer 2; Vitest, real git in a throwaway
- * directory, no VS Code). Depends on: src/core/discovery.ts, src/core/git.ts. Plan: §10.1
- * item 3, §6, §8 E1/E2/E19, §9.1 "hermetic".
+ * directory, no VS Code). Depends on: src/core/discovery.ts, src/core/git.ts. The first
+ * block is the up direction (a folder that is a repository or inside one); the last is
+ * the down direction (repositories below a folder, plan §1's layout, §13.4). Plan: §10.1
+ * item 3, §6, §13.4, §8 E1/E1b/E2/E19, §9.1 "hermetic".
  */
 
 // see primer §1 (import / export)
@@ -12,9 +14,15 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { discoverRepoRoots } from '../../src/core/discovery';
+import { DEFAULT_DISCOVERY_OPTIONS, discoverRepoRoots } from '../../src/core/discovery';
+import type { DiscoveryOptions } from '../../src/core/discovery';
 import { RealGitRunner } from '../../src/core/git';
 import { FakeGitRunner } from '../helpers/fakeGit';
+
+// Depth 0 with nothing ignored: only the workspace folders themselves are asked — the up
+// direction on its own, for the tests that are about nothing else.
+// see primer §4 (const)
+const FOLDERS_ONLY: DiscoveryOptions = { scanMaxDepth: 0, scanIgnoredFolders: [] };
 
 // Everything lives under one throwaway directory, removed in afterAll.
 let scratchDir: string;
@@ -128,7 +136,11 @@ describe('discoverRepoRoots (real git)', () => {
     expect(roots).toEqual([physicalRepoDir]);
   });
 
-  it('resolves a folder nested two levels inside the repository to its root (E1)', async () => {
+  // Plan §8's E1 row reads "repo is a nested subfolder of a workspace folder" — the down
+  // direction, which this test never exercised. The row is being split: E1 is the
+  // repository below the folder (the last block in this file), E1b the folder inside the
+  // repository, which is this test. The plan file is edited by the orchestrator, not here.
+  it('resolves a folder nested two levels inside the repository to its root — the up direction (E1b)', async () => {
     // arrange: repo/src/deep is what VS Code has open, not the repository itself
 
     // act
@@ -240,14 +252,166 @@ describe('discoverRepoRoots (real git)', () => {
 describe('discoverRepoRoots (real filesystem, fake git)', () => {
   it('resolves a symlinked spelling to the physical path itself, even when git prints the link (E2)', async () => {
     // arrange: a fake git that answers with the link, newline and all — where real git
-    // would already have printed the physical path
+    // would already have printed the physical path. Depth 0, because the scan is not what
+    // this test is about: at depth 1 the fake would be asked about link-to-repo/src too,
+    // and it has no answer for that.
     const fakeGit = new FakeGitRunner(new Map());
     fakeGit.answerIn(linkToRepoDir, ['rev-parse', '--show-toplevel'], linkToRepoDir + '\n');
 
     // act
-    const roots = await discoverRepoRoots([linkToRepoDir], fakeGit);
+    const roots = await discoverRepoRoots([linkToRepoDir], fakeGit, FOLDERS_ONLY);
 
     // assert: link-to-repo → repo, resolved by discovery rather than by git
     expect(roots).toEqual([physicalRepoDir]);
+  });
+});
+
+// Ric's layout (plan §1): a parent folder open for browsing, the repositories in
+// subdirectories of it. From the parent, git says "not a repository"; the scan below it
+// (plan §13.4) is what finds them. The unit tests pin which directories are asked; these
+// check that real git answers as the scan assumes — including for a linked worktree,
+// whose `.git` is a file, and for a repository nested inside another. Built once for this
+// block, under the same scratch directory as the fixture above:
+//
+//   parent/                       a plain directory — not a repository
+//     alpha/                      a repository
+//     beta/                       a repository (created before alpha: order is by name)
+//     node_modules/hidden-dep/    a repository the ignore list must keep out (two levels down)
+//     notes/                      a plain directory
+//   with-worktree/                a plain directory
+//     linked/                     a linked worktree of alpha: `.git` is a file (E19)
+//   outer/                        a repository ...
+//     inner/                      ... with another repository inside it
+describe('discoverRepoRoots (real git, repositories below a workspace folder)', () => {
+  let parentDir: string;
+  let alphaDir: string;
+  let hiddenDepDir: string;
+  let withWorktreeDir: string;
+  let outerDir: string;
+  // What discovery must return: the physical paths (see the note on physicalRepoDir).
+  let physicalAlphaDir: string;
+  let physicalBetaDir: string;
+  let physicalHiddenDepDir: string;
+  let physicalLinkedDir: string;
+  let physicalOuterDir: string;
+  let physicalInnerDir: string;
+
+  beforeAll(async () => {
+    parentDir = path.join(scratchDir, 'parent');
+    alphaDir = path.join(parentDir, 'alpha');
+    const betaDir = path.join(parentDir, 'beta');
+    await initRepoWithOneCommit(betaDir);
+    await initRepoWithOneCommit(alphaDir);
+    physicalAlphaDir = await fs.realpath(alphaDir);
+    physicalBetaDir = await fs.realpath(betaDir);
+    // A repository under node_modules — a dependency installed from git, say. The default
+    // ignore list is what keeps it out of the tree. It sits two levels below the parent,
+    // so the two tests about it scan deeper than the default depth of 1: at depth 1 it is
+    // out of reach whether or not node_modules is ignored, and its absence would prove
+    // nothing.
+    hiddenDepDir = path.join(parentDir, 'node_modules', 'hidden-dep');
+    await initRepoWithOneCommit(hiddenDepDir);
+    physicalHiddenDepDir = await fs.realpath(hiddenDepDir);
+    await fs.mkdir(path.join(parentDir, 'notes'));
+
+    // A linked worktree of alpha, one level below a plain folder of its own (E19). As in
+    // the fixture above, its `.git` is a one-line file, and that is checked here.
+    withWorktreeDir = path.join(scratchDir, 'with-worktree');
+    await fs.mkdir(withWorktreeDir);
+    const linkedDir = path.join(withWorktreeDir, 'linked');
+    await git.run(['worktree', 'add', '-q', '-b', 'linked-branch', linkedDir], alphaDir);
+    const linkedDotGit = await fs.stat(path.join(linkedDir, '.git'));
+    if (linkedDotGit.isFile() === false) {
+      throw new Error(`expected ${linkedDir}/.git to be a file (a linked worktree), not a directory`);
+    }
+    physicalLinkedDir = await fs.realpath(linkedDir);
+
+    // A repository with a second, independent repository inside its working tree
+    // (`git init` in a subdirectory): to git, inner is its own repository, and outer sees
+    // it as an untracked directory.
+    outerDir = path.join(scratchDir, 'outer');
+    await initRepoWithOneCommit(outerDir);
+    const innerDir = path.join(outerDir, 'inner');
+    await initRepoWithOneCommit(innerDir);
+    physicalOuterDir = await fs.realpath(outerDir);
+    physicalInnerDir = await fs.realpath(innerDir);
+  });
+
+  it('finds the repositories in the subdirectories of a folder that is not one itself, in name order (E1)', async () => {
+    // arrange: nothing beyond the layout — the parent is what VS Code has open
+
+    // act: the default options, depth 1
+    const roots = await discoverRepoRoots([parentDir], git);
+
+    // assert: alpha before beta although beta was created first; the plain `notes`
+    // folder and the parent itself are not repositories and do not appear
+    expect(roots).toEqual([physicalAlphaDir, physicalBetaDir]);
+  });
+
+  it('finds none of them at depth 0, because the parent itself is not a repository', async () => {
+    // arrange: nothing beyond the layout
+
+    // act
+    const roots = await discoverRepoRoots([parentDir], git, FOLDERS_ONLY);
+
+    // assert: what M1 first shipped showed for this layout
+    expect(roots).toEqual([]);
+  });
+
+  it('reaches a repository under node_modules when nothing is ignored — the control for the next test', async () => {
+    // arrange: nothing beyond the layout. hidden-dep is two levels down, so the scan needs
+    // a depth that reaches it (-1 does) and an empty ignore list to enter node_modules
+
+    // act
+    const roots = await discoverRepoRoots([parentDir], git, { scanMaxDepth: -1, scanIgnoredFolders: [] });
+
+    // assert
+    expect(roots).toContain(physicalHiddenDepDir);
+  });
+
+  it('does not find a repository inside node_modules with the default ignore list, at any depth', async () => {
+    // arrange: the same scan, with the default ignore list instead of none. The test above
+    // proved the scan can reach hidden-dep, so its absence here means the ignore list
+    // kept it out — not that there was nothing to find
+
+    // act
+    const roots = await discoverRepoRoots([parentDir], git, {
+      scanMaxDepth: -1,
+      scanIgnoredFolders: DEFAULT_DISCOVERY_OPTIONS.scanIgnoredFolders,
+    });
+
+    // assert
+    expect(roots).not.toContain(physicalHiddenDepDir);
+  });
+
+  it('finds a linked worktree below the parent, whose .git is a file rather than a directory (E19)', async () => {
+    // arrange: nothing beyond the layout — beforeAll checked that linked/.git is a file
+
+    // act
+    const roots = await discoverRepoRoots([withWorktreeDir], git);
+
+    // assert: the worktree's own directory, not alpha's
+    expect(roots).toEqual([physicalLinkedDir]);
+  });
+
+  it('finds a repository and the repository nested inside it as two roots', async () => {
+    // arrange: nothing beyond the layout — outer is what VS Code has open
+
+    // act
+    const roots = await discoverRepoRoots([outerDir], git);
+
+    // assert: outer from the folder itself, inner from the scan one level below; the up
+    // direction alone would have found only outer
+    expect(roots).toEqual([physicalOuterDir, physicalInnerDir]);
+  });
+
+  it('lists a repository once when the parent and the repository itself are both open (E2)', async () => {
+    // arrange: nothing beyond the layout — alpha is found below the parent and directly
+
+    // act
+    const roots = await discoverRepoRoots([parentDir, alphaDir], git);
+
+    // assert: alpha keeps the position it was first seen at, below the parent
+    expect(roots).toEqual([physicalAlphaDir, physicalBetaDir]);
   });
 });

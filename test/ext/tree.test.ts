@@ -6,7 +6,7 @@
  * Layer: test, extension host (plan §9.1 layer 3; Mocha inside VS Code, `npm run test:ext`).
  * Depends on: the running extension (through what activate() returns, src/extension.ts)
  * and the fixture workspace (two folders, one repository). Depended on by: nothing.
- * Plan: §10.1 item 6, §6, §7.1, §8 E1/E2/E4/E5/E17/E44, §9.4 row "ext/tree.test.ts".
+ * Plan: §10.1 item 6, §6, §7.1, §8 E1b/E2/E4/E5/E17/E44, §9.4 row "ext/tree.test.ts".
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -82,9 +82,11 @@ describe('the Stack view', () => {
     provider = api.provider;
   });
 
-  it('shows the layers at the top level: the two workspace folders are one repository, found from its subfolder (E1) and listed once (E2)', async () => {
+  it('shows the layers at the top level: the two workspace folders are one repository, found from its subfolder (E1b) and listed once (E2)', async () => {
     // precondition, not the idea under test: the workspace .vscode-test.mjs built has the
-    // nested folder first, then the root — the shape E1 and E2 need. Fails fast otherwise.
+    // nested folder first, then the root — the shape E1b and E2 need. Fails fast otherwise.
+    // (E1b, not E1: plan §8's E1 row was split when discovery learned to look below a
+    // folder — test/git/discovery.git.test.ts says how.)
     const folders = vscode.workspace.workspaceFolders ?? [];
     const folderNames = folders.map((folder) => path.basename(folder.uri.fsPath));
     assert.deepStrictEqual(folderNames, ['nested', 'repo']);

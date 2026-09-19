@@ -749,10 +749,14 @@ codebase uses, all of them the same idea as a shell pipeline stage: a list goes 
   The annotation is needed for the same reason `new Set<string>()` (§21) needed one: `[]`
   on its own tells the compiler nothing about what will go in. With it, a later
   `measured.push(...)` of the wrong shape is a compile error.
+- `list.includes(value)` — true when `value` is one of the elements, compared with `===`.
+  `options.scanIgnoredFolders.includes(entry.name)` in `core/discovery.ts` (PR 7) asks "is
+  this name on the ignore list?" — `grep -qxF` over a list. For a large list a `Set` (§21)
+  and `has` would be faster; for two or three names an array reads more plainly.
 
-Which of these change the array they are called on: `push` and `sort` (§26) do; `filter`,
-`map`, `slice` and `join` never do — they return something new and leave the original as it
-was, the same rule as for strings in §23.
+Which of these change the array they are called on: `push`, `shift` (§38) and `sort` (§26)
+do; `filter`, `map`, `slice`, `join` and `includes` never do — they return something new and
+leave the original as it was, the same rule as for strings in §23.
 
 ## 26. sort and comparison functions
 
@@ -788,9 +792,13 @@ Two things worth knowing:
 - A function is a value like any other, so `sort(compareByDistanceThenName)` hands the
   function over by name, the way `execFile(..., callback)` did in §15 — no parentheses,
   because it is not being *called* here; `sort` will call it, many times.
-- **Always give `sort` a comparison function** for anything but plain strings. With no
-  argument, JavaScript sorts by converting every element to text, so `[10, 9, 1]` sorts to
-  `[1, 10, 9]`. It is a well-known trap; the function makes the order explicit.
+- **Always give `sort` a comparison function.** With no argument, JavaScript sorts by
+  converting every element to text, so `[10, 9, 1]` sorts to `[1, 10, 9]`. It is a
+  well-known trap; the function makes the order explicit. Even for plain strings, where the
+  default order happens to be right, `src/` spells it out: `childNames.sort(compareByName)`
+  in `core/discovery.ts` (PR 7) uses a three-line comparison that orders by character code,
+  the same `<` / `>` order the name tie-break below uses — and static analysis (SonarQube
+  rule S2871) flags a bare `sort()` precisely because the trap is so common.
 
 The name tie-break uses `<` and `>` on strings, which order by character code — plain, and
 the same on every machine. The alternative, `first.name.localeCompare(second.name)`, sorts
@@ -845,8 +853,9 @@ error message). Each `Sync` function is the same operation as its non-`Sync` twi
 the same arguments, so nothing new has to be learned per call.
 
 The extension itself never blocks — VS Code's whole window would freeze for the duration
-— so `src/` uses the `Sync` form only for a single `existsSync` in `core/git.ts` where the
-answer is instant. The fixture builder is setup code: it runs some twenty git commands in
+— so `src/` uses the `Sync` form only for `statSync` and `accessSync` in `core/git.ts`
+(`describeDirectoryProblem`), where the answer is instant. The Promise-returning half of
+`node:fs` gets its own section when discovery starts reading directories (§39). The fixture builder is setup code: it runs some twenty git commands in
 a fixed order and nothing else is waiting, so the `Sync` forms make it a plain list of
 steps with no `async`, no `await`, and no Promise to hand back. That is also what lets PR
 6's `npm run fixture` script call `buildStack()` as an ordinary function.
@@ -1076,3 +1085,184 @@ number that is not one of the members' values — though a bare `1` slips throug
 one reason to always write the name. It is the same job the exact-string unions of §10 do
 (`FileStatus`, `StartFailure`), which is why this codebase uses the API's enums where the
 API demands them and defines none of its own (plan §11.1).
+
+## 36. export const: a shared constant object
+
+*First seen in `src/core/discovery.ts` (`DEFAULT_DISCOVERY_OPTIONS`).*
+
+```ts
+export const DEFAULT_DISCOVERY_OPTIONS: DiscoveryOptions = {
+  scanMaxDepth: 1,
+  scanIgnoredFolders: ['node_modules'],
+};
+
+export async function discoverRepoRoots(
+  folders: string[],
+  git: GitRunner,
+  options: DiscoveryOptions = DEFAULT_DISCOVERY_OPTIONS,
+): Promise<string[]> { ... }
+```
+
+§4's `const` and §1's `export` together: a value built once, when the module is first
+loaded, and visible to other files by name. `MAX_OUTPUT_BYTES` in `core/git.ts` was a
+`const` too, but a private number; this one is an *object*, and shared.
+
+- The type is written out, `: DiscoveryOptions`, although the compiler could infer
+  `{ scanMaxDepth: number; scanIgnoredFolders: string[] }` from the literal on its own. The
+  annotation makes the compiler check the literal *against the interface* (§9) right
+  here — a misspelt or missing key is an error at the definition, not at some call site
+  — and it tells the reader what the object is for.
+- `const` fixes the name, not the contents (§4): `DEFAULT_DISCOVERY_OPTIONS.scanMaxDepth
+  = 2` would compile, and would change the default for every later call. The codebase
+  relies on the obvious rule — nobody assigns into it — rather than the compiler-enforced
+  version, `readonly` (§14) on each field of the interface, because the object is two
+  fields long and read from two places.
+- It is the **default parameter** (§13) of `discoverRepoRoots`: a call with two arguments
+  gets this object as its third. Every such call is handed *the same* object, not a copy,
+  which is only safe because nothing changes it. The old two-argument call in
+  `src/extension.ts` kept compiling when the parameter was added — that is the point of a
+  default.
+
+Why export it at all: PR 8's `src/vscode/config.ts` uses the same values as the
+fallbacks when it reads the settings, so the defaults live in one file and the Settings
+UI, the code and the tests cannot disagree.
+
+## 37. Promise.all
+
+*First seen in `src/core/discovery.ts` (`discoverRepoRoots`).*
+
+```ts
+const probes = candidates.map((candidate) => git.tryRun(['rev-parse', '--show-toplevel'], candidate));
+const outputs = await Promise.all(probes);
+```
+
+§6's `await` pauses at *one* Promise. Until now every git call was awaited where it was
+made, one after another: `for (const folder of folders) { const output = await
+git.tryRun(...); }` asks about the second folder only after the first has answered. Here
+the calls are all *started* first, with no `await` — `map` (§25) calls `tryRun` once per
+candidate and collects the Promises (§7) it returns, each one a git process already
+running — and `Promise.all(list)` is a single Promise that resolves when every Promise in
+the list has, with their values in the same order as the list. Twenty candidates take
+about as long as one. The shell version:
+`for d in ...; do git -C "$d" rev-parse --show-toplevel & done; wait`.
+
+Two rules follow. **Order**: `outputs[3]` is the answer for `candidates[3]` whatever order
+the processes finished in, so the loop after it can read the answers in candidate order.
+**Failure**: if any Promise in the list rejects, `Promise.all` rejects at once with that
+error and the other results are discarded (their processes still run to the end; nothing
+waits for them). That is exactly what discovery wants for E17 — a missing git fails every
+probe the same way, and the first rejection is the whole story — and it is the thing to
+check before reaching for `Promise.all` anywhere else: when one failure should *not*
+discard the rest, `Promise.allSettled` (not used yet) reports every outcome separately.
+
+The types: `probes` is `Promise<string | null>[]`, a list of Promises; `Promise.all`
+turns it inside out into `Promise<(string | null)[]>`, a Promise of a list; `await`
+unwraps that to `(string | null)[]`.
+
+## 38. while loops and a queue
+
+*First seen in `src/core/discovery.ts` (`listCandidates`).*
+
+```ts
+const queue: PendingDirectory[] = [{ directory: folder, depth: 0 }];
+while (queue.length > 0) {
+  const current = queue.shift();
+  if (current === undefined) {
+    break;
+  }
+  ...
+  queue.push({ directory: path.join(current.directory, name), depth: current.depth + 1 });
+}
+```
+
+`while (condition) { ... }` repeats the body as long as the condition holds, checking it
+before each pass — `while [ ... ]; do ...; done`. §22's `for ... of` walks a list that
+exists up front; `while` is for when the amount of work is not known in advance. Here the
+list is a **queue**: `shift()` removes the first element and returns it (§9's `push` adds
+at the end), so elements come out in the order they went in, and the body adds more as it
+goes. Started with the workspace folder, taking one directory off the front and pushing its
+children onto the back, the queue empties one *level* at a time — the folder, then all of
+depth 1, then all of depth 2 — a breadth-first walk, which is why a depth limit can be a
+plain comparison on each entry.
+
+The `undefined` check: `shift()` on an empty array returns `undefined`, so its type is
+`PendingDirectory | undefined` (§10), and the compiler does not connect that with the
+`length > 0` one line above — it follows checks on the *value* (§8), not reasoning about
+the array. The `if` proves the value is present, and `break` (§22 mentioned it) leaves the
+loop; it can never actually run. It is the honest cost of a queue in TypeScript. The
+alternative — `queue.shift()!`, a `!` that tells the compiler "trust me, it is there" —
+is not used in this codebase: a claim the compiler cannot check is a claim that goes
+stale.
+
+`depth: current.depth + 1` builds each child's entry (an object literal, §16) one level
+deeper than its parent's.
+
+## 39. Node's Promise-returning file-system calls: readdir and Dirent
+
+*First seen in `src/core/discovery.ts` (`listCandidates`); `fs.realpath` in the same file
+since PR 3.*
+
+```ts
+import type { Dirent } from 'node:fs';
+import * as fs from 'node:fs/promises';
+
+let entries: Dirent[];
+try {
+  entries = await fs.readdir(current.directory, { withFileTypes: true });
+} catch {
+  continue;
+}
+for (const entry of entries) {
+  if (entry.isDirectory() === false) {
+    continue;
+  }
+  ...
+}
+```
+
+§28 covered the `Sync` forms; these are the other half. `node:fs/promises` offers the
+same operations returning Promises (§7), so `await fs.readdir(...)` hands the work to the
+operating system and pauses only this function (§6) — the extension stays responsive —
+where `fs.readdirSync` would block VS Code's whole extension host until the disk answered.
+`src/` uses this half everywhere but the two instant directory checks in `core/git.ts`
+(`statSync`, `accessSync` — §28); the fixture builder, which is setup code, uses the
+`Sync` forms throughout.
+
+`readdir` is `ls -A`: the names in a directory, no `.` or `..`, no path in front. With
+`{ withFileTypes: true }` each result is a **`Dirent`** (directory entry) instead of a bare
+name: `entry.name`, plus questions about what it is — `isDirectory()`, `isFile()`,
+`isSymbolicLink()` — answered from the listing itself, with no `stat` call per entry. The
+questions are about the entry *itself*: a symbolic link answers yes to `isSymbolicLink()`
+and no to `isDirectory()`, whatever it points at, which is how discovery skips links with
+no second call. `Dirent` is imported with `import type` (§9) from `node:fs` — the type
+lives in the base module, the Promise functions in `/promises` — for one purpose: the
+`let entries: Dirent[];` line, §4's declare-then-assign form. The value is assigned inside
+`try`, so the type has to be written; the compiler then checks that every path out of the
+`try`/`catch` (§18) either assigned it or left the loop.
+
+`readdir` rejects — so the `await` throws — when the directory does not exist, is not a
+directory, or cannot be read; discovery treats all three alike and skips what is below.
+`path.join(a, b)` (§28) makes each child's full path from its parent's and its name.
+
+## 40. A sentinel value: -1 for "no limit"
+
+*First seen in `src/core/discovery.ts` (`DiscoveryOptions.scanMaxDepth`, `listCandidates`).*
+
+```ts
+const childrenWanted = current.depth < options.scanMaxDepth || options.scanMaxDepth === -1;
+```
+
+Not syntax: a convention. A **sentinel** is an ordinary value given a special meaning —
+here `-1` for "no depth limit", which works because no real depth is negative. The
+alternatives were a union (§10), `number | null` with `null` meaning unlimited, or
+`Infinity` (a real JavaScript number, larger than every other, and `depth < Infinity` is
+always true). `-1` was kept because the setting this option comes from (PR 8) must mean
+the same as VS Code's own `git.repositoryScanMaxDepth`, where `-1` already means that —
+and because a settings file is JSON, which can hold `-1` and cannot hold `Infinity`.
+
+The cost of a sentinel is that every comparison has to remember it — hence the
+`|| === -1` — and that values with no meaning are still valid numbers: `-5` here behaves
+like `0`, and nothing in the type says otherwise. PR 8's settings reader is where such a
+value is turned back into the default, because settings are typed by hand. When the
+special case is ours to design, a union or `null` says it in the type instead, and the
+compiler does the remembering.
