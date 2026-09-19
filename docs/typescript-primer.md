@@ -243,6 +243,14 @@ Two small things that appear alongside it:
   vanish at compile time, so does the import; there is nothing for esbuild to bundle. A
   plain `import { GitRunner }` would also work; `import type` states the intent.
 
+An interface can also `extends` another interface. `PrCascadeSettings extends
+DiscoveryOptions` (`src/vscode/config.ts`) has every `DiscoveryOptions` field plus its own
+three, so a `PrCascadeSettings` can be passed wherever a `DiscoveryOptions` is expected —
+`src/extension.ts` hands the settings object straight to `discoverRepoRoots` — and a field
+added to `DiscoveryOptions` must be supplied by whatever builds a `PrCascadeSettings`, here
+`readSettings`, or it will not compile. This is not §13's `extends` on a class: nothing is
+inherited at run time, the interface simply lists the parent's fields as its own.
+
 ## 10. Union types
 
 *First seen in `src/core/model.ts`.*
@@ -951,11 +959,14 @@ hand:
 - `configuration.get<string>('trunk', '')` — VS Code cannot know what type a setting holds
   (it is whatever the user typed into a JSON file), so `get` is generic and we say
   `<string>`. The compiler then treats the result as a `string`, and `readSettings` can
-  promise `PrCascadeSettings` without a check.
+  promise `PrCascadeSettings` without a check. That is a claim, not a check — §41 is
+  where the difference matters, and what the same file does about it for a setting that
+  is not a string.
 - `getExtension<ExtensionApi>(...)` — what an extension's `activate()` returns is the
   extension's own business, so the API declares it as `any` unless told otherwise. This
-  is the one `any` this codebase meets, and it is on the API's side; naming the type turns
-  `api.provider` back into a checked value (§18: `any` switches checking off).
+  is the first `any` this codebase meets, and it is on the API's side (§41 and §42 meet
+  two more, both also the API's or the standard library's, never ours); naming the type
+  turns `api.provider` back into a checked value (§18: `any` switches checking off).
 
 A class can `implements` more than one interface, comma-separated, as
 `StackTreeProvider` does: it is a `TreeDataProvider` *and* a `Disposable` (§32). And as
@@ -1262,7 +1273,179 @@ and because a settings file is JSON, which can hold `-1` and cannot hold `Infini
 
 The cost of a sentinel is that every comparison has to remember it — hence the
 `|| === -1` — and that values with no meaning are still valid numbers: `-5` here behaves
-like `0`, and nothing in the type says otherwise. PR 8's settings reader is where such a
-value is turned back into the default, because settings are typed by hand. When the
-special case is ours to design, a union or `null` says it in the type instead, and the
-compiler does the remembering.
+like `0`, and nothing in the type says otherwise. The settings reader in
+`src/vscode/config.ts` (§41) is where such a value is turned back into the default,
+because settings are typed by hand. When the special case is ours to design, a union or
+`null` says it in the type instead, and the compiler does the remembering.
+
+## 41. Checking a value the compiler cannot vouch for: `get<unknown>`, `Number.isInteger`, `Array.isArray`
+
+*First seen in `src/vscode/config.ts` (`readScanMaxDepth`, `readScanIgnoredFolders`).*
+
+```ts
+import { DEFAULT_DISCOVERY_OPTIONS } from '../core/discovery';
+
+const value = configuration.get<unknown>('repositoryScanMaxDepth', DEFAULT_DISCOVERY_OPTIONS.scanMaxDepth);
+if (typeof value !== 'number') {
+  return DEFAULT_DISCOVERY_OPTIONS.scanMaxDepth;
+}
+if (Number.isInteger(value) === false || value < -1) {
+  return DEFAULT_DISCOVERY_OPTIONS.scanMaxDepth;
+}
+return value;
+```
+
+Three things here, in the order they appear.
+
+**The import.** `'../core/discovery'` is a path (§1): `..` climbs from `src/vscode/` to
+`src/`, then into `core/`. `src/vscode/tree.ts` already imported from core, but only
+types (`import type`, §9), which vanish at compile time; this is the first *value* — an
+object that exists when the extension runs — to cross from core into vscode. The
+direction is the one §2 allows: vscode may depend on core, core never on vscode, and the
+lint rule enforces the half that could go wrong. It is also why the defaults live in core
+(§36): the file that reads the settings imports them from the file that uses them, never
+the other way round.
+
+**`get<unknown>`.** §31 said `configuration.get<string>('trunk', '')` makes the compiler
+treat the result as a `string`. That is a *claim*: the annotations never run (the top of
+this file), so `get<number>` would not turn the `"1"` or `1.5` a user typed into
+settings.json into a valid number — it would only stop the compiler from asking. For a
+string setting the claim costs nothing: any string is usable, and a wrong one fails where
+it is used, with a message. For a number with rules — a whole number, `-1` or more — a
+wrong claim is a wrong answer with no error: `-5` would reach the scan and behave as `0`
+(§40). So the code says `<unknown>` (§18) instead: the compiler now refuses `value < -1`
+and `return value` until the code has proved what `value` is, and the checks that follow
+are not optional.
+
+**The checks.** `typeof value !== 'number'` is §17's narrowing turned round: once that
+`if` has returned, the compiler knows `value` is a `number`. `Number.isInteger(value)`
+asks "a whole number?" — §27 said `number` is the only numeric type and `3` and `3.0` the
+same value, so whether a value is an integer is a run-time question, and this is the
+function that asks it (it also answers no to `NaN` and `Infinity`). It returns a plain
+boolean, hence `=== false` rather than `!`, as §24 says the codebase writes it. `value <
+-1` is the floor package.json declares as `minimum`, checked again here because VS Code's
+Settings editor underlines a value that breaks a declared `minimum` and stores it anyway.
+
+The list setting adds one more tool:
+
+```ts
+const value = configuration.get<unknown>('repositoryScanIgnoredFolders', DEFAULT_DISCOVERY_OPTIONS.scanIgnoredFolders);
+if (Array.isArray(value)) {
+  const entries: unknown[] = value;
+  const names: string[] = [];
+  for (const entry of entries) {
+    if (typeof entry === 'string') {
+      names.push(entry);
+    }
+  }
+  return names;
+}
+return Array.from(DEFAULT_DISCOVERY_OPTIONS.scanIgnoredFolders);
+```
+
+`Array.isArray(value)` is the `typeof` for lists — `typeof []` is `'object'`, no help —
+and, like `instanceof` in §18, it narrows: inside the `if`, `value` is a list. But the
+compiler can only call it a list *of anything*, `any[]` — the second `any` this codebase
+meets (§31 had the first), and again on the standard library's side, not ours. `const
+entries: unknown[] = value;` is the repair: a list of `any` may be assigned to a list of
+`unknown`, and from then on every element has to be checked before it is used — the
+`typeof entry === 'string'` inside the loop (§22). The `if` is written the positive way
+round, with the default *after* the block, where the function above returned early on
+the failing case: the two read the same, and here the list branch is the long one, so it
+is the one that gets the block.
+
+The default is handed out as a copy — `Array.from(list)` copies an array the way it copied
+a Set in §21 — rather than as the shared object itself. `DEFAULT_DISCOVERY_OPTIONS` is one
+object for the whole session, `discoverRepoRoots` falls back to it too, and a `string[]`
+can always be `push`ed onto (§25). Nothing pushes onto the settings' list today; the copy
+makes sure that if something ever does, it changes that refresh's list and not the default
+every later refresh starts from.
+
+## 42. Changing the workspace from a test: updateWorkspaceFolders, Uri.file, and waiting for an event
+
+*First seen in `test/ext/scanSettings.test.ts`.*
+
+```ts
+const changed = nextWorkspaceFoldersChange();
+const accepted = vscode.workspace.updateWorkspaceFolders(folders.length, 0, { uri: vscode.Uri.file(parentDir) });
+assert.strictEqual(accepted, true);
+await changed;
+
+function nextWorkspaceFoldersChange(): Promise<void> {
+  return new Promise((resolve) => {
+    const subscription = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      subscription.dispose();
+      resolve();
+    });
+  });
+}
+```
+
+- **`vscode.Uri.file(path)`** — VS Code names everything by URI, not by path: a workspace
+  folder is `file:///private/tmp/...`, and later the two sides of a diff will be
+  `stackdiff:` URIs (plan §7.4). `Uri.file` builds the URI for a local path; `.fsPath`,
+  which `src/extension.ts` already reads off each workspace folder, goes the other way.
+- **`updateWorkspaceFolders(start, deleteCount, ...toAdd)`** — one call that removes
+  `deleteCount` folders at position `start` and inserts the ones given, so it adds
+  (`(folders.length, 0, { uri })`), removes (`(index, 1)`) or replaces. It returns `true`
+  or `false` *at once* — whether the change was accepted; a folder already present is
+  refused — and applies it a moment later. Then `onDidChangeWorkspaceFolders` fires, the
+  same event `src/extension.ts` refreshes the tree on, and the API's own note says not to
+  call it again before that event has fired. Two things make it usable from a test: the
+  workspace `.vscode-test.mjs` opens is a `.code-workspace` file, so the change is an edit
+  to that file — adding a folder to a *single-folder* window turns it into a new
+  multi-root workspace and reloads the window, with the test run inside it — and the
+  folder is added at the end, because changing the first folder can restart the
+  extension host too.
+- **Waiting for an event with `new Promise`** — §15 wrapped a callback; here the same
+  shape wraps an event. The Promise resolves when the listener runs, and the listener
+  first removes itself (`subscription.dispose()`, §32) so it fires once. The order
+  matters: the Promise is *made* before `updateWorkspaceFolders` is called and *awaited*
+  after — a listener attached after the change could miss the event, and a Promise that
+  never resolves would hang the test until Mocha's timeout.
+
+Two smaller things in the same file. Mocha's **`after`** hook is `before`'s twin: it runs
+once when every test in the block is done, pass or fail, and here undoes what `before`
+did — settings back to their defaults, the folder out of the workspace, the repositories
+off disk — so the file that runs next meets the workspace as built. And
+**`extension.packageJSON`** is `package.json` as VS Code read it, declared `any` by the
+API like `activate()`'s result in §31; `const manifest: ExtensionManifest =
+extension.packageJSON;` puts it under a written type from that line on. `ExtensionManifest`
+is an interface (§9) whose fields are themselves object shapes, written inline between
+braces instead of being named, with the two dotted keys in quotes because a bare
+`prCascade.repositoryScanMaxDepth` would be read as a path through three fields. Reading
+such a field uses the same square brackets as an array index (§25, `list[0]`) with the key
+as a string — `properties['prCascade.repositoryScanMaxDepth'].default` — because
+`properties.prCascade.repositoryScanMaxDepth` would again be three steps; `object['name']`
+and `object.name` are one operation written two ways, and the bracket form is the one that
+takes any string. Like every claim about an `any`, it is checked at run time by the
+assertion, not by the compiler.
+
+## 43. `keyof` and `Record<K, V>`: an object with exactly another type's fields
+
+*First seen in `test/ext/scanSettings.test.ts`.*
+
+```ts
+const declared: Record<keyof DiscoveryOptions, unknown> = {
+  scanMaxDepth: properties['prCascade.repositoryScanMaxDepth'].default,
+  scanIgnoredFolders: properties['prCascade.repositoryScanIgnoredFolders'].default,
+};
+```
+
+- **`keyof DiscoveryOptions`** is a type made from another type: the union (§10) of its
+  field names — here `'scanMaxDepth' | 'scanIgnoredFolders'`. It is not written out by
+  hand, so when a field is added to the interface this union grows with it.
+- **`Record<K, V>`** is a built-in generic type (§31, like `Promise<T>`): "an object that
+  has every key in `K`, each holding a `V`". So `Record<keyof DiscoveryOptions, unknown>`
+  reads "an object with exactly the fields of `DiscoveryOptions`, each holding anything".
+  Plain `const declared: DiscoveryOptions` cannot be written here: the values come out of
+  package.json as `unknown` (§18, §41), and the compiler refuses `unknown` where a
+  `number` is wanted. This spelling keeps the values `unknown` — `deepStrictEqual` still
+  does the comparing — and pins only the set of keys.
+- **Why it is there.** The object literal mirrors the interface's fields by hand. Without
+  the annotation, a third field added to `DiscoveryOptions` leaves this literal two fields
+  short and `tsc` says nothing; the mismatch only shows up when the extension-host suite
+  runs inside VS Code. With it, `npm run typecheck` reports the missing field (`Property
+  'x' is missing in type ...`) and a misspelled one (`... does not exist in type ... Did
+  you mean ...?`). It is the same idea as `implements` in §13: a link the compiler checks,
+  instead of a copy kept up by hand.

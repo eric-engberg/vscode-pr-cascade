@@ -95,11 +95,11 @@ export function deactivate(): void {
  * trunk cannot be found is kept, with `trunk: null`, so the tree can say so (E4) rather
  * than leave the repository out without a word.
  *
- * Settings are read here, on every run, so a changed `prCascade.gitPath` or
- * `prCascade.trunk` takes effect at the next refresh — and the git runner is rebuilt
- * from them for the same reason (it holds nothing but the path). A failure anywhere in
- * here — git missing (E17), a command exiting non-zero — rejects, and the provider turns
- * that into one error row (vscode/tree.ts, topLevelNodes).
+ * Settings are read here, on every run, so a changed `prCascade.gitPath`,
+ * `prCascade.trunk` or scan setting takes effect at the next refresh — and the git
+ * runner is rebuilt from them for the same reason (it holds nothing but the path). A
+ * failure anywhere in here — git missing (E17), a command exiting non-zero — rejects, and
+ * the provider turns that into one error row (vscode/tree.ts, topLevelNodes).
  */
 // see primer §6 (async / await), §22 (for ... of) and §30 (`??`)
 async function loadRepoStates(output: vscode.OutputChannel): Promise<RepoState[]> {
@@ -112,7 +112,11 @@ async function loadRepoStates(output: vscode.OutputChannel): Promise<RepoState[]
   // see primer §25 (arrays: map)
   const folders = vscode.workspace.workspaceFolders ?? [];
   const folderPaths = folders.map((folder) => folder.uri.fsPath);
-  const roots = await discoverRepoRoots(folderPaths, git);
+  // The settings object is a DiscoveryOptions by declaration (vscode/config.ts:
+  // `PrCascadeSettings extends DiscoveryOptions`), its two scan fields already checked
+  // there, so it is handed over as it is — no second copy to keep in step. The rules of
+  // the scan itself live in core/discovery.ts (plan §13.4).
+  const roots = await discoverRepoRoots(folderPaths, git, settings);
 
   const states: RepoState[] = [];
   for (const root of roots) {

@@ -31,6 +31,22 @@ Milestones (each is one stack of PRs):
 - git ≥ 2.38
 - Node ≥ 22 for development (CI uses 24); no runtime dependencies so far.
 
+## Settings
+
+All under `prCascade.*` in the Settings editor (search "PR Cascade"). Every one is read
+again on each refresh, so a change takes effect without reloading the window.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `trunk` | `""` | The ref the stack is measured against. Empty = auto-detect: the remote's default branch (`origin/HEAD`), then `origin/main`, `origin/master`, `main`, `master`. |
+| `gitPath` | `"git"` | The git executable; a full path when git lives somewhere unusual. |
+| `remote` | `"origin"` | The remote whose default branch is consulted first — change it if you work on a fork. |
+| `repositoryScanMaxDepth` | `1` | How many levels below each workspace folder to look for repositories: `0` the folders only, `1` their immediate subfolders too (a parent folder open with the repositories under it), `-1` no limit — one git process per directory, all at once. Same meaning as `git.repositoryScanMaxDepth`. |
+| `repositoryScanIgnoredFolders` | `["node_modules"]` | Folder names never entered by that scan. Same meaning as `git.repositoryScanIgnoredFolders`. |
+
+A value the last two cannot use (a depth that is not a whole number of -1 or more, an
+ignore list that is not a list) is treated as the default.
+
 ## Development loop
 
 Nothing gets installed during development. VS Code runs the extension straight from this

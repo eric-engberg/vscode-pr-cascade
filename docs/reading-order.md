@@ -13,8 +13,11 @@ the repository root; its §13 is the running log of decisions and deviations mad
    `main` (the one file it loads), `activationEvents` (when), `engines` (which VS Code), and
    `contributes`: the **Stack** view under Source Control (`views.scm`), the **Refresh
    Stack** command and the toolbar slot it sits in (`commands`, `menus` › `view/title`,
-   `navigation@1` = an inline icon), and the three settings (`configuration`:
-   `prCascade.trunk`, `prCascade.gitPath`, `prCascade.remote`). Everything declared here is
+   `navigation@1` = an inline icon), and the five settings (`configuration`:
+   `prCascade.trunk`, `prCascade.gitPath`, `prCascade.remote`, and the two that shape the
+   repository scan, `prCascade.repositoryScanMaxDepth` and
+   `prCascade.repositoryScanIgnoredFolders`, whose `default`s must match
+   `src/core/discovery.ts` — a test checks). Everything declared here is
    given code in `src/extension.ts`. The `scripts` block is every command a developer runs;
    the `devDependencies` block is the toolchain, nothing here ships.
 2. **`src/extension.ts`** — the entry point and the wiring. Read it twice: now for the
@@ -65,9 +68,10 @@ the repository root; its §13 is the running log of decisions and deviations mad
    (E19); why the probes run in parallel (`Promise.all`: twenty repositories under one
    parent are twenty processes); why a repository's own subdirectories are asked too and
    deduped; and why the depth is the safety valve. Then `DiscoveryOptions` and
-   `DEFAULT_DISCOVERY_OPTIONS` at the top (the one place the defaults live; PR 8 reads
-   them), `listCandidates` (a queue, one level at a time, children sorted by name, `.git`
-   / ignored names / symlinks / unreadable directories skipped, and why nothing is logged),
+   `DEFAULT_DISCOVERY_OPTIONS` at the top (the one place the defaults live;
+   `src/vscode/config.ts`, item 18, reads them as its fallbacks), `listCandidates` (a
+   queue, one level at a time, children sorted by name, `.git` / ignored names / symlinks
+   / unreadable directories skipped, and why nothing is logged),
    why only the newline git prints is removed from a root (a directory name may end in a
    space), and how `normalizeRoot` makes two spellings of one directory compare equal —
    symlinks, the macOS `/tmp` → `/private/tmp` case, a trailing slash — so the `Set`
@@ -153,7 +157,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
     the graph and which E-number it is for: `amend` (E14), `squashMergeBottomIntoTrunk`
     (E15), `addUnrelatedStack` (E16), `detach` (E3), `startConflictingRebase` (E12, used
     from M4). The `directory` option is for the two callers outside Vitest: the
-    extension-host workspace (item 22) and `npm run fixture` (item 29). The class at the
+    extension-host workspace (item 23) and `npm run fixture` (item 30). The class at the
     bottom is the first one in the codebase whose methods carry real domain logic; the
     `Fixture` interface above it is all a test ever sees.
 17. **`test/git/stack.git.test.ts`** — `computeStack` on real repositories: the Appendix A
@@ -165,11 +169,19 @@ the repository root; its §13 is the running log of decisions and deviations mad
     names, `head` and SHAs are the branches', not `heads/<name>` or the tag's). The E14
     and E15 blocks document what the tree shows in those states — git's answer, until
     git-spice restacks or syncs in M8 — rather than a fix.
-18. **`src/vscode/config.ts`** — the first file in `src/vscode/`, and the smallest: the
-    three `prCascade.*` settings read out of VS Code into a plain object
-    (`PrCascadeSettings`). Read it for the boundary it draws — settings live in VS Code's
-    configuration API, and nothing in `src/core` ever sees that API — and for why an empty
-    `gitPath` becomes `git`.
+18. **`src/vscode/config.ts`** — the first file in `src/vscode/`: the five `prCascade.*`
+    settings read out of VS Code into a plain object (`PrCascadeSettings`). Read it for
+    the boundary it draws — settings live in VS Code's configuration API, and nothing in
+    `src/core` ever sees that API; the defaults for the scan, and the shape of the two scan
+    settings (`DiscoveryOptions`, which `PrCascadeSettings` extends), cross the boundary the
+    other way, imported from `core/discovery.ts` — and for the two kinds of setting it holds.
+    The three strings are taken as they come (a wrong one fails where it is used, with a
+    message; an empty `gitPath` becomes `git`). The two scan settings are checked first,
+    in `readScanMaxDepth` and `readScanIgnoredFolders`, because settings.json is typed by
+    hand and VS Code hands over whatever is in it: read the doc comments for what an
+    unchecked `-5`, `1.5` or a string in place of the list would have quietly done to the
+    scan, and the body for why the value is read as `unknown` rather than claimed to be a
+    number.
 19. **`src/vscode/tree.ts`** — the Stack view. Three small node classes first: `LayerNode`
     (the row is the branch name and nothing else — plan §7.1, E44 — with the count and
     the `· current` marker as the dimmer description, `$(target)` / `$(git-branch)` as the
@@ -198,7 +210,22 @@ the repository root; its §13 is the running log of decisions and deviations mad
     the fixture or a setting into the state and undoing it in `finally`: HEAD on trunk
     (E5), a configured trunk that does not exist (E4), a `gitPath` that does not exist
     (E17 — the row carries `RealGitRunner`'s own message).
-22. **`.vscode-test.mjs`** — where that workspace comes from: the fixture builder (item 16,
+22. **`test/ext/scanSettings.test.ts`** — the two scan settings, live: `before` builds
+    Ric's layout in a temporary directory (a parent that is not a repository, the
+    Appendix A stack in `alpha` and `beta` below it, a third in `group/gamma` two levels
+    down) and adds the parent to the running workspace with `updateWorkspaceFolders`,
+    waiting for `onDidChangeWorkspaceFolders` the way the API requires. Then: a row per
+    repository, `repo`, `alpha`, `beta` (E1, E2 — workspace order, then name order);
+    alpha's layers under its row; depth 0 hides the scanned ones and depth 2 reaches
+    `gamma`; an ignore list is honoured; and the three fallbacks — `-5`, `1.5`, a string
+    where the list belongs — each shown to give the default by an assertion that the
+    unchecked value would fail (the comments say which test shows the other outcome).
+    Last, the defaults in `package.json` compared with `DEFAULT_DISCOVERY_OPTIONS`. Read
+    `buildRepositoryUnder` for why the fixtures are moved after being built, `withSetting`
+    for the try / finally every setting test shares, and `after` for the cleanup that
+    leaves the workspace as built for whichever file Mocha runs next (item 21 asserts the
+    folder list).
+23. **`.vscode-test.mjs`** — where that workspace comes from: the fixture builder (item 16,
     its compiled copy under `out/`) makes the stack in a temporary directory, an empty
     `nested` folder is added inside the repository, and a `.code-workspace` file listing
     `nested` first and the root second is what the test VS Code opens. Cleaned up when the
@@ -207,31 +234,31 @@ the repository root; its §13 is the running log of decisions and deviations mad
 
 ## The toolchain (read once, then only when something breaks)
 
-23. **`tsconfig.json`** — how `tsc` type-checks `src/`, `test/` and `scripts/`. Emits nothing.
-24. **`esbuild.mjs`** — how `src/extension.ts` becomes `dist/extension.js` (build, watch,
+24. **`tsconfig.json`** — how `tsc` type-checks `src/`, `test/` and `scripts/`. Emits nothing.
+25. **`esbuild.mjs`** — how `src/extension.ts` becomes `dist/extension.js` (build, watch,
     analyze). The `target`/`external` lines explain the two constraints VS Code imposes.
-25. **`eslint.config.mjs`** — lint rules, including the one that enforces the architecture:
+26. **`eslint.config.mjs`** — lint rules, including the one that enforces the architecture:
     `src/core/**` must not import `vscode`.
-26. **`vitest.config.mts`** — the Node-side runner: `unit` and `git` projects, coverage on
+27. **`vitest.config.mts`** — the Node-side runner: `unit` and `git` projects, coverage on
     `src/core`, and why only the `git` project gets a longer `hookTimeout` (every real git
     command is a separate process; a `beforeAll` that builds six repositories went past the
     default once, under load). (`.mts` = TypeScript as an ES module; the header explains
     why not `.ts`.)
-27. **`tsconfig.ext.json`** — the extension-host tests (and `test/helpers`, which
+28. **`tsconfig.ext.json`** — the extension-host tests (and `test/helpers`, which
     `.vscode-test.mjs` needs) compiled to `out/` for Mocha inside the downloaded VS Code.
-28. **`.vscode/launch.json`**, **`.vscode/tasks.json`** — F5 (plan §11.2): build, then open a
+29. **`.vscode/launch.json`**, **`.vscode/tasks.json`** — F5 (plan §11.2): build, then open a
     second VS Code with the extension loaded and `../fixture-repo/repo` open.
-29. **`scripts/fixture.ts`** — `npm run fixture`: the fixture builder pointed at
+30. **`scripts/fixture.ts`** — `npm run fixture`: the fixture builder pointed at
     `../fixture-repo`, so F5 has a stack to show. The comment above its import explains
     how esbuild bundles the script into `out/` and node runs it from there (the same tool
     that builds the extension; `&&` so a bundling error is not mistaken for success) and
     why Node's own type stripping was not used.
-30. **`.github/workflows/ci.yml`** — the same `npm test` and `npm run test:ext`, on Linux and
+31. **`.github/workflows/ci.yml`** — the same `npm test` and `npm run test:ext`, on Linux and
     macOS, on every pull request and on pushes to `main`.
-31. **`scripts/depcheck.mjs`** — prints the dependency card (plan §11.3) that every PR adding
+32. **`scripts/depcheck.mjs`** — prints the dependency card (plan §11.3) that every PR adding
     a runtime library must include. Not used until M5. Plain JavaScript that runs ahead of
     the primer: read it for what it does, not how (primer intro).
-32. **`.vscodeignore`** — what is left out of the `.vsix`; the reason `node_modules` never
+33. **`.vscodeignore`** — what is left out of the `.vsix`; the reason `node_modules` never
     reaches a user.
 
 ## Where the layers live
@@ -241,9 +268,9 @@ the repository root; its §13 is the running log of decisions and deviations mad
   `discovery.ts` (workspace folders, and the directories below them → repository roots),
   `trunk.ts` (which branch is trunk) and `stack.ts` (the layers under HEAD). That is the
   whole M1 core.
-- `src/vscode/` — adapters: `config.ts` (settings → plain values) and `tree.ts` (the Stack
-  view). Later milestones add the diff content provider, commands, terminals, the status
-  bar.
+- `src/vscode/` — adapters: `config.ts` (settings → plain values, checked) and `tree.ts`
+  (the Stack view). Later milestones add the diff content provider, commands, terminals,
+  the status bar.
 - `src/extension.ts` — the wiring between the two: the pipeline as one function, the view
   and command registrations, `{ provider, refresh }` for the tests.
 - `test/unit/` (Vitest, no git), `test/git/` (Vitest, real git in temp repos),

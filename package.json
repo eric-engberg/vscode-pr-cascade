@@ -78,6 +78,22 @@
           "type": "string",
           "default": "origin",
           "markdownDescription": "The remote whose default branch is consulted first when auto-detecting the trunk. Change it if you work on a fork and keep the original repository as `upstream`."
+        },
+        "prCascade.repositoryScanMaxDepth": {
+          "type": "number",
+          "default": 1,
+          "minimum": -1,
+          "markdownDescription": "How many levels below each workspace folder to look for repositories. `0` looks only at the folders themselves; `1` (the default) also looks in their immediate subfolders — the layout where a parent folder is open and the repositories live under it; `-1` sets no limit, which on a large folder starts one git process per directory, all at once. Same meaning as `git.repositoryScanMaxDepth`. Anything but a whole number of -1 or more is treated as the default."
+        },
+        "prCascade.repositoryScanIgnoredFolders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "node_modules"
+          ],
+          "markdownDescription": "Folder names skipped while looking for repositories below a workspace folder, at any level. Same meaning as `git.repositoryScanIgnoredFolders`. A value that is not a list is treated as the default; an entry in the list that is not a name is dropped."
         }
       }
     }
