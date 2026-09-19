@@ -1,8 +1,9 @@
 {
   // tsconfig.json — how the TypeScript compiler reads this project.
   //
-  // Layer: tooling. Used by `npm run typecheck` (tsc --noEmit): it type-checks src/ and
-  // test/ and emits nothing. Building the shippable file is esbuild's job (esbuild.mjs),
+  // Layer: tooling. Used by `npm run typecheck` (tsc --noEmit): it type-checks src/, test/
+  // and scripts/ (only the .ts files there; the .mjs ones are plain JavaScript and are
+  // ESLint's) and emits nothing. Building the shippable file is esbuild's job (esbuild.mjs),
   // which reads only the options it needs from here. tsconfig.ext.json extends this one
   // to compile the extension-host tests to out/. Plan: §11 skeleton, §3 "Language".
   "compilerOptions": {
@@ -38,5 +39,5 @@
     // import fails to type-check instead of failing at run time.
     "types": ["node"]
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "scripts"]
 }

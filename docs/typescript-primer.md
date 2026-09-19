@@ -4,6 +4,10 @@ This file explains each piece of TypeScript syntax **once**, the first time it a
 project, in the order a reader following [`reading-order.md`](reading-order.md) meets it.
 Code comments point here (`// see primer §3 (functions and type annotations)`) instead of
 re-explaining the language. Every PR that introduces a new construct adds a section.
+One exception to the order: `src/extension.ts` is read second, for its shape, and again
+after the core and `src/vscode/` (reading-order item 2); the constructs it uses are
+counted as first seen in the file that introduced them, and its `// see primer` links are
+for that second reading.
 
 It is written for someone fluent in shell and git who has not written TypeScript. Two things
 to hold onto:
@@ -508,6 +512,26 @@ treatment — the name may be left off: `catch {` instead of `catch (error) {`. 
 reader "this can fail, and why does not matter here". A comment inside the block is still
 wanted, so it never looks like an accident (ESLint flags an empty block without one).
 
+A third form, `try` / `finally`, first seen in `test/ext/tree.test.ts` (the E5 test):
+
+```ts
+runGit(['checkout', '-q', 'main']);
+try {
+  const items = await topLevelItems();
+  assert.deepStrictEqual(labels, ['Not on a stack']);
+} finally {
+  runGit(['checkout', '-q', 'retry-metrics']);
+}
+```
+
+`finally` runs its block on every way out of `try` — the block finished, it `return`ed, or
+it threw — and then lets whatever happened carry on (a thrown error keeps travelling up
+after `finally` is done). There is no `catch` here on purpose: a failing assertion must
+still fail the test, but the fixture must be put back on its branch first, or every test
+after this one would start from the wrong place. That is the job of `finally`: undoing a
+change the code above it made, whether or not that code succeeded. The three can be
+combined (`try` / `catch` / `finally`), but this codebase has not needed to.
+
 ## 19. Map
 
 *First seen in `test/helpers/fakeGit.ts`.*
@@ -839,7 +863,8 @@ absolute (`realpath -m`), and `path.dirname(p)` is `dirname`.
 
 ## 29. Counted for loops
 
-*First seen in `test/helpers/fixture.ts` (`buildStack`).*
+*First seen in `test/helpers/fixture.ts` (`buildStack`); counting down, in
+`src/vscode/tree.ts` (`nodesForRepo`).*
 
 ```ts
 for (let index = 0; index < layers.length; index++) {
@@ -857,6 +882,11 @@ character. Use it only when the number itself is needed — here it is, twice: t
 layer's name from one list and the file's letter from a string (`charAt(index)`, the
 character at that position, counted from 0). Everywhere the position is not needed,
 `for ... of` says less and is preferred.
+
+The same three parts count down: `for (let index = list.length - 1; index >= 0; index--)`
+starts at the last position, keeps going while it is still a valid one (`>= 0`), and
+`index--` subtracts one. First seen in `nodesForRepo`, `src/vscode/tree.ts`, where it is
+how the layers are listed top-first without touching the array.
 
 ## 30. ?? — a default for a missing value
 
@@ -880,3 +910,169 @@ as well, because they are falsy (§24). `options.remote ?? true` keeps a caller'
 remote" fixture (E25) could never be built. `??` looks only for the two "nothing" values,
 which is what "was this option given?" means. Its sibling `?.` — "read this field only if
 the thing before the dot is present" — is not used yet and gets its section when it is.
+
+## 31. Generics on classes and calls
+
+*First seen in `src/vscode/tree.ts` (`TreeDataProvider<StackNode>`,
+`EventEmitter<StackNode | undefined>`); on a call in `src/vscode/config.ts` (`get<string>`)
+and `test/ext/tree.test.ts` (`getExtension<ExtensionApi>`).*
+
+```ts
+export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vscode.Disposable {
+  private readonly changeEmitter = new vscode.EventEmitter<StackNode | undefined>();
+  async getChildren(node?: StackNode): Promise<StackNode[]> { ... }
+}
+
+const trunk = configuration.get<string>('trunk', '');
+const extension = vscode.extensions.getExtension<ExtensionApi>('local.vscode-pr-cascade');
+```
+
+§19 introduced type parameters on built-in types: `Map<string, Error>`, `Promise<string>`.
+VS Code's API is full of the same idea. `TreeDataProvider<T>` is "a provider of rows of
+type `T`" — the interface is written once, for any `T`, and `implements
+vscode.TreeDataProvider<StackNode>` fills the blank in: from then on the compiler insists
+that `getChildren` returns `StackNode[]` and that `getTreeItem` accepts a `StackNode`,
+because that is what the interface says with `T` = `StackNode`. `EventEmitter<T>` is the
+same for events: `T` is what `fire` sends and what every listener receives (§32).
+
+The angle brackets can also go on a **call**. Usually the compiler works the type out from
+the arguments and nothing is written — `new Map([['a', 'b']])` in §19. Two cases need a
+hand:
+
+- `configuration.get<string>('trunk', '')` — VS Code cannot know what type a setting holds
+  (it is whatever the user typed into a JSON file), so `get` is generic and we say
+  `<string>`. The compiler then treats the result as a `string`, and `readSettings` can
+  promise `PrCascadeSettings` without a check.
+- `getExtension<ExtensionApi>(...)` — what an extension's `activate()` returns is the
+  extension's own business, so the API declares it as `any` unless told otherwise. This
+  is the one `any` this codebase meets, and it is on the API's side; naming the type turns
+  `api.provider` back into a checked value (§18: `any` switches checking off).
+
+A class can `implements` more than one interface, comma-separated, as
+`StackTreeProvider` does: it is a `TreeDataProvider` *and* a `Disposable` (§32). And as
+§19 said: this codebase only *uses* generic types; it defines none (plan §11.1).
+
+## 32. EventEmitter and Event
+
+*First seen in `src/vscode/tree.ts` (`StackTreeProvider`); subscribing in
+`src/extension.ts` and `test/ext/tree.test.ts`.*
+
+```ts
+private readonly changeEmitter = new vscode.EventEmitter<StackNode | undefined>();
+readonly onDidChangeTreeData: vscode.Event<StackNode | undefined>;
+
+constructor(loadStates: () => Promise<RepoState[]>) {
+  this.onDidChangeTreeData = this.changeEmitter.event;
+}
+
+refresh(): void {
+  this.changeEmitter.fire(undefined);
+}
+
+// elsewhere:
+context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(refresh));
+const subscription = provider.onDidChangeTreeData((node) => { received.push(node); });
+subscription.dispose();
+```
+
+VS Code tells extensions about things that happen — a folder added, a file saved, "your
+tree changed" — through **events**, and this is the whole mechanism. An `EventEmitter<T>`
+has two halves:
+
+- `.fire(value)` — the *sending* half: notify everyone listening, handing each a `value`
+  of type `T`.
+- `.event` — the *subscribing* half: a function that takes a **listener** (an arrow
+  function, §5, that receives the `value`) and returns a `Disposable`. Calling
+  `.dispose()` on that stops listening. `vscode.Event<T>` is the type of this half.
+
+The naming convention is fixed across the API: every event is a field named
+`onDidSomething` (or `onWillSomething`), and you subscribe by *calling* it with your
+listener — `vscode.workspace.onDidChangeWorkspaceFolders(refresh)` passes the function
+`refresh` by name, the way `sort(compareByDistanceThenName)` did in §26. The provider
+follows the same convention: the emitter is `private` (only the class may fire it), and
+the public field `onDidChangeTreeData` — the name `TreeDataProvider` requires — is its
+`.event` half, so VS Code can subscribe and nobody else can fire. Firing `undefined` has
+a meaning defined by that interface: "the whole tree changed, ask for the top again".
+
+**Disposable** is anything with a `dispose(): void` method — a subscription, an output
+channel, a registered command, the provider itself. Pushing one onto
+`context.subscriptions` (in `activate`) hands it to VS Code, which calls `dispose()` on
+each when the extension shuts down; that is why `activate` never has to undo anything.
+
+## 33. Function types
+
+*First seen in `src/vscode/tree.ts` (the constructor parameter `loadStates`) and
+`src/extension.ts` (`ExtensionApi.refresh`).*
+
+```ts
+constructor(loadStates: () => Promise<RepoState[]>) { ... }
+
+export interface ExtensionApi {
+  provider: StackTreeProvider;
+  refresh: () => void;
+}
+
+const provider = new StackTreeProvider(() => loadRepoStates(output));
+```
+
+A function is a value (§26), so it has a type, and the type is written with the same
+arrow as an arrow function — in a *type* position it describes rather than defines.
+`() => Promise<RepoState[]>` reads "a function that takes nothing and returns a Promise
+of a `RepoState[]`"; `() => void` is "takes nothing, returns nothing". Parameters go in
+the parentheses with their types, `(name: string) => boolean`. So the provider's
+constructor accepts *any* function of that shape — the real pipeline in
+`src/extension.ts`, or something else in a test — and the interface field
+`refresh: () => void` says "an object with a `refresh` you can call".
+
+The value handed to the constructor, `() => loadRepoStates(output)`, is an arrow function
+that uses `output` — a variable that belongs to the surrounding `activate`. That is
+allowed, and the function keeps `output` alive for as long as it is around, even after
+`activate` has returned; the technical name is a **closure**. `function refresh() {
+provider.refresh(); }` inside `activate` is the same thing with `provider`. A shell
+function that reads a variable set in the script around it is the closest analogy, except
+that here the variable survives the script's end.
+
+## 34. A union of classes, narrowed with instanceof
+
+*First seen in `src/vscode/tree.ts` (`StackNode`).*
+
+```ts
+export type StackNode = RepoNode | LayerNode | MessageNode;
+
+getTreeItem(node: StackNode): vscode.TreeItem {
+  return node.toTreeItem();
+}
+
+if (node instanceof RepoNode) {
+  return nodesForRepo(node.state);
+}
+```
+
+§10's `|` works on classes too: a `StackNode` is an object of one of these three classes.
+On a value of the union you may use only what **every** member has — all three define
+`toTreeItem()`, so `node.toTreeItem()` compiles with no check. Anything only one member
+has (`node.state` exists on `RepoNode` alone) needs narrowing first, and `instanceof`
+(§18, where it told a `GitError` from other errors) is the tool: inside
+`if (node instanceof RepoNode)` the compiler treats `node` as a `RepoNode`.
+
+Many TypeScript codebases give each class a `kind: 'repo' | 'layer'` field and narrow on
+that instead. `instanceof` was chosen here because it is already known from §18 and needs
+no extra field.
+
+## 35. Enum values from the VS Code API
+
+*First seen in `src/vscode/tree.ts` (`vscode.TreeItemCollapsibleState.None`).*
+
+```ts
+new vscode.TreeItem(this.layer.name, vscode.TreeItemCollapsibleState.None);
+new vscode.TreeItem(path.basename(this.state.root), vscode.TreeItemCollapsibleState.Expanded);
+```
+
+An **enum** is a named set of constants. `TreeItemCollapsibleState` has three members —
+`None` (a leaf row), `Collapsed` (has children, shown folded) and `Expanded` (has children,
+shown open) — and a value of that type must be one of them, written
+`vscode.TreeItemCollapsibleState.None`; a misspelt name is a compile error, and so is a
+number that is not one of the members' values — though a bare `1` slips through, which is
+one reason to always write the name. It is the same job the exact-string unions of §10 do
+(`FileStatus`, `StartFailure`), which is why this codebase uses the API's enums where the
+API demands them and defines none of its own (plan §11.1).

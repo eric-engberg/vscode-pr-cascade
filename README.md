@@ -37,12 +37,15 @@ Nothing gets installed during development. VS Code runs the extension straight f
 folder in a second window, the **Extension Development Host**.
 
 1. `npm install` once.
-2. Terminal 1: `npm run watch` — esbuild rebuilds `dist/extension.js` on every save.
-3. Press **F5** ("Run Extension"). A second VS Code window opens with the extension loaded.
-   The launch config also opens `../fixture-repo`; until a later PR adds `npm run fixture`
-   to create it, VS Code treats the missing path as a new file and shows an empty editor
-   tab named `fixture-repo` instead of a folder — close it.
-4. Edit code → in the dev-host window run **Developer: Reload Window** to pick up the rebuild.
+2. `npm run fixture` once (and again whenever you want a clean slate): builds a throwaway
+   three-layer stack at `../fixture-repo/repo`, with its bare origin beside it at
+   `../fixture-repo/origin.git` so `origin/main` exists. That sibling folder is the only
+   thing this project writes outside its own directory.
+3. Terminal 1: `npm run watch` — esbuild rebuilds `dist/extension.js` on every save.
+4. Press **F5** ("Run Extension"). A second VS Code window opens with the extension loaded
+   and `../fixture-repo/repo` open. Its Source Control side bar has a **Stack** view listing
+   the three branches, top layer first.
+5. Edit code → in the dev-host window run **Developer: Reload Window** to pick up the rebuild.
    The extension's own log is in that window's Output panel under "PR Cascade".
 
 ## Tests
@@ -50,7 +53,7 @@ folder in a second window, the **Extension Development Host**.
 | Command | What it runs |
 |---|---|
 | `npm test` | typecheck + lint + unit + git tests — run this before every push |
-| `npm run typecheck` | `tsc --noEmit` over `src/` and `test/` |
+| `npm run typecheck` | `tsc --noEmit` over `src/`, `test/` and `scripts/` |
 | `npm run lint` | ESLint, including the rule that `src/core` never imports `vscode` |
 | `npm run test:unit` | Vitest, `test/unit` — pure logic, no git, no VS Code |
 | `npm run test:git` | Vitest, `test/git` — real `git` in throwaway temp repos |
@@ -66,7 +69,8 @@ CI (`.github/workflows/ci.yml`) runs `npm test` and `npm run test:ext` on Linux 
 ```
 src/extension.ts     entry point — wires core to VS Code
 src/core/            pure logic + git runner; no VS Code imports (enforced by lint)
-src/vscode/          adapters: tree view, diff content provider, commands, config
+src/vscode/          adapters: config (settings → plain values) and the Stack tree view;
+                     later milestones add the diff content provider and commands
 test/unit, test/git  Vitest (see vitest.config.mts)
 test/helpers/        the fake git runner and the fixture builder (a real throwaway stack)
 test/ext             Mocha inside VS Code (see .vscode-test.mjs)

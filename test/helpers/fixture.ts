@@ -3,10 +3,10 @@
  * branches: a TypeScript port of plan Appendix A — one commit on trunk, a bare origin, then
  * one branch per layer, each committing one distinct file (`a`, `b`, `c`, ...).
  *
- * Layer: test helper (plan §9.1 layer 2, §9.3). Hermetic on its own: the git environment
- * is built into `git()` below, not into the test runner, so PR 6's `scripts/fixture.ts` can
- * use it outside Vitest. Depends on: Node built-ins only, nothing under src/. Depended on
- * by: test/git/stack.git.test.ts; `scripts/fixture.ts` (PR 6). Plan: §9.3, Appendix A.
+ * Layer: test helper (plan §9.1 layer 2, §9.3); hermetic on its own — the git environment
+ * is built into `git()`, not the test runner — so it works outside Vitest too. Depends on:
+ * Node built-ins only, nothing under src/. Depended on by: test/git/stack.git.test.ts,
+ * .vscode-test.mjs (its compiled copy under out/), scripts/fixture.ts. Plan: §9.3, Appendix A.
  */
 
 // see primer §1 (import / export) and §28 (the Sync variants of Node's functions): they
@@ -29,6 +29,14 @@ export interface FixtureOptions {
   layers?: string[];
   /** Create a bare `origin` and fetch it, so `origin/<trunk>` and `origin/HEAD` exist. Default true; false for a repository with no remote (E25). */
   remote?: boolean;
+  /**
+   * Where to build. The repository goes in `<directory>/repo` and its origin in
+   * `<directory>/origin.git`; `cleanup()` removes the whole directory. Default: a fresh
+   * temporary directory, which is what every test wants. `npm run fixture`
+   * (scripts/fixture.ts) names `../fixture-repo` here so the result is somewhere F5 can
+   * open it.
+   */
+  directory?: string;
 }
 
 /**
@@ -90,8 +98,16 @@ export function buildStack(options: FixtureOptions = {}): Fixture {
   // (`origin.git`) side by side, the way Appendix A's `../origin.git` does, and cleanup
   // removes it whole. `realpathSync` turns macOS's `/var/folders/...` into
   // `/private/var/folders/...`.
-  const temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-cascade-fixture-'));
-  const scratchDir = fs.realpathSync(temporaryDir);
+  let scratchDir: string;
+  if (options.directory === undefined) {
+    const temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-cascade-fixture-'));
+    scratchDir = fs.realpathSync(temporaryDir);
+  } else {
+    // `recursive` creates missing parents and is a no-op if the directory exists — the
+    // caller (scripts/fixture.ts) is responsible for it being empty.
+    fs.mkdirSync(options.directory, { recursive: true });
+    scratchDir = fs.realpathSync(options.directory);
+  }
   const repoDir = path.join(scratchDir, 'repo');
   fs.mkdirSync(repoDir);
   const fixture = new StackFixture(scratchDir, repoDir, trunk, layers, hasRemote);

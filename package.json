@@ -34,7 +34,54 @@
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
-  "contributes": {},
+  "contributes": {
+    "views": {
+      "scm": [
+        {
+          "id": "prCascade",
+          "name": "Stack",
+          "icon": "$(layers)"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "prCascade.refresh",
+        "title": "Refresh Stack",
+        "category": "PR Cascade",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "prCascade.refresh",
+          "when": "view == prCascade",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "PR Cascade",
+      "properties": {
+        "prCascade.trunk": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "The ref the stack is measured against, e.g. `main` or `origin/main`. Leave empty to auto-detect: the remote's default branch (`origin/HEAD`), then `origin/main`, `origin/master`, `main`, `master`. A value that does not exist in the repository shows \"No trunk found\" rather than falling back."
+        },
+        "prCascade.gitPath": {
+          "type": "string",
+          "default": "git",
+          "markdownDescription": "The git executable to run. `git` means whatever is first on PATH; set a full path when git lives somewhere unusual."
+        },
+        "prCascade.remote": {
+          "type": "string",
+          "default": "origin",
+          "markdownDescription": "The remote whose default branch is consulted first when auto-detecting the trunk. Change it if you work on a fork and keep the original repository as `upstream`."
+        }
+      }
+    }
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
@@ -47,7 +94,8 @@
     "analyze": "node esbuild.mjs --analyze",
     "vscode:prepublish": "npm run build",
     "package": "vsce package",
-    "depcheck": "node scripts/depcheck.mjs"
+    "depcheck": "node scripts/depcheck.mjs",
+    "fixture": "esbuild scripts/fixture.ts --bundle --platform=node --format=cjs --log-level=warning --outfile=out/scripts/fixture.js && node out/scripts/fixture.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",

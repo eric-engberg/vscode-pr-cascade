@@ -123,7 +123,7 @@ export interface RepoState {
   root: string;
   /** The ref the stack is measured against (`origin/main`, `main`), or null when none was found (E4). */
   trunk: string | null;
-  /** The branch HEAD is on, or null when HEAD is detached (E3). */
+  /** The branch HEAD is on; null when HEAD is detached (E3), or when no trunk was found and the stack was not computed (E4, `trunk` also null). */
   head: string | null;
   /** Bottom to top: the first element sits directly on trunk. Empty when HEAD is on trunk (E5). */
   layers: StackLayer[];
