@@ -18,10 +18,8 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    // The scaffold PR ships no unit or git tests yet (the first real ones arrive with
-    // src/core/git.ts). Without this, `vitest run test/unit` would fail on "no test files".
-    // Remove it once both folders have tests, so an accidentally empty run fails loudly.
-    passWithNoTests: true,
+    // No `passWithNoTests`: both folders have tests now, so a run that finds none (a typo
+    // in a path, a misnamed file) fails loudly instead of reporting success.
     projects: [
       { test: { name: 'unit', include: ['test/unit/**/*.test.ts'] } },
       { test: { name: 'git', include: ['test/git/**/*.test.ts'] } },

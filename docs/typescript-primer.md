@@ -106,6 +106,11 @@ but `output.appendLine(...)` still changes the channel.
 No type is written here because the compiler already knows what `createOutputChannel`
 returns (`vscode.OutputChannel`). Hover over `output` in VS Code to see it.
 
+`let` also comes in a form with a type but no value yet — `let scratchDir: string;` at the
+top of `test/git/git.git.test.ts`. It is for a value that exists only once some setup has
+run: `beforeAll` assigns it, once, before any test reads it. The type has to be written
+out, because there is no value for the compiler to infer it from.
+
 ## 5. Arrow functions
 
 *First seen in `test/ext/activate.test.ts`.*
@@ -122,8 +127,13 @@ label and "a function to run", and the arrow function is that function. When the
 single expression the braces may be dropped: `(entry) => entry.name` returns `entry.name`.
 
 There is one real difference from `function name() {}`: an arrow function has no `this` of
-its own. We do not rely on `this` in this codebase, so treat the two forms as interchangeable
-and use arrows for callbacks, `function` for anything exported.
+its own — it keeps the `this` of the code it is written in — while a `function` gets a
+`this` of its own (usually nothing useful). Until §13 nothing here uses `this`, so up to
+that point the two forms are interchangeable. From `RealGitRunner.run` on they are not:
+the callbacks handed to `new Promise` and to `execFile` (§15) read `this.gitPath`, which
+works only because they are arrows; written as `function () {}` they would find
+`this.gitPath` undefined. The rule in this codebase: arrows for callbacks, `function` for
+anything exported.
 
 ## 6. async / await
 
@@ -193,3 +203,334 @@ TypeScript — it is the null-pointer bug caught at compile time.
 the compiler so; from that line on, `extension` is known to be an `Extension`. An `if
 (extension === undefined) { return; }` guard narrows the same way. Both are ordinary code —
 the compiler simply follows the control flow.
+
+## 9. interface
+
+*First seen in `src/core/model.ts`.*
+
+```ts
+export interface GitRunner {
+  run(args: string[], cwd: string): Promise<string>;
+  tryRun(args: string[], cwd: string): Promise<string | null>;
+}
+```
+
+An `interface` describes a **shape**: "anything called a `GitRunner` has these two methods,
+with these parameters and results". It contains no code and produces nothing at run time —
+after compilation it is simply gone. Its value is that a function can ask for
+`git: GitRunner` and accept *anything* with that shape: the real runner in production, a
+fake that answers from canned strings in tests. Neither has to know the other exists.
+
+An interface can describe data fields as well as methods (`GitFailure` in `core/git.ts` is
+all fields: `exitCode: number | null;`), and a plain object literal with those fields
+satisfies it — no `new`, no class needed: `new GitError({ gitPath: 'git', args: [...], ... })`.
+
+Two small things that appear alongside it:
+
+- `string[]` — "an array of strings". Any type followed by `[]` is an array of that type.
+  Arrays come with methods: `failure.args.join(' ')` (in `core/git.ts`) glues the elements
+  into one string with a space between each — `['rev-parse', 'HEAD']` becomes
+  `'rev-parse HEAD'` — and `this.calls.push(...)` (in the fake runner) appends one element
+  at the end. Those are the two array *instance* methods used so far; `Array.from(...)`,
+  which builds an array from a Map's keys, is explained with `Map` in §19. The other Array
+  methods get a section of their own when PR 3 starts using them.
+- `import type { GitRunner } from './model'` (in `core/git.ts` and `test/helpers/fakeGit.ts`)
+  — the `type` keyword says "I only need this name for type-checking". Because interfaces
+  vanish at compile time, so does the import; there is nothing for esbuild to bundle. A
+  plain `import { GitRunner }` would also work; `import type` states the intent.
+
+## 10. Union types
+
+*First seen in `src/core/model.ts`.*
+
+```ts
+tryRun(args: string[], cwd: string): Promise<string | null>;
+```
+
+The `|` reads "or": the result is a `string`, or `null`. Where a shell script signals "no
+answer" with an empty string and hopes every caller remembers, TypeScript lets the type say
+the answer may be absent — and then refuses to let a caller use it as a string until it has
+checked (§8 narrowing): `if (root === null) { ... }`.
+
+JavaScript has two "nothing" values, for historical reasons. The convention in this
+codebase: **`null` is a deliberate answer** we return ("git said no"); **`undefined` is what
+you get when something was never set** — an optional field that was left out (§11), a
+`Map` lookup that found nothing (§19). Other unions you will meet here: `number | null`
+(an exit code, or none), `string | Error` (the fake runner's canned values).
+
+Two more things a union can do, both in `core/git.ts` (`StartFailure`):
+
+```ts
+export type StartFailure = 'not-found' | 'not-executable' | 'unusable-directory' | null;
+```
+
+- The members can be **exact strings**, not only kinds of value. This union means "one of
+  these three spellings, or `null`": a typo such as `'notfound'` is a compile error, and
+  `failure.startFailure === 'not-found'` is how code branches on it. It is the type-level
+  version of a shell `case` over fixed words. PR 5's `FileStatus` (`'A' | 'M' | 'D' | ...`)
+  works the same way.
+- `type Name = ...` gives a type a **name**, so it is written once and used by name
+  (`startFailure: StartFailure` in the interface, in the class, and as a function's return
+  type). Like `interface` (§9), a `type` produces nothing at run time. The difference:
+  an `interface` describes an object's shape; `type` can name *any* type, a union included.
+
+## 11. Optional fields
+
+*First seen in `src/core/git.ts` (`GitFailure`).*
+
+```ts
+export interface GitFailure {
+  stderr: string;
+  detail?: string;
+}
+```
+
+The `?` after a name means the field **may be left out entirely** when the object is built.
+Reading it gives `string | undefined`, so code that uses it checks first:
+`if (failure.detail !== undefined) { ... }`. This is different from writing
+`detail: string | undefined` without the `?`, which would *require* the key to be present
+(even if set to `undefined`). Use `?` for a value that only sometimes exists.
+
+The class `GitError` holds the same value as `readonly detail: string | undefined` — the
+form *without* `?` — on purpose: a class field is always present on the object, so the
+honest description is "a string, or `undefined` when the failure had no detail", not "may
+be left out".
+
+## 12. Template strings
+
+*First seen in `src/core/git.ts` (`describeFailure`).*
+
+```ts
+return `git not found at ${failure.gitPath} (while running: ${command})`;
+```
+
+A string in **backticks** may contain `${...}` holes, and whatever expression is inside a
+hole is evaluated and inserted — like `"$var"` in shell, except any expression is allowed,
+not just a variable name. Template strings may also span several lines. Ordinary
+single-quoted strings have no holes; this codebase uses them everywhere a string is fixed.
+
+## 13. class, extends and constructor
+
+*First seen in `src/core/git.ts` (`GitError`, `RealGitRunner`).*
+
+```ts
+export class GitError extends Error implements GitFailure {
+  readonly exitCode: number | null;
+
+  constructor(failure: GitFailure) {
+    super(describeFailure(failure));
+    this.name = 'GitError';
+    this.exitCode = failure.exitCode;
+  }
+}
+
+const error = new GitError({ ... });
+```
+
+A **class** is a blueprint for objects that carry both data (**fields**) and behaviour
+(**methods**). `new GitError(...)` creates one object from the blueprint and runs its
+`constructor` with the arguments given. Inside the class, `this` is the object being built
+or used. An interface (§9) describes only a shape; a class also brings the code — use a
+class when there is something to *do* or *remember*, an interface when a shape is enough.
+
+- `extends Error` — this class **inherits** from the built-in `Error`. A `GitError`
+  therefore *is* an `Error`: it can be thrown and caught, `instanceof Error` is true, and it
+  gets `.message` and a stack trace for free. `super(...)` calls the parent's constructor
+  (here: `Error`'s, which takes the message) and must run before `this` is touched.
+- `implements GitRunner` (`RealGitRunner`, `FakeGitRunner`) — a promise to the compiler that
+  the class has the interface's shape; a missing or mismatched method is a compile error.
+  `extends` inherits code; `implements` only checks a shape. The promise covers fields as
+  well as methods, and a class may make it while also extending something: `GitError
+  extends Error implements GitFailure` inherits `Error`'s code *and* is held to
+  `GitFailure`'s fields, so a field added to the interface and forgotten in the class is a
+  compile error rather than an error object that silently lacks it.
+- A **method** is a function attached to the object: `run(args: string[], cwd: string):
+  Promise<string> { ... }` inside the class, `git.run(...)` outside.
+- `private readonly gitPath: string;` — `private` means only code inside the class can
+  read it. Callers see the public surface (the methods) and nothing else.
+- `constructor(gitPath: string = 'git')` — a **default parameter**: `new RealGitRunner()`
+  is the same as `new RealGitRunner('git')`.
+- `readonly calls: GitCall[] = [];` (in the fake) — a field with an initial value, set
+  when the object is created; no constructor line needed.
+
+## 14. readonly
+
+*First seen in `src/core/git.ts` (`GitError`).*
+
+```ts
+readonly exitCode: number | null;
+```
+
+A `readonly` field can be assigned only where the object is created — in the constructor or
+in its initializer — and `error.exitCode = 1` anywhere later is a compile error. It is
+`const` (§4) for fields, and like `const` it is a compile-time promise only. Read it as
+"this is a fact about the object, not a knob": a `GitError` describes one failure, and
+nothing should be able to edit that description afterwards.
+
+## 15. new Promise
+
+*First seen in `src/core/git.ts` (`RealGitRunner.run`).*
+
+```ts
+return new Promise((resolve, reject) => {
+  execFile(this.gitPath, args, options, (error, stdout, stderr) => {
+    if (error === null) {
+      resolve(stdout);
+      return;
+    }
+    reject(new GitError({ ... }));
+  });
+});
+```
+
+§7 said every `async` function returns a Promise. Here a Promise is built **by hand**,
+because the thing being wrapped — Node's `execFile` — is an older-style API that reports
+its result through a **callback**: a function you hand in, which Node calls later with
+`(error, stdout, stderr)`. `new Promise` takes a function and gives it two functions of its
+own: call `resolve(value)` when the work is done, or `reject(error)` when it failed. The
+Promise settles exactly once, and whoever `await`s it gets the value or has the error
+thrown at them. This is the standard adapter between callback APIs and `await`, and
+`RealGitRunner.run` is the only place in the codebase that needs it.
+
+Three details: `run` is not marked `async`, because it already returns a Promise
+explicitly; the `return;` after `resolve(stdout)` matters, because the callback would
+otherwise continue into the failure branch; and both callbacks are arrow functions because
+they read `this.gitPath` — an arrow keeps the method's `this`, a `function` would not (§5).
+
+## 16. Object literals: shorthand and spread
+
+*First seen in `src/core/git.ts` (`RealGitRunner.run`); shorthand keys also in
+`test/helpers/fakeGit.ts`.*
+
+```ts
+const options: ExecFileOptionsWithStringEncoding = {
+  cwd,
+  env: { ...process.env, LC_ALL: 'C', GIT_OPTIONAL_LOCKS: '0' },
+  maxBuffer: MAX_OUTPUT_BYTES,
+};
+```
+
+`{ key: value, ... }` builds an object on the spot — an **object literal** (§9 showed one
+satisfying an interface). The `: ExecFileOptionsWithStringEncoding` after the name is an
+ordinary type annotation (§3), and on an object literal it is what turns an unknown key — a
+misspelled `maxBufer`, say — into a compile error instead of an option Node would silently
+ignore. This one uses all three ways of writing a key:
+
+- `maxBuffer: MAX_OUTPUT_BYTES` — the ordinary form: key, colon, value.
+- `cwd` on its own is **shorthand** for `cwd: cwd`. When a variable already has the name
+  the key should have, writing it once does both: the key is `cwd` and the value is
+  whatever the variable `cwd` holds — here, `run`'s parameter. `this.calls.push({ args, cwd })`
+  in the fake runner and `new GitError({ gitPath: this.gitPath, args, cwd, exitCode, ... })`
+  are the same thing: every bare name is a key *and* the variable of that name.
+- `...process.env` inside `{ }` is **spread**: it copies every key of `process.env` into the
+  new object being built; the keys written after it are added, or **override** a copied
+  key with the same name (later wins). The original object is untouched. It is exactly the
+  shell idiom `LC_ALL=C GIT_OPTIONAL_LOCKS=0 git ...`: the child gets the parent's whole
+  environment plus these two.
+
+## 17. Narrowing with typeof
+
+*First seen in `src/core/git.ts` (`RealGitRunner.run`).*
+
+```ts
+let exitCode: number | null = null;
+if (typeof error.code === 'number') {
+  exitCode = error.code;
+}
+```
+
+Node declares `error.code` as `string | number | null | undefined` — a union (§10) of
+everything it might put there. `typeof x` evaluates to a string naming the value's
+JavaScript type (`'string'`, `'number'`, `'undefined'`, ...), and inside the `if` the
+compiler knows `error.code` is a `number`, so the assignment is allowed. Comparing with
+`=== 'ENOENT'` or `=== 'EACCES'` (in `classifyStartFailure`) needs no narrowing: comparison
+is always permitted, and the result is a plain boolean. `let exitCode: number | null = null`
+is a `let` (§4) with a written type: it starts as `null` and may become a number, and the
+type says so.
+
+## 18. try / catch and unknown
+
+*First seen in `src/core/git.ts` (`RealGitRunner.tryRun`).*
+
+```ts
+try {
+  return await this.run(args, cwd);
+} catch (error) {
+  if (error instanceof GitError) {
+    const gitSaidNo = error.exitCode !== null;
+    const directoryUnusable = error.startFailure === 'unusable-directory';
+    if (gitSaidNo || directoryUnusable) {
+      return null;
+    }
+  }
+  throw error;
+}
+```
+
+`try` runs its block; if anything inside throws — including a rejected Promise that was
+`await`ed (§7) — execution jumps to `catch` with the thrown value. What is not handled
+there can be thrown again (`throw error`) for the caller to deal with.
+
+The caught value is typed **`unknown`** under strict mode: JavaScript lets code throw
+anything (a string, a number, an object), so the compiler refuses to let you read
+`error.exitCode` until you have proved what `error` is. `error instanceof GitError` does
+that: it is true only for objects created by `new GitError(...)` (or a subclass), and inside
+the `if` the compiler treats `error` as a `GitError`. `unknown` is the honest cousin of
+`any`: `any` switches checking off, `unknown` demands proof. This codebase never uses `any`
+(plan §11.1).
+
+`&&` is "and" and `||` is "or" (`gitSaidNo || directoryUnusable`: true when either is). Both
+stop early — `a && b` never looks at `b` when `a` is false — which is why a check such as
+`error instanceof GitError && error.exitCode !== null` is safe to write on one line: the
+field is only read once the `instanceof` has proved it exists.
+
+## 19. Map
+
+*First seen in `test/helpers/fakeGit.ts`.*
+
+```ts
+private readonly responses: Map<string, string | Error>;
+
+const git = new FakeGitRunner(new Map([['--version', 'git version 2.50.1\n']]));
+const response = this.responses.get(key);   // string | Error | undefined
+```
+
+A `Map` is a key → value store. `new Map([[key, value], ...])` builds one from a list of
+pairs; `.get(key)` returns the value or `undefined` when the key is absent; `.has(key)`,
+`.set(key, value)` and `.keys()` do what they say, and `Array.from(map.keys())` turns the
+keys into an ordinary array. Compared with a plain object used as a dictionary, a `Map`
+takes any key type, iterates in insertion order, and has no built-in names (`toString`,
+`constructor`) that could collide with a key.
+
+The angle brackets are **type parameters**: `Map<string, string | Error>` says this
+particular map's keys are strings and its values are strings or Errors, so the compiler
+knows `.get` returns `string | Error | undefined`. `Promise<string>` (§7) is the same idea:
+"a Promise of a string". This codebase only *uses* generic built-in types like these; it
+does not define generic types of its own (plan §11.1).
+
+Usually the compiler works the parameters out from the pairs you pass, and
+`new Map([['--version', 'git version 2.50.1\n']])` needs nothing more. When the pairs mix
+value types it guesses from the first one and then rejects the second, so the test that
+cans one string and one Error writes them out: `new Map<string, string | Error>([...])`
+(`test/unit/git.test.ts`, "call recording").
+
+## 20. Regular expression literals
+
+*First seen in `test/git/git.git.test.ts`.*
+
+```ts
+expect(output).toMatch(/^git version \d+\.\d+/);
+expect(error.message).toMatch(/^git not found at \/no\/such\/dir\/git/);
+```
+
+Text between two slashes is a **regular expression** — a pattern, in the same language as
+`grep -E`. `^` anchors the match to the start of the string; `\d+` is one or more digits;
+`\.` is a literal dot (an unescaped `.` matches any character); and because `/` ends the
+pattern, a slash inside it is written `\/`. `expect(text).toMatch(pattern)` passes when the
+text contains a match, and `.rejects.toThrow(pattern)` checks a rejection's message the same
+way.
+
+The tests reach for a pattern only where the exact text is not ours to promise (Apple's git
+prints `git version 2.50.1 (Apple Git-155)`) or where a prefix is the whole point (an E17
+message must *start* with the path). Everywhere else they compare whole strings with
+`toBe`, which fails with a clearer diff.

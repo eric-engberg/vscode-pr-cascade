@@ -64,10 +64,11 @@ CI (`.github/workflows/ci.yml`) runs `npm test` and `npm run test:ext` on Linux 
 ## Layout
 
 ```
-src/extension.ts     entry point — wires core to VS Code (this is the only file so far)
+src/extension.ts     entry point — wires core to VS Code
 src/core/            pure logic + git runner; no VS Code imports (enforced by lint)
 src/vscode/          adapters: tree view, diff content provider, commands, config
 test/unit, test/git  Vitest (see vitest.config.mts)
+test/helpers/        the fake git runner (and, later, the fixture builder)
 test/ext             Mocha inside VS Code (see .vscode-test.mjs)
 docs/                reading order and the TypeScript primer
 scripts/             developer tooling (never shipped)
