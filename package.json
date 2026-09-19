@@ -1,0 +1,69 @@
+{
+  "name": "vscode-pr-cascade",
+  "displayName": "PR Cascade",
+  "description": "Stacked pull requests in VS Code — see the stack, click a layer for its diff, create and restack PRs on GitHub and GitLab",
+  "version": "0.0.1",
+  "publisher": "local",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eric-engberg/vscode-pr-cascade"
+  },
+  "engines": {
+    "vscode": "^1.85.0",
+    "node": ">=22"
+  },
+  "categories": [
+    "SCM Providers"
+  ],
+  "keywords": [
+    "stacked pull requests",
+    "stacked PRs",
+    "PR stack",
+    "stack",
+    "stacked diffs",
+    "GitHub stacks",
+    "GitLab stacked merge requests",
+    "git-spice",
+    "gh stack",
+    "restack",
+    "pull request",
+    "merge request"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {},
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test:unit": "vitest run test/unit",
+    "test:git": "vitest run test/git",
+    "test:ext": "npm run build && rm -rf out && tsc -p tsconfig.ext.json && vscode-test",
+    "test": "npm run typecheck && npm run lint && npm run test:unit && npm run test:git",
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "analyze": "node esbuild.mjs --analyze",
+    "vscode:prepublish": "npm run build",
+    "package": "vsce package",
+    "depcheck": "node scripts/depcheck.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.0.0",
+    "@types/vscode": "1.85.0",
+    "@vitest/coverage-v8": "^5.0.1",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.11.0",
+    "globals": "^16.0.0",
+    "mocha": "^11.0.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^5.0.1"
+  }
+}

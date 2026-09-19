@@ -1,0 +1,65 @@
+# ci.yml — GitHub Actions: run the full test suite on every pull request and on main.
+#
+# Layer: tooling. Mirrors what a developer runs locally: `npm test` (typecheck, lint, unit,
+# git tests) and then the extension-host tests, on both Linux and macOS. VS Code needs a
+# display; on Linux `xvfb-run` fakes one. The VS Code download is cached so it is not
+# fetched on every run. Plan: §9.5.
+name: CI
+
+# Pull requests cover every stacked branch; the push trigger is for main only, so a push to
+# a PR branch runs the suite once (the pull_request event), not twice.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      # `npm ci` installs exactly what package-lock.json says, unlike `npm install`.
+      # `--ignore-scripts` stops every package's install-time scripts from running: a
+      # compromised dependency's preinstall hook is the classic supply-chain attack, and
+      # plan §11.3 already makes "no install scripts" a floor for anything we depend on.
+      # Nothing here needs one — esbuild's platform binary arrives as an optional
+      # dependency, not through a script (verified: build, every suite and `vsce package`
+      # pass with the flag).
+      - run: npm ci --ignore-scripts
+
+      - run: npm test
+
+      # The extension-host tests download VS Code (~300 MB) into .vscode-test/; keep it
+      # between runs. .vscode-test.mjs asks for 'stable', so the cache key must be the
+      # version 'stable' means today (from the same update API test-cli asks): a key that
+      # never changed would restore an old VS Code on every run and download the new one
+      # anyway, because actions/cache saves only when the key was a miss.
+      - name: Resolve the current VS Code stable version
+        id: vscode
+        # `-L` follows redirects; `--proto '=https'` refuses to follow one that leaves HTTPS,
+        # so a hijacked redirect cannot hand us a version string over plain HTTP.
+        run: echo "version=$(curl -fsSL --proto '=https' --tlsv1.2 https://update.code.visualstudio.com/api/releases/stable | jq -r '.[0]')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          # Only the download itself, not user-data/ (the launched VS Code's profile).
+          path: .vscode-test/vscode-*
+          key: vscode-test-${{ runner.os }}-${{ steps.vscode.outputs.version }}
+
+      - name: Extension-host tests (Linux, under a virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:ext
+
+      - name: Extension-host tests (macOS)
+        if: runner.os == 'macOS'
+        run: npm run test:ext

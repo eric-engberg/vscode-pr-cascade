@@ -1,0 +1,23 @@
+// tasks.json — the two npm tasks VS Code runs for the dev loop (plan §11.2).
+// Layer: tooling. "npm: build" is launch.json's preLaunchTask, so F5 always starts from a
+// fresh dist/extension.js; "npm: watch" is the rebuild-on-save loop. The empty
+// problemMatcher arrays are explained in the scaffold PR body (deviation 8).
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "npm: build",
+      "type": "npm",
+      "script": "build",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "npm: watch",
+      "type": "npm",
+      "script": "watch",
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}
