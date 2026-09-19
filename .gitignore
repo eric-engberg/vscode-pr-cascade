@@ -1,0 +1,17 @@
+pr-cascade-plan.md
+
+# npm
+node_modules/
+npm-debug.log*
+
+# build output
+dist/
+*.vsix
+
+# tests
+.vscode-test/
+coverage/
+
+# editor / OS
+.DS_Store
+*.log
