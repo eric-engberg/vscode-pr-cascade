@@ -110,9 +110,9 @@ function describeFailure(failure: GitFailure): string {
   // stderr from git already ends in a newline; trim so the message is one tidy line.
   const explanation = failure.stderr.trim();
   if (explanation === '') {
-    // Some commands fail silently by design — `rev-parse --verify --quiet` (PR 4) and
-    // `symbolic-ref --quiet` (PR 5) exit 1 and print nothing. Say so, rather than end
-    // the message in a dangling colon.
+    // Some commands fail silently by design — `rev-parse --verify --quiet` and
+    // `symbolic-ref --quiet` (core/trunk.ts, PR 4 onward) exit 1 and print nothing. Say
+    // so, rather than end the message in a dangling colon.
     return `${command} failed with exit code ${failure.exitCode} in ${failure.cwd} (git printed nothing on stderr)`;
   }
   return `${command} failed with exit code ${failure.exitCode} in ${failure.cwd}: ${explanation}`;

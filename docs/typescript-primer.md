@@ -600,9 +600,11 @@ anything else that can be walked in order (a `Set`, a `Map`, the characters of a
 reassigned.
 
 `continue` skips the rest of the body and moves on to the next element; `break` (not used
-here) would leave the loop altogether. An `await` inside the body is ordinary: the loop
-pauses at each git call and resumes when it answers, so the folders are asked one at a
-time, in order.
+here) would leave the loop altogether. A `return` inside the body leaves the loop and the
+whole function at once — `detectTrunk` in `core/trunk.ts` stops at the first candidate
+that exists this way, so `break` is never needed there. An `await` inside the body is
+ordinary: the loop pauses at each git call and resumes when it answers, so the folders are
+asked one at a time, in order.
 
 Two look-alikes to keep apart: the older counted form
 `for (let i = 0; i < list.length; i++)` appears only when the index itself is needed, and
@@ -635,3 +637,39 @@ Strings carry their own methods, called with a dot like a method on any object:
 None of them change the string they are called on — a string, once made, never changes;
 each method returns a new one. That is why the code writes `printedRoot =
 printedRoot.slice(0, -1)` rather than expecting the variable to change in place.
+
+## 24. boolean
+
+*First seen in `src/core/trunk.ts` (`refExists`).*
+
+```ts
+async function refExists(git: GitRunner, root: string, ref: string): Promise<boolean> {
+  const output = await git.tryRun(['rev-parse', '--verify', '--quiet', '--end-of-options', `${ref}^{commit}`], root);
+  return output !== null;
+}
+
+const configuredExists = await refExists(git, root, options.configured);
+if (configuredExists) {
+  return options.configured;
+}
+```
+
+`boolean` is the type with exactly two values, `true` and `false`. Every comparison —
+`===`, `!==`, `<` and the rest — *is* an expression of that type, so `return output !==
+null;` hands back the answer to "did git print something?" directly; there is no need for
+an `if` that returns `true` in one branch and `false` in the other. `Promise<boolean>` (§7)
+is a yes-or-no, eventually. A variable holding one is named so the `if` reads as a sentence:
+`configuredExists`, `targetExists`, `gitSaidNo` (§18).
+
+An `if` takes any boolean, so a variable that *is* one stands alone: `if (configuredExists)`.
+Compare that with the explicit checks elsewhere in the codebase — `if (output === null)`,
+`if (failure.detail !== undefined)`. Those values are not booleans, and JavaScript would
+still accept them in an `if`: it silently treats `0`, `''`, `null` and `undefined` as
+false and everything else as true (the "truthy / falsy" rules). That conversion hides
+mistakes — an empty string that was a real answer, a `0` that was a real count — so this
+codebase writes the comparison out whenever the value is not already a boolean.
+
+For "not", `trunk.ts` writes `if (targetExists === false)`, matching its `=== null`
+checks. JavaScript's shorthand is a prefix `!` (`!targetExists`, read "not
+targetExists"); it means the same and appears in later PRs where a spelled-out comparison
+would only add noise.

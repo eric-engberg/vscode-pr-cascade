@@ -22,7 +22,19 @@ export default defineConfig({
     // in a path, a misnamed file) fails loudly instead of reporting success.
     projects: [
       { test: { name: 'unit', include: ['test/unit/**/*.test.ts'] } },
-      { test: { name: 'git', include: ['test/git/**/*.test.ts'] } },
+      {
+        test: {
+          name: 'git',
+          include: ['test/git/**/*.test.ts'],
+          // Each git test file builds its repositories once, in `beforeAll`, and every git
+          // command there is a separate process. trunk.git.test.ts runs about forty of
+          // them (six repositories, four bare clones): around 2 s on an idle Mac, but it
+          // went past Vitest's 10 s default once while another build was running — which
+          // skips every test in the file. Sixty seconds is a ceiling, not a budget: a
+          // hook that reaches it is broken, not slow.
+          hookTimeout: 60_000,
+        },
+      },
     ],
     // `vitest run --coverage` reports which lines of the core logic the tests reached.
     // Only src/core is measured: it is the pure part with a ≥ 95 % target (plan §9.1).

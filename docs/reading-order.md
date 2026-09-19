@@ -58,37 +58,65 @@ the repository root; its §13 is the running log of decisions and deviations mad
     inline with `git init`, a folder nested in it, a symlink to it, a linked worktree whose
     `.git` is a file (E19), a plain folder beside it, and a second repository whose name
     ends in a space. The fixture builder proper arrives in PR 5.
-11. **`test/ext/activate.test.ts`** — two tests: a real VS Code is launched, the extension is
+11. **`src/core/trunk.ts`** — which branch is "trunk", the base every stack is measured
+    against. Read the doc comment on `detectTrunk` for the four-step order (plan §5) and
+    the two decisions in it: a configured `prCascade.trunk` that does not exist gives
+    `null` rather than falling back to a guess (E4), and the remote's `origin/HEAD`
+    pointer is verified before it is trusted, because a remote that renamed `master` to
+    `main` can leave it dangling at a branch that `fetch --prune` has removed (git before
+    2.48 does exactly that; the plan's floor is 2.38). Then the two small helpers:
+    `refExists` (what `rev-parse --verify --quiet` means, and why the ref goes in after
+    `--end-of-options` and with `^{commit}` on the end) and `remoteDefaultBranch` (what
+    `symbolic-ref` reads, and why `trim()` is safe on a ref name when it was not on a
+    path). `TrunkOptions` at the top is the two settings, handed in as plain values so
+    this file never touches VS Code.
+12. **`test/unit/trunk.test.ts`** — every step of the order as a specification against the
+    fake, including the exact git commands each path runs and where it stops: configured
+    ref found / missing (E4, no fall-through), `origin/HEAD`, a stale `origin/HEAD`,
+    `origin/main`, `origin/master`, local `main` (E25), local `master`, nothing (E4),
+    `prCascade.remote` other than `origin`, and E17 not hidden.
+13. **`test/git/trunk.git.test.ts`** — the same against real repositories built in
+    `beforeAll`: a clone with `origin/HEAD` (and a second remote, `upstream`), one with the
+    pointer deleted, one whose remote renamed `master` → `main` and whose `origin/HEAD` is
+    left dangling at the pruned branch, a master-only repository, no remote (E25), and a
+    repository whose only branch is `trunk` (E4 — and the case `prCascade.trunk` exists
+    for). Note how each fixture sets, deletes or overwrites `origin/HEAD` explicitly,
+    because git versions differ in what `fetch` does to it.
+14. **`test/ext/activate.test.ts`** — two tests: a real VS Code is launched, the extension is
     found by its id, and it activates. Read it for the shape every later extension-host test
     follows (arrange / act / assert, one idea per test, `describe`/`it` imported from
     `mocha`).
 
 ## The toolchain (read once, then only when something breaks)
 
-12. **`tsconfig.json`** — how `tsc` type-checks `src/` and `test/`. Emits nothing.
-13. **`esbuild.mjs`** — how `src/extension.ts` becomes `dist/extension.js` (build, watch,
+15. **`tsconfig.json`** — how `tsc` type-checks `src/` and `test/`. Emits nothing.
+16. **`esbuild.mjs`** — how `src/extension.ts` becomes `dist/extension.js` (build, watch,
     analyze). The `target`/`external` lines explain the two constraints VS Code imposes.
-14. **`eslint.config.mjs`** — lint rules, including the one that enforces the architecture:
+17. **`eslint.config.mjs`** — lint rules, including the one that enforces the architecture:
     `src/core/**` must not import `vscode`.
-15. **`vitest.config.mts`** — the Node-side runner: `unit` and `git` projects, coverage on
-    `src/core`. (`.mts` = TypeScript as an ES module; the header explains why not `.ts`.)
-16. **`tsconfig.ext.json`** and **`.vscode-test.mjs`** — the extension-host runner: tests are
+18. **`vitest.config.mts`** — the Node-side runner: `unit` and `git` projects, coverage on
+    `src/core`, and why only the `git` project gets a longer `hookTimeout` (every real git
+    command is a separate process; a `beforeAll` that builds six repositories went past the
+    default once, under load). (`.mts` = TypeScript as an ES module; the header explains
+    why not `.ts`.)
+19. **`tsconfig.ext.json`** and **`.vscode-test.mjs`** — the extension-host runner: tests are
     compiled to `out/` and run by Mocha inside a downloaded VS Code.
-17. **`.vscode/launch.json`**, **`.vscode/tasks.json`** — F5 (plan §11.2): build, then open a
+20. **`.vscode/launch.json`**, **`.vscode/tasks.json`** — F5 (plan §11.2): build, then open a
     second VS Code with the extension loaded and `../fixture-repo` open.
-18. **`.github/workflows/ci.yml`** — the same `npm test` and `npm run test:ext`, on Linux and
+21. **`.github/workflows/ci.yml`** — the same `npm test` and `npm run test:ext`, on Linux and
     macOS, on every pull request and on pushes to `main`.
-19. **`scripts/depcheck.mjs`** — prints the dependency card (plan §11.3) that every PR adding
+22. **`scripts/depcheck.mjs`** — prints the dependency card (plan §11.3) that every PR adding
     a runtime library must include. Not used until M5. Plain JavaScript that runs ahead of
     the primer: read it for what it does, not how (primer intro).
-20. **`.vscodeignore`** — what is left out of the `.vsix`; the reason `node_modules` never
+23. **`.vscodeignore`** — what is left out of the `.vsix`; the reason `node_modules` never
     reaches a user.
 
 ## Where the layers live
 
 - `src/core/` — pure logic and the git runner. No VS Code imports. Fully testable under Node.
-  So far: `model.ts` (shared types), `git.ts` (the runner) and `discovery.ts` (workspace
-  folders → repository roots). Next: `trunk.ts`, `stack.ts` (PRs 4–5).
+  So far: `model.ts` (shared types), `git.ts` (the runner), `discovery.ts` (workspace
+  folders → repository roots) and `trunk.ts` (which branch is trunk). Next: `stack.ts`
+  (PR 5).
 - `src/vscode/` — adapters: tree view, content provider, commands, config. Empty until PR 6.
 - `test/unit/` (Vitest, no git), `test/git/` (Vitest, real git in temp repos),
   `test/ext/` (Mocha inside VS Code), `test/helpers/` (the fake git runner; the fixture
