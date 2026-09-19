@@ -31,47 +31,64 @@ the repository root; its §13 is the running log of decisions and deviations mad
    `classifyStartFailure` is then free to blame git with the E17 message "git not found
    at <path>".
 5. **`test/helpers/fakeGit.ts`** — the same interface answered from canned strings. Every
-   unit test of a core module will use it; note that it records every call and fails loudly
-   on a command nobody canned.
+   unit test of a core module uses it; note that it records every call and fails loudly on
+   a command nobody canned. `answerIn` cans an answer for one command *in one directory* —
+   discovery is the one module whose answers depend on where git runs, and its tests are
+   why that method exists.
 6. **`test/unit/git.test.ts`** — the runner contract written as a specification against the
-   fake, plus the `GitError` message rules. Vitest, no git binary needed.
+   fake (including `answerIn`), plus the `GitError` message rules. Vitest, no git binary
+   needed.
 7. **`test/git/git.git.test.ts`** — the real thing: how a real-git test is made hermetic
    (`HOME` pointed at a throwaway directory, `GIT_CONFIG_GLOBAL` at `/dev/null` and
    `GIT_CONFIG_NOSYSTEM=1`, all via `vi.stubEnv` and restored afterwards), `git --version`,
    a non-zero exit, the environment variables observed from inside git, 2 MB of output, a
    missing executable, a directory in place of one, and a working directory that does not
    exist, cannot be entered, or is a file.
-8. **`test/ext/activate.test.ts`** — two tests: a real VS Code is launched, the extension is
-   found by its id, and it activates. Read it for the shape every later extension-host test
-   follows (arrange / act / assert, one idea per test, `describe`/`it` imported from
-   `mocha`).
+8. **`src/core/discovery.ts`** — workspace folders in, repository roots out. Look for *why*
+   git is asked instead of looking for `.git` ourselves (`rev-parse --show-toplevel` walks
+   up from a subfolder, E1, and understands worktrees, E19), why a folder outside any
+   repository is `null` and skipped while a missing git still throws (E17), why only the
+   newline git prints is removed from the path (a directory name may end in a space), and
+   how `normalizeRoot` makes two spellings of one directory compare equal — symlinks, the
+   macOS `/tmp` → `/private/tmp` case, a trailing slash — so the `Set` counts them once (E2).
+9. **`test/unit/discovery.test.ts`** — the rules as a specification against the fake: a
+   nested folder (E1), one entry per repository (E2), skipped folders, workspace order, the
+   trailing-slash, newline-only and realpath-fallback rules, and E17 not hidden.
+10. **`test/git/discovery.git.test.ts`** — the same on a real filesystem: a repository built
+    inline with `git init`, a folder nested in it, a symlink to it, a linked worktree whose
+    `.git` is a file (E19), a plain folder beside it, and a second repository whose name
+    ends in a space. The fixture builder proper arrives in PR 5.
+11. **`test/ext/activate.test.ts`** — two tests: a real VS Code is launched, the extension is
+    found by its id, and it activates. Read it for the shape every later extension-host test
+    follows (arrange / act / assert, one idea per test, `describe`/`it` imported from
+    `mocha`).
 
 ## The toolchain (read once, then only when something breaks)
 
-9. **`tsconfig.json`** — how `tsc` type-checks `src/` and `test/`. Emits nothing.
-10. **`esbuild.mjs`** — how `src/extension.ts` becomes `dist/extension.js` (build, watch,
+12. **`tsconfig.json`** — how `tsc` type-checks `src/` and `test/`. Emits nothing.
+13. **`esbuild.mjs`** — how `src/extension.ts` becomes `dist/extension.js` (build, watch,
     analyze). The `target`/`external` lines explain the two constraints VS Code imposes.
-11. **`eslint.config.mjs`** — lint rules, including the one that enforces the architecture:
+14. **`eslint.config.mjs`** — lint rules, including the one that enforces the architecture:
     `src/core/**` must not import `vscode`.
-12. **`vitest.config.mts`** — the Node-side runner: `unit` and `git` projects, coverage on
+15. **`vitest.config.mts`** — the Node-side runner: `unit` and `git` projects, coverage on
     `src/core`. (`.mts` = TypeScript as an ES module; the header explains why not `.ts`.)
-13. **`tsconfig.ext.json`** and **`.vscode-test.mjs`** — the extension-host runner: tests are
+16. **`tsconfig.ext.json`** and **`.vscode-test.mjs`** — the extension-host runner: tests are
     compiled to `out/` and run by Mocha inside a downloaded VS Code.
-14. **`.vscode/launch.json`**, **`.vscode/tasks.json`** — F5 (plan §11.2): build, then open a
+17. **`.vscode/launch.json`**, **`.vscode/tasks.json`** — F5 (plan §11.2): build, then open a
     second VS Code with the extension loaded and `../fixture-repo` open.
-15. **`.github/workflows/ci.yml`** — the same `npm test` and `npm run test:ext`, on Linux and
+18. **`.github/workflows/ci.yml`** — the same `npm test` and `npm run test:ext`, on Linux and
     macOS, on every pull request and on pushes to `main`.
-16. **`scripts/depcheck.mjs`** — prints the dependency card (plan §11.3) that every PR adding
+19. **`scripts/depcheck.mjs`** — prints the dependency card (plan §11.3) that every PR adding
     a runtime library must include. Not used until M5. Plain JavaScript that runs ahead of
     the primer: read it for what it does, not how (primer intro).
-17. **`.vscodeignore`** — what is left out of the `.vsix`; the reason `node_modules` never
+20. **`.vscodeignore`** — what is left out of the `.vsix`; the reason `node_modules` never
     reaches a user.
 
 ## Where the layers live
 
 - `src/core/` — pure logic and the git runner. No VS Code imports. Fully testable under Node.
-  So far: `model.ts` (shared types) and `git.ts` (the runner). Next: `discovery.ts`,
-  `trunk.ts`, `stack.ts` (PRs 3–5).
+  So far: `model.ts` (shared types), `git.ts` (the runner) and `discovery.ts` (workspace
+  folders → repository roots). Next: `trunk.ts`, `stack.ts` (PRs 4–5).
 - `src/vscode/` — adapters: tree view, content provider, commands, config. Empty until PR 6.
 - `test/unit/` (Vitest, no git), `test/git/` (Vitest, real git in temp repos),
   `test/ext/` (Mocha inside VS Code), `test/helpers/` (the fake git runner; the fixture

@@ -92,6 +92,48 @@ describe('FakeGitRunner', () => {
     });
   });
 
+  describe('answerIn', () => {
+    it('prefers an answer canned for the exact directory over the directory-blind one', async () => {
+      // arrange: everywhere "not a repository", except one folder where git finds a root
+      const git = new FakeGitRunner(
+        new Map([['rev-parse --show-toplevel', new Error('fatal: not a git repository')]]),
+      );
+      git.answerIn('/work/app/src', ['rev-parse', '--show-toplevel'], '/work/app\n');
+
+      // act
+      const inTheFolder = await git.tryRun(['rev-parse', '--show-toplevel'], '/work/app/src');
+      const elsewhere = await git.tryRun(['rev-parse', '--show-toplevel'], '/work/notes');
+
+      // assert
+      expect(inTheFolder).toBe('/work/app\n');
+      expect(elsewhere).toBeNull();
+    });
+
+    it('falls back to the directory-blind answer for a command the directory has no answer to', async () => {
+      // arrange: /repo has its own answer for one command, but not for --version
+      const git = new FakeGitRunner(new Map([['--version', 'git version 2.50.1\n']]));
+      git.answerIn('/repo', ['rev-parse', 'HEAD'], 'abc123\n');
+
+      // act
+      const output = await git.run(['--version'], '/repo');
+
+      // assert
+      expect(output).toBe('git version 2.50.1\n');
+    });
+
+    it('names the directories that have answers of their own when a command is unknown', async () => {
+      // arrange
+      const git = new FakeGitRunner(new Map());
+      git.answerIn('/work/app', ['rev-parse', '--show-toplevel'], '/work/app\n');
+
+      // act
+      const result = git.run(['rev-parse', '--show-toplevel'], '/work/other');
+
+      // assert: the message points at the likely mistake — the right command, wrong folder
+      await expect(result).rejects.toThrow('Directories with answers of their own (answerIn): /work/app');
+    });
+  });
+
   describe('unknown command', () => {
     it('rejects with a message naming the command and cwd so the test fails loudly', async () => {
       // arrange
@@ -113,6 +155,17 @@ describe('FakeGitRunner', () => {
 
       // assert
       await expect(result).rejects.toThrow('Canned commands (args joined by spaces): --version');
+    });
+
+    it('says "(none)" instead of an empty list when nothing at all is canned', async () => {
+      // arrange
+      const git = new FakeGitRunner(new Map());
+
+      // act
+      const result = git.run(['rev-parse', 'HEAD'], '/repo');
+
+      // assert: never "spaces): ." with nothing between the colon and the full stop
+      await expect(result).rejects.toThrow('Canned commands (args joined by spaces): (none)');
     });
 
     it('fails loudly from tryRun too, rather than returning null', async () => {

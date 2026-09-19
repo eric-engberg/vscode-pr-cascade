@@ -24,6 +24,12 @@ export interface GitCall {
  * meaning "git exited non-zero". A test then asserts on what the code under test returned
  * and, through `calls`, on exactly which git commands it ran and in which directory.
  *
+ * That constructor map ignores the directory a command runs in, and for almost every
+ * core module that is right: trunk detection and the stack computation (PRs 4–5) ask all
+ * their questions at one repository root. Discovery (PR 3) is the exception — it runs the
+ * same `rev-parse --show-toplevel` once per workspace folder and needs a different answer
+ * from each — so `answerIn` cans an answer for one command in one specific directory.
+ *
  * Why it fails loudly on an unknown command: a fake that quietly returned '' for anything
  * unexpected would let a test pass while the code ran a command nobody canned — the exact
  * kind of silent drift these tests exist to catch. The thrown message names the command
@@ -40,8 +46,30 @@ export class FakeGitRunner implements GitRunner {
 
   private readonly responses: Map<string, string | Error>;
 
+  /**
+   * Answers that depend on the directory: cwd → (joined args → answer). A Map whose values
+   * are themselves Maps (primer §19, applied twice). Empty until answerIn is called.
+   */
+  private readonly responsesByDirectory: Map<string, Map<string, string | Error>> = new Map();
+
   constructor(responses: Map<string, string | Error>) {
     this.responses = responses;
+  }
+
+  /**
+   * Cans an answer for one command run in one specific directory. It wins over the
+   * constructor map for that command in that directory, and has no effect anywhere else,
+   * so a test can say "in /work/app/src git finds /work/app; in /work/lib it finds
+   * /work/lib; everywhere else, whatever the constructor map says".
+   */
+  answerIn(cwd: string, args: string[], response: string | Error): void {
+    let forDirectory = this.responsesByDirectory.get(cwd);
+    if (forDirectory === undefined) {
+      // No type parameters on this Map: it takes them from forDirectory (primer §21).
+      forDirectory = new Map();
+      this.responsesByDirectory.set(cwd, forDirectory);
+    }
+    forDirectory.set(args.join(' '), response);
   }
 
   // see primer §6 (async / await)
@@ -68,13 +96,31 @@ export class FakeGitRunner implements GitRunner {
     // see primer §16 (object literals: shorthand keys)
     this.calls.push({ args, cwd });
     const key = args.join(' ');
-    const response = this.responses.get(key);
+    // An answer canned for this exact directory wins; otherwise the directory-blind
+    // constructor map decides.
+    let response: string | Error | undefined = undefined;
+    const forDirectory = this.responsesByDirectory.get(cwd);
+    if (forDirectory !== undefined) {
+      response = forDirectory.get(key);
+    }
     if (response === undefined) {
-      const cannedKeys = Array.from(this.responses.keys()).join(', ');
-      throw new Error(
+      response = this.responses.get(key);
+    }
+    if (response === undefined) {
+      // "(none)" rather than an empty list, so the message never reads "...spaces): ." —
+      // the shape a discovery test produces when its fake was set up with answerIn only.
+      let cannedKeys = '(none)';
+      if (this.responses.size > 0) {
+        cannedKeys = Array.from(this.responses.keys()).join(', ');
+      }
+      let message =
         `FakeGitRunner: no canned output for "git ${key}" (cwd ${cwd}). ` +
-          `Canned commands (args joined by spaces): ${cannedKeys}`,
-      );
+        `Canned commands (args joined by spaces): ${cannedKeys}`;
+      if (this.responsesByDirectory.size > 0) {
+        const directories = Array.from(this.responsesByDirectory.keys()).join(', ');
+        message = message + `. Directories with answers of their own (answerIn): ${directories}`;
+      }
+      throw new Error(message);
     }
     return response;
   }

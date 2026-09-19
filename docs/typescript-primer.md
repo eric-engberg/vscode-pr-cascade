@@ -231,9 +231,8 @@ Two small things that appear alongside it:
   Arrays come with methods: `failure.args.join(' ')` (in `core/git.ts`) glues the elements
   into one string with a space between each — `['rev-parse', 'HEAD']` becomes
   `'rev-parse HEAD'` — and `this.calls.push(...)` (in the fake runner) appends one element
-  at the end. Those are the two array *instance* methods used so far; `Array.from(...)`,
-  which builds an array from a Map's keys, is explained with `Map` in §19. The other Array
-  methods get a section of their own when PR 3 starts using them.
+  at the end. `Array.from(...)` (§19, §21) turns a Map's keys or a Set into an array. The
+  other Array methods get a section of their own when a later PR starts using them.
 - `import type { GitRunner } from './model'` (in `core/git.ts` and `test/helpers/fakeGit.ts`)
   — the `type` keyword says "I only need this name for type-checking". Because interfaces
   vanish at compile time, so does the import; there is nothing for esbuild to bundle. A
@@ -484,6 +483,21 @@ stop early — `a && b` never looks at `b` when `a` is false — which is why a 
 `error instanceof GitError && error.exitCode !== null` is safe to write on one line: the
 field is only read once the `instanceof` has proved it exists.
 
+One more form, in `src/core/discovery.ts` (`normalizeRoot`):
+
+```ts
+try {
+  resolved = await fs.realpath(printedRoot);
+} catch {
+  // Keep the path git printed.
+}
+```
+
+When the code in `catch` does not look at the error at all — every failure gets the same
+treatment — the name may be left off: `catch {` instead of `catch (error) {`. It tells the
+reader "this can fail, and why does not matter here". A comment inside the block is still
+wanted, so it never looks like an accident (ESLint flags an empty block without one).
+
 ## 19. Map
 
 *First seen in `test/helpers/fakeGit.ts`.*
@@ -534,3 +548,90 @@ The tests reach for a pattern only where the exact text is not ours to promise (
 prints `git version 2.50.1 (Apple Git-155)`) or where a prefix is the whole point (an E17
 message must *start* with the path). Everywhere else they compare whole strings with
 `toBe`, which fails with a clearer diff.
+
+## 21. Set
+
+*First seen in `src/core/discovery.ts`.*
+
+```ts
+const roots = new Set<string>();
+roots.add(root);
+return Array.from(roots);
+```
+
+A `Set` is a collection of values with **no duplicates**: `add` of a value already present
+does nothing, and the values are kept in the order they were **first** added. `has(value)`
+asks whether one is present, `size` is the count, and `Array.from(set)` copies the values
+into an ordinary array in that same order. It is the sibling of `Map` (§19) — keys with no
+values — and the right tool whenever the question is "have I seen this before?". In
+discovery that question is "is this repository root already in the list?" (E2), and the
+Set answers it without an `if` in sight.
+
+`new Set<string>()` carries its type parameter (§19) explicitly because the Set is going
+into a brand-new `const`: there is nothing on the left to guess from, and without
+`<string>` the compiler would settle on `Set<unknown>` and refuse to hand the values back
+as strings. Two other shapes need no annotation, and both appear on this branch. A
+collection built from a list, `new Set(['a', 'b'])` or `new Map([[...]])`, is typed by its
+contents. And an *empty* collection is fine when it lands somewhere that already has a
+type: in `test/helpers/fakeGit.ts`, `forDirectory = new Map()` assigns into a variable the
+`get` two lines earlier already typed as `Map<string, string | Error> | undefined`, and in
+the unit tests `new FakeGitRunner(new Map())` hands an empty Map to a parameter declared
+`Map<string, string | Error>`. In both the compiler takes the type from where the value is
+going, and nothing needs writing.
+
+## 22. for ... of, and continue
+
+*First seen in `src/core/discovery.ts`.*
+
+```ts
+for (const folder of folders) {
+  const output = await git.tryRun(['rev-parse', '--show-toplevel'], folder);
+  if (output === null) {
+    continue;
+  }
+  ...
+}
+```
+
+`for (const item of list) { ... }` runs the body once per element, with `item` bound to
+each element in turn — `for f in "$@"; do ...; done` in shell. It works on arrays and on
+anything else that can be walked in order (a `Set`, a `Map`, the characters of a string).
+`const` is allowed because every pass of the loop gets a fresh `folder`; nothing is ever
+reassigned.
+
+`continue` skips the rest of the body and moves on to the next element; `break` (not used
+here) would leave the loop altogether. An `await` inside the body is ordinary: the loop
+pauses at each git call and resumes when it answers, so the folders are asked one at a
+time, in order.
+
+Two look-alikes to keep apart: the older counted form
+`for (let i = 0; i < list.length; i++)` appears only when the index itself is needed, and
+`for (const key in object)` — `in`, not `of` — walks an object's key names; this codebase
+uses neither so far.
+
+## 23. String methods: trim, endsWith, slice
+
+*First seen in `src/core/discovery.ts` (`trim` in `core/git.ts`).*
+
+```ts
+if (printedRoot.endsWith('\n')) {
+  printedRoot = printedRoot.slice(0, -1);
+}
+```
+
+Strings carry their own methods, called with a dot like a method on any object:
+
+- `endsWith('\n')` — true when the string ends in that text; `startsWith` is its mirror.
+  `'\n'` between quotes is one newline character, as `$'\n'` is in bash.
+- `slice(start, end)` — the characters from position `start` up to, but not including,
+  `end`. Positions count from 0, and a negative number counts back from the end, so
+  `slice(0, -1)` is everything but the last character. Arrays have the same `slice`.
+- `trim()` — a copy with whitespace (spaces, tabs, newlines) removed from both ends.
+  `core/git.ts` uses it on stderr, where whitespace around the message is noise. Discovery
+  deliberately does *not* use it on the path git prints: a directory name may end in a
+  space, and `trim()` would eat that along with the newline. When exactly one known
+  character has to go, `endsWith` plus `slice` say so precisely.
+
+None of them change the string they are called on — a string, once made, never changes;
+each method returns a new one. That is why the code writes `printedRoot =
+printedRoot.slice(0, -1)` rather than expecting the variable to change in place.
