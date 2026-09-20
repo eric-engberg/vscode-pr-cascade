@@ -56,7 +56,7 @@ afterAll(async () => {
 // it (E16) and a linked worktree (E19); HEAD on trunk (E5); a detached HEAD (E3); two
 // branches on one commit (E6); an amended bottom layer (E14); a squash-merged bottom layer
 // (E15); and one §8 does not list, a tag with the same name as a branch. The E14 and E15
-// blocks document what the tree will show until git-spice's restack and sync (M8) repair
+// blocks document what the tree will show until git-spice's restack and sync (M9) repair
 // the stack. Each block builds its own fixture in `beforeAll` and removes it in `afterAll`,
 // so the situations never leak into one another: an amended layer in one block cannot
 // change what the next block sees, whatever order the tests run in.
@@ -362,7 +362,7 @@ describe('computeStack (real git)', () => {
       const state = await computeStack(git, fixture.dir, TRUNK);
 
       // assert: what git says — api-refactor is a sibling of the stack now, not its base.
-      // git-spice will flag this as `needsRestack` (M5) and restack it (M8); the tree
+      // git-spice will flag this as `needsRestack` (M5) and restack it (M9); the tree
       // renders the state, it does not hide it.
       const names = state.layers.map((layer) => layer.name);
       expect(names).toEqual(['add-retries', 'retry-metrics']);
@@ -410,7 +410,7 @@ describe('computeStack (real git)', () => {
 
       // assert: the same three layers as before the merge. api-refactor's own commit is
       // not an ancestor of the squash commit (same tree, different commit), so
-      // `--no-merged origin/main` keeps it. git-spice's sync (M8) is what removes it.
+      // `--no-merged origin/main` keeps it. git-spice's sync (M9) is what removes it.
       const names = state.layers.map((layer) => layer.name);
       expect(names).toEqual(['api-refactor', 'add-retries', 'retry-metrics']);
     });

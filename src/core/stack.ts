@@ -52,7 +52,7 @@ interface MeasuredBranch {
  *   of HEAD, so it disappears and its old commit is simply counted under the next layer
  *   (E14); after the bottom PR is squash-merged its branch's commits are still not in
  *   trunk (the squash wrote a different commit), so it still shows (E15). Both are
- *   documented by tests and fixed by git-spice's restack and sync in M8, not here.
+ *   documented by tests and fixed by git-spice's restack and sync in M9, not here.
  *
  * The order is each branch's distance from trunk — `rev-list --count <trunk>..<branch>`,
  * ascending — so the bottom layer, one commit above trunk, comes first. Two branches on

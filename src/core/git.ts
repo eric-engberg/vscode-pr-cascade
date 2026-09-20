@@ -214,7 +214,7 @@ function classifyStartFailure(error: ExecFileException): StartFailure {
  * nothing but the path to the executable, so it is cheap and safe to share.
  *
  * Why execFile with an array of arguments and never a shell string: branch names contain
- * `/`, paths contain spaces, and a PR body (M7) can contain anything. With an argv array
+ * `/`, paths contain spaces, and a PR body (M8) can contain anything. With an argv array
  * each element reaches git exactly as written; with a shell string every one of those
  * would need quoting, and quoting bugs are how commands break — or worse — on odd input
  * (plan §3 "Git access").
