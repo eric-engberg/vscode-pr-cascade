@@ -1332,6 +1332,22 @@ vscode-pr-cascade/            (GitHub repo: <you>/vscode-pr-cascade)
 **Goal:** someone fluent in shell and git, new to TypeScript, can read any file top to bottom and
 understand both what it does and why it's shaped that way. Optimize for that reader, not for brevity.
 
+**Write idiomatic TypeScript — the code must look like what a working TypeScript developer would
+write (revised 2026-09-20).** The reader learns the language from this codebase, so it must teach the
+language as it is actually used, not a simplified dialect that avoids its conventions. The teaching
+happens in *comments and the primer*, never by picking a longer or less conventional spelling of the
+code. Concretely: use the construct the language provides for the job — constructor parameter
+properties (`constructor(private readonly git: GitRunner) {}`) instead of a field plus a parameter
+plus an assignment; `??` and `?.` instead of `if (x !== undefined)` ladders; destructuring where it
+names things; `readonly` arrays and `as const` where they say something; utility types (`Pick`,
+`Partial`, `Record`, `ReturnType`) when they express a relationship the alternative would duplicate;
+`satisfies` where a literal must match a type without being widened to it; the ESLint/TypeScript
+community defaults for the rest. When a construct appears for the first time, add its primer section
+in the same PR and link it at first use — that is the accommodation for the reader, and the only one.
+The old rule "explain the syntax by writing it the long way" is withdrawn; M1 and M2 were written
+under it (e.g. every constructor in `src/` copies fields by hand), and the next milestone that
+touches a file may modernise it in passing, noting the primer section.
+
 Rules:
 - **File header** (every file): 3–8 lines — purpose, which layer (§4.1), what it depends on, what
   depends on it, and a pointer to the plan section. Example:
@@ -1354,11 +1370,16 @@ Rules:
   `??`, union types `'a' | 'b'`, generics only where unavoidable, `readonly`, `Map`/`Set`,
   destructuring, arrow functions, `import`/`export`). The first use in each file links the section:
   `// see primer §3 (async/await)`. Keep the primer updated in the same PR that introduces a construct.
-- **Prefer explicit over inferred** where it helps reading: annotate return types of exported
-  functions; name intermediate values instead of chaining five calls; one statement per line.
-- **Avoid**: clever generics, conditional/mapped types, decorators, function overloads, `any`
-  (use `unknown` + narrowing and explain it), abbreviations in names, single-letter variables outside
-  tiny loops, "helper" utilities that hide what a line does.
+- **Annotate what convention annotates, infer the rest.** Return types on exported functions;
+  parameter types always; local `const`s inferred unless the type is the point. Name an intermediate
+  value when the name carries meaning, not to avoid a chain — a three-call chain that reads as a
+  sentence stays a chain.
+- **Avoid what a code reviewer at a good TypeScript shop would also avoid**: `any` (use `unknown` +
+  narrowing and explain it), decorators, function overloads where a union parameter does, hand-rolled
+  types that a built-in utility type expresses, conditional types unless they remove real duplication,
+  abbreviations in names, single-letter variables outside tiny loops, "helper" utilities that hide
+  what a line does. Generics are fine wherever they are the natural tool (`Map<string, T>`,
+  `Promise<T>`, a typed `EventEmitter<T>`); explain them in the primer, do not avoid them.
 - **Tests read as specifications.** `describe('computeStack')` / `it('orders layers by distance from
   trunk (E6 tie-break by name)')`. Each test: arrange / act / assert with a blank line between.
   Fixture builders over inline setup. One assertion idea per test.
