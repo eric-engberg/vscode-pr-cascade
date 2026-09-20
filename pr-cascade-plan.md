@@ -125,7 +125,7 @@ Shelling out to `git`, `gs` and `gh` sidesteps auth entirely — that is the who
 - Works when the repo is a nested subfolder of a workspace folder.
 - Works regardless of whether the built-in git extension is enabled.
 
-### v0.2+ (milestones 5–8)
+### v0.2+ (milestones 5–9)
 - "Push stack" (`gs stack submit --no-publish`: every layer, force-with-lease semantics).
 - **"Create PRs" for the whole stack in one click**: pushes, then creates a PR for every layer that
   doesn't have one, bottom → top, each with the correct base. Idempotent — re-running only fills
@@ -138,7 +138,10 @@ Shelling out to `git`, `gs` and `gh` sidesteps auth entirely — that is the who
   runs `gh stack link` after submit so the PRs get the native badge/popover/merge-box map. No
   git-native backend; other forges wait for native stack support.
 - Restack after amend / after squash-merge.
-- Optional: show all stacks in the repo, not just the one containing HEAD.
+- Show **all stacks** in the repo, not just the one containing HEAD (the views below draw them all).
+- **Two views over one model (decided 2026-09-20, §7.1):** a compact *smartlog* rail in the Explorer for
+  daily use, and a detailed *graph* view in the extension's own container. Both are webviews rendering
+  the same `StackViewModel`; the v0.1 native tree is deleted when the smartlog reaches parity (M6).
 
 ### Non-goals (do not build)
 - Creating branches or commits (VS Code and git already do this).
@@ -157,7 +160,8 @@ Shelling out to `git`, `gs` and `gh` sidesteps auth entirely — that is the who
 | Git access | `child_process.execFile('git', [args])` — **array args, never a shell string** | Branch names contain `/` and could contain anything; no quoting bugs. |
 | Forge access | **git-spice (`gs`) via `execFile` with `--no-prompt`**; a **terminal only for `gs auth login`** and for operations that can stop on conflicts (restack, sync, onto, merge). `gh` is used for `gh stack link` and for GitHub-only status extras (draft/checks) when present. | One stacking tool for both forges, offline-capable locally, documented JSON read model. |
 | Diff rendering | Own `TextDocumentContentProvider` on scheme `stackdiff:` backed by `git show <ref>:<path>` | No dependency on the built-in git extension's API, so it works with `git.enabled: false`. |
-| View location | `contributes.views.scm` | User wants it next to Source Control. |
+| View location | **v0.1:** the native tree in `contributes.views.scm`. **From M6:** two webview views — `prCascade.smartlog` (`type: "webview"`, contributed to `explorer`) and `prCascade.graph` (`type: "webview"`, in the extension's own `prCascade` activity-bar container) — §7.1 | Ric's daily view is the Explorer; the compact rail condenses to a narrow pane, the graph needs room of its own. Users can drag any view into any container and VS Code remembers it, so the defaults only decide first impressions. Decided 2026-09-20 from the view-lab mockups (`docs/view-lab.html`). |
+| View technology | **Webview views** (`WebviewViewProvider`) rendering a **pure view model** (`core/viewmodel.ts`); native `webview/context` menus; no UI toolkit | A lane graph with curves, a fixed glyph tail and an in-view file panel cannot be drawn with `TreeItem`. The costs are listed in §7.1.3 and accepted. §7.9's "no webview" principle is about *text editing* and still stands. |
 | Repo discovery | `git rev-parse --show-toplevel` **from each workspace folder**, deduped | Walks *up*, so nested repos and ancestor folders both resolve correctly. |
 | Forge and host | **Derived per repo from the remote URL** (`git remote get-url <remote>`, `core/forge.ts`); host passed to `gh` as `GH_HOST`; forge kind gates GitHub-only steps | Same code path for github.com and GitHub Enterprise hosts. Never hardcode a host, never assume github.com. |
 | Auth | **None in the extension.** `gs auth login` (interactive, per forge) is the only mechanism; the extension detects state with `gs auth status` and opens the login terminal on demand. On GitHub hosts it recommends the **GitHub CLI** method (reuses `gh`'s OAuth token — no PAT) or OAuth device flow. | Tokens are stored by git-spice in the OS keychain; the extension never sees one. |
@@ -178,11 +182,15 @@ Shelling out to `git`, `gs` and `gh` sidesteps auth entirely — that is the who
 
 ```
 src/core/      ← NO `import * as vscode`. Pure logic + git runner. Fully testable under node.
-src/vscode/    ← Adapters: TreeDataProvider, content provider, commands, terminals, config.
+src/vscode/    ← Adapters: view providers, content provider, commands, terminals, config.
+src/webview/   ← M6: browser code for the two views. Renders a StackViewModel into DOM, posts messages
+                 back. NO `vscode` import, NO node built-ins; only acquireVsCodeApi(). Bundled separately.
 src/extension.ts ← activate(): wires core to vscode, returns { provider, refresh } for tests.
 ```
 
-Enforce with an ESLint `no-restricted-imports` rule on `src/core/**` (forbid `vscode`).
+Enforce with an ESLint `no-restricted-imports` rule on `src/core/**` (forbid `vscode`) and, from M6, a
+second one on `src/webview/**` (forbid `vscode` and node built-ins). `src/webview` may import **types**
+from `src/core` (the view model) — types only, so the browser bundle carries no host code.
 
 ### 4.2 Module map
 
@@ -208,7 +216,14 @@ src/core/prs.ts          §7.7 planner: layers + status map → ordered operatio
 src/core/prstatus.ts     §7.8 status tiers: gs JSON + optional gh extras → per-layer status (pure).
 src/core/nativeStack.ts  `gh stack link` after submit on GitHub repos — required there (§7.13.4).
 src/core/model.ts        types below.
-src/vscode/tree.ts       StackTreeProvider (TreeDataProvider<Node>), node classes.
+src/core/graph.ts        M6: every stack in the repo → parent graph, tips, lane assignment, elision (pure; §7.1.1, E78).
+src/core/viewmodel.ts    M6: RepoState + §7.8 enrichment + graph → StackViewModel: rows, lanes, indicators (pure; §7.1.3).
+src/webview/protocol.ts  M6: the message types between the extension host and the two webviews (types only).
+src/webview/smartlog/    M6: the compact rail renderer (§7.1.1): render(model) → DOM, keyboard, drag and drop.
+src/webview/graph/       M6: the detailed graph renderer (§7.1.2).
+src/vscode/views/base.ts M6: WebviewViewProvider base — HTML shell + CSP nonce, posts the model, routes messages to commands.
+src/vscode/views/smartlog.ts, graph.ts   M6: the two providers (thin subclasses).
+src/vscode/tree.ts       StackTreeProvider (TreeDataProvider<Node>), node classes. v0.1 only; deleted in M6 (item 23j).
 src/vscode/content.ts    StackDiffContentProvider.
 src/vscode/commands.ts   refresh / openDiff / createPR / pushStack / checkout.
 src/vscode/terminal.ts   run a command in a named terminal, reuse if exists.
@@ -331,7 +346,15 @@ Re-run discovery on `onDidChangeWorkspaceFolders` and on manual refresh.
 
 ## 7. UI spec
 
-### 7.1 Tree
+### 7.1 Views
+
+**Decided 2026-09-20:** two views over one model, both webviews (§3). The v0.1 native tree (7.1.0) ships
+first (M1–M4) and is deleted when the smartlog reaches parity (M6, item 23j). The visual spec is
+`docs/view-lab.html` — three mockups of one scenario with every indicator drawn in, plus the inventory of
+where each indicator's data comes from and which milestone can compute it. The text here is what a PR is
+checked against; the page is what it should look like.
+
+#### 7.1.0 The v0.1 native tree (M1–M4)
 
 ```
 [Stack]                                    ⟳  ⎘   (view title: refresh, create PRs)
@@ -357,6 +380,122 @@ Re-run discovery on `onDidChangeWorkspaceFolders` and on manual refresh.
 - Special nodes: "No trunk found — set prCascade.trunk", "Rebase in progress — resolve it first",
   "Detached HEAD" (still shows layers), "Not on a stack" (zero layers).
 
+#### 7.1.1 Smartlog rail — `prCascade.smartlog` (compact; Explorer by default)
+
+Modelled on Graphite's VS Code smartlog; pane B of `docs/view-lab.html`.
+
+```
+PR CASCADE                                  [Sync ▾]              ⟳  ⛅  ⚙
+ ○  feat/FWRK-1610-e-collector-ui                              ⛅        3m
+ ○  feat/FWRK-1610-d-collector-api                             ⛅        3m
+ ○  feat/FWRK-1610-a-collector-core                            ⛅        3m
+ │ ○   feat/FWRK-1434-part4                   not tracked      ⛅       15m
+ │ ◌   Uncommitted changes                               2 files       now
+ │ ●   feat/FWRK-1434-part3               ⇈  ✕ 2/7   (#482 draft)      2d   ← checked out: filled node, blue row
+ │ ○╮  feat/FWRK-1434-part2          💬2  ⇄  ↑1 ⛅   (#481 open)      40m
+ ○  feat/FWRK-1434-part1                             (#480 merged)      3d
+ │ ○╮  fix/FWRK-1500-retry-timeout                   (#479 open)        1w
+ ┆
+ ○  main                                            ↓5 · local ↓3     26h
+ ────────────────────────────────────────────────────────────────────────
+ ⌄ feat/FWRK-1434-part3                                               …
+    ⌄ 🗀 src/collector
+         ● ingress.ts             (M, orange)
+         + ingress.test.ts        (A, green)
+                          [ Submit ]  [ Check out ]
+```
+
+- **One row per branch, one line high** (VS Code's list row height, 22 px; §12 item 12). Columns: a 40 px
+  rail cell, the branch name (ellipsised, never wrapped), then a right-aligned **tail**.
+- **Rail.** Lane 0 is trunk's line. A stack whose bottom sits on lane *n* draws its layers in lane *n*; a
+  second stack on the same parent opens lane *n+1*, and its lowest row **curves into the parent's lane**
+  (the `╮` above). Nodes: hollow circle = layer; filled = the checked-out layer; yellow dashed = the working
+  tree when dirty (a child of the checked-out layer, as Graphite draws it); a dashed segment = elided trunk
+  history between the lowest stack and `main`. Lane assignment is `core/graph.ts` (pure, E78).
+- **Tail, fixed order, each glyph only when true:** ⇈ needs restack (amber) · 💬*n* unresolved comments
+  (red) · ⇄ PR base drifted from the local parent (amber) · ↑*n* unpushed commits (blue) · ⛅ never pushed /
+  needs push · **PR circle** coloured by state (green open, grey draft, purple merged, red closed; number and
+  title in the tooltip) · ✕ *f/n* failing checks (red; GitHub only) · age. Untracked layers get a dim name and
+  "not tracked"; merged layers a dim name; trunk shows `↓n` behind origin and `local ↓m` when the local
+  trunk branch lags its remote.
+- **Condensing (E80).** Below 260 px the tail keeps only the PR circle and the age and the rest moves into
+  the row tooltip; below 200 px the age goes too. Nothing ever overflows horizontally. This is why the view
+  can live in the Explorer.
+- **Focus vs checkout.** ↑/↓ move a focus outline; the checked-out row has the filled node and the
+  `--vscode-list-activeSelectionBackground` background. Enter checks out the focused layer (after the E13
+  dirty-tree refusal); the panel below always follows the *focused* row.
+- **Lower panel** (Graphite's): the focused layer's name, its changed files as a folder tree (codicons;
+  status colour from `--vscode-gitDecoration-*`; click → `openDiff`), and two buttons: **Submit** (`createPR`
+  for that layer; label "Update PR" when one exists) and **Check out**. Collapsible; its state lives in
+  `workspaceState`.
+- **Title-bar actions** are the §7.2.1 `view/title` layout unchanged — VS Code draws them for webview views
+  too. **Row context menu** is §7.2.1's layer menu contributed as `webview/context` items whose `when`
+  clauses read the keys each row sets in `data-vscode-context` (`webviewSection: "layer"`, `layer`, `hasPR`,
+  `isDraft`, `isCurrent`, `isTracked`): same command ids, same groups, no custom menu HTML.
+- **Drag and drop** is the E77 gesture inside the webview (HTML5 DnD): layer rows are draggable, layer rows
+  and the trunk row are drop targets, a drop posts `{ type: "moveOnto", layer, target }` and the host runs
+  the §7.2.1 confirmation and refusals. Graphite's inline "Move *L* onto *B*? ✕ ✓" row is optional polish;
+  the native confirm dialog is the requirement.
+- **Message rows** replace the v0.1 special nodes: "Rebase in progress — resolve it first" (with the M9
+  banner actions), "Detached HEAD" (layers still drawn), "No trunk found — set prCascade.trunk", and "Not on
+  a stack" only when the repo has no stack at all — otherwise the other stacks are simply drawn.
+
+#### 7.1.2 Change graph — `prCascade.graph` (detailed; own container)
+
+Modelled on VisualJJ's graph; pane C of `docs/view-lab.html`. Same model, different rendering:
+
+- A thick rail; trunk commits are **diamonds** on lane 0 (the tip in the accent colour with a `main` chip),
+  layers are **large filled circles** on the lanes to the right (the checked-out one in the accent colour);
+  curves rejoin the trunk lane; a dotted segment is elided history; the bottom ends in a squiggle.
+- Rows are **tall and wrap**: state **pills** first (Editing = checked out, Draft, Changes requested,
+  Approved, Merged, Not tracked, Restack needed, `2/7 checks`, `2 unresolved`, `base: main`), then
+  `<branch> · <first commit subject>`, then the age and `↑n unpushed` as plain text. The checked-out row
+  lists its **uncommitted files** beneath the title (click → diff against HEAD) and every other row carries
+  a check button = **Check out**.
+- Between stacks it shows the trunk commits that separate them (subject + age from `git log --format`
+  over the elided range, capped at 50 rows with "… n more").
+- Same `webview/context` menu, same drag and drop, same keyboard rules as the smartlog. No lower panel:
+  everything is a pill or a menu item; the PR pill opens the PR and its tooltip reads "Click to open Pull
+  Request #482 in GitHub".
+
+#### 7.1.3 What both views share, and what a webview costs
+
+- **One model.** `core/viewmodel.ts` (pure) turns `RepoState` + the §7.8 enrichment + `core/graph.ts`
+  lanes into a `StackViewModel`; both webviews render it and compute nothing themselves. Sketch (final
+  shape decided in item 23b; every field has a §8 row):
+  ```ts
+  export interface StackViewModel { repo: string; rows: ViewRow[]; lanes: number; message?: MessageRow; }
+  export interface ViewRow {
+    kind: 'layer' | 'trunk' | 'workingTree' | 'trunkCommit' | 'elided';
+    name: string; lane: number; node: 'hollow' | 'filled' | 'dashed' | 'diamond';
+    joinsLane?: number;              // this row's line curves into that lane below it
+    indicators: Indicator[]; age: string; subject?: string; files?: ChangedFile[];
+  }
+  export type Indicator =
+    | { kind: 'pr'; number: number; state: 'open' | 'draft' | 'merged' | 'closed'; url: string; reviewDecision?: string }
+    | { kind: 'needsRestack' } | { kind: 'needsPush'; ahead: number } | { kind: 'neverPushed' } | { kind: 'untracked' }
+    | { kind: 'checks'; failing: number; total: number } | { kind: 'unresolved'; count: number }
+    | { kind: 'baseDrift'; prBase: string; localParent: string } | { kind: 'behindTrunk'; origin: number; local: number }
+    | { kind: 'dirty'; files: number };
+  ```
+- **Protocol** (`src/webview/protocol.ts`): host → view `{ type: "model", seq, model }` on every refresh
+  and whenever the view becomes visible; view → host `{ type: "command", seq, command: "prCascade.<id>",
+  args }` for everything a click does — the webview has no logic of its own and every action is a registered
+  command. A message whose `seq` is older than the last model sent is dropped (E79).
+- **Theme** from `--vscode-*` variables only (the rail uses `--vscode-tree-indentGuidesStroke`, state
+  colours the `--vscode-gitDecoration-*` and `--vscode-charts-*` sets); icons from `@vscode/codicons` copied
+  into `dist/webview/`; `retainContextWhenHidden` **off** — the model is small and re-sent on visibility.
+- **Security:** CSP `default-src 'none'; style-src ${cspSource} 'nonce-…'; script-src 'nonce-…'; font-src
+  ${cspSource}`; one HTML template, all data arrives by message, nothing is interpolated into markup.
+- **Accepted costs of leaving `TreeItem`:** file rows cannot use the user's file-icon theme (codicons
+  instead) and get no `resourceUri` decorations; keyboard navigation, focus outline and screen-reader roles
+  are ours to implement (rows are `role="row"` with `aria-selected`; the view declares
+  `accessibilityHelpContent`); no `viewsWelcome`, no built-in tree filter; two more bundles to build and a
+  browser test layer (§9.1). Kept from the native tree: `view/title` menus, the `<viewId>.focus` command the
+  status bar uses, dragging the view between containers, native `webview/context` menus.
+- **Both views are user-movable:** VS Code lets a user drag either view into any container and remembers
+  it; the contributed containers are defaults, not constraints.
+
 ### 7.2 Commands and menus
 
 The "Where" column is the primary placement; §7.2.1 is the authoritative menu layout and wins on
@@ -375,7 +514,7 @@ any conflict.
 | `prCascade.createStackPRsAsDrafts` | Create PRs for Stack (all as drafts) | view title overflow | §7.7 with every `Draft: yes`, still opens the plan document unless mode is `auto`. |
 | `prCascade.markReadyForReview` | Mark Ready for Review | context menu on a draft PR layer | backend `setDraft(layer, false)` = `gs branch submit --branch <l> --update-only --no-draft` (both forges), then refresh. |
 | `prCascade.markStackReady` | Mark All Drafts Ready | view title overflow; also inline on the top layer when any draft exists | Confirm `"Mark N draft pull requests ready for review?"` listing them → `setDraft(layer, false)` for each draft in the stack, **bottom → top**, stop on first failure and report which succeeded → refresh. No-op with a message when the stack has no drafts. |
-| `prCascade.moveOnto` | Move Layer and Above Onto… | `…` › Stack; layer context | §7.12 primitive. |
+| `prCascade.moveOnto` | Move Layer and Above Onto… | `…` › Stack; layer context; **drag and drop** (§7.2.1) | §7.12 primitive. |
 | `prCascade.insertBranchBelow` | Insert Branch Below… | layer context | §7.12 phase 1. |
 | `prCascade.finishInsert` | Finish Insert | inline on pending-insert node | §7.12 phase 2. |
 | `prCascade.cancelInsert` | Cancel Insert | inline on pending-insert node | Clears the pending record only. |
@@ -405,15 +544,15 @@ Keep inline to the two things used many times a day. Everything destructive or o
    Refresh Navigation Comments          1_pullrequests@5   (only when navComment ≠ never)
 ── 2_stack ─────────────────────────────────────────
    Push Whole Stack                     2_stack@1
-   Restack onto Trunk                   2_stack@2   (M8)
-   Restack After Merge…                 2_stack@3   (M8)
-   Sync After Amend                     2_stack@4   (M8)
-   Move Layer and Above Onto…           2_stack@5   (M8)
-   Sync Stack                           2_stack@6   (M8)
-   Merge Bottom PR…                     2_stack@7   (M8)
+   Restack onto Trunk                   2_stack@2   (M9)
+   Restack After Merge…                 2_stack@3   (M9)
+   Sync After Amend                     2_stack@4   (M9)
+   Move Layer and Above Onto…           2_stack@5   (M9)
+   Sync Stack                           2_stack@6   (M9)
+   Merge Bottom PR…                     2_stack@7   (M9)
    Track Stack with git-spice           2_stack@8   (only when untracked layers exist)
 ── 3_view ──────────────────────────────────────────
-   Show All Stacks            (toggle)  3_view@1   (M9)
+   Show Only This Stack       (toggle)  3_view@1   (M6: a view-model filter; the views draw every stack by default)
    Collapse All                         3_view@2
 ── 9_settings ──────────────────────────────────────
    PR Cascade Settings…                 9_settings@1   → opens Settings filtered to `prCascade.`
@@ -432,8 +571,8 @@ The trailing `…` in a title means "opens something before acting" (the plan do
    Create Pull Request…         (no PR yet)
    Open Pull Request            (has PR)
    Mark Ready for Review        (has draft PR)
-   Insert Branch Below…         (M8)
-   Move Layer and Above Onto…   (M8)
+   Insert Branch Below…         (M9)
+   Move Layer and Above Onto…   (M9)
 ── 2_copy ──────────────────────────────────────────
    Copy Branch Name
    Copy PR URL                  (has PR)
@@ -441,6 +580,18 @@ The trailing `…` in a title means "opens something before acting" (the plan do
                                 GitLab: <host>/<owner>/<repo>/-/compare/<parent>...<branch>
 ```
 Pending-insert node: `contextValue = stackPendingInsert`, inline `Finish Insert` + `Cancel Insert`.
+
+**Drag and drop (M9, added 2026-09-20 at Ric's request — the gesture Graphite and VisualJJ offer):**
+HTML5 drag and drop inside the two webviews (§7.1.1; amended the same day when the views were decided —
+a `TreeDragAndDropController` would only serve the native tree, which is gone by M9). Only **layer
+rows** can be dragged; a layer can be dropped on another **layer row** or on the **trunk row**. A drop
+posts `{ type: "moveOnto", layer, target }` to the host (§7.1.3 protocol), which
+means `prCascade.moveOnto(L = dragged, B = target)`, i.e. `gs branch onto <B> --branch <L> --restack
+upstack` (§7.12), **after** a confirmation `Move <L> and the N layer(s) above it onto <B>?` — a rebase
+that can pause on conflicts must not fire on an accidental drop. Refusals, checked before the confirm:
+B is L or a descendant of L (E53, cycle); rebase in progress (E12); dirty working tree; L and B in
+different repositories. File rows, message rows and the pending-insert row are neither draggable nor
+drop targets. Nothing else changes: the picker command stays for keyboard users.
 
 Layer `contextValue` vocabulary: `stackBranch`, `stackBranchWithPR`, `stackBranchWithDraftPR`, with
 `Current` appended when HEAD is on it (e.g. `stackBranchWithPRCurrent`) so "Check Out" hides on the
@@ -453,7 +604,7 @@ current layer. Tests assert the exact `contextValue` for each state (it's what d
 
 Additional commands introduced by this layout: `prCascade.copyBranchName`, `prCascade.copyPRUrl`,
 `prCascade.openCompare`, `prCascade.collapseAll`, `prCascade.openSettings`, `prCascade.openFile`,
-`prCascade.openFileAtParent`, `prCascade.toggleAllStacks` (M9). All trivial; each gets one test that
+`prCascade.openFileAtParent`, `prCascade.toggleAllStacks` (M6). All trivial; each gets one test that
 it is registered and does the obvious thing with a fake runner/env.
 
 ### 7.3 Settings
@@ -542,7 +693,7 @@ owns auth for both hosts; keep a single path. Revisit only if the copy-the-code 
 Both hosts can be logged in at once; `gh auth status` lists them. The extension must work with any
 combination of repos from either host open in the same workspace (E22).
 
-**Native stacked PRs on GitHub hosts:** the required `gh stack link` step, §7.13.4 (M6).
+**Native stacked PRs on GitHub hosts:** the required `gh stack link` step, §7.13.4 (M7).
 
 ### 7.6 Forge detection and `gs auth` (all forges)
 
@@ -557,7 +708,7 @@ didn't recognize — E70).
 **Auth state:** `gs auth status` (exit 0 = logged in for this repo's forge). Not logged in → any forge
 action shows `"<name>: not logged in to <forge host>" [Log in] [Cancel]`; "Log in" opens a terminal
 running `gs auth login`. `gs` prompts for the method; the README says what to pick:
-| Forge | Pick (v1 supports GitHub and GitLab; the other rows are for M10) |
+| Forge | Pick (v1 supports GitHub and GitLab; the other rows are for M11) |
 |---|---|
 | GitHub (incl. `*.ghe.com`, Enterprise) | **GitHub CLI** if `gh` is logged in to that host (no PAT), else **OAuth** (device flow in the browser). Never PAT at work. |
 | GitLab.com | OAuth. Self-hosted: `glab` token or PAT (OAuth needs an admin-registered app). |
@@ -572,7 +723,7 @@ keychain; the extension never reads them.
 (§7.13.1) detects this and offers `gs repo init --trunk <trunk> --remote <remote>` (terminal, so any
 prompt is visible). Trunk comes from §5 detection.
 
-### 7.7 "Create PRs for Stack" algorithm (M6)
+### 7.7 "Create PRs for Stack" algorithm (M7)
 
 Inputs: `RepoState` (layers bottom→top), forge/host, CR status map from §7.8.
 ```
@@ -603,7 +754,7 @@ git-spice pushes the parent itself if needed.
 
 Ordering still matters and is tested: bottom → top, so each CR's base branch exists on the remote.
 
-### 7.8 CR status per layer (M6, read-only)
+### 7.8 CR status per layer (M7, read-only)
 
 Two tiers, both from `gs log short --json` (one object per line, one per tracked branch):
 - **Local, every refresh (no network):** `change.id`, `change.url`, `push.needsPush`,
@@ -617,7 +768,7 @@ Rendered in the layer description: `#482 · open · 2 unresolved` / `#482 · mer
 in v1. Failures degrade to "no CR info" without touching the tree. `contextValue` vocabulary as in
 §7.2.1.
 
-### 7.9 PR descriptions: the editable plan document (M7)
+### 7.9 PR descriptions: the editable plan document (M8)
 
 **Principle:** one editing surface for the whole stack, the `git rebase -i` pattern — a single
 document opens, you edit titles/bodies, you run "Create" from it. No sequence of input boxes (they're
@@ -706,7 +857,7 @@ If several: setting `prCascade.prTemplate` picks, else the first alphabetically 
 <layer>:<path>`), not the working copy, so a template added in a lower layer applies. None → body is
 the commit summary alone.
 
-### 7.10 Stack navigation on every CR (M6)
+### 7.10 Stack navigation on every CR (M7)
 
 Both supported forges have a **native** stack view (GitHub: badge + popover + merge-box map, via
 §7.13.4; GitLab: header dropdown, automatic). git-spice can additionally post a **navigation comment** on each CR showing the whole stack and the CR's position,
@@ -717,7 +868,7 @@ native view; users can turn it on. The extension does not implement its own foot
 The command is `prCascade.refreshNavComments` (**Refresh Navigation Comments**) = `gs stack submit --update-only`.
 On GitHub hosts with native stacks, the native stack map (via §7.13.4) sits alongside the comment.
 
-### 7.12 Stack surgery: inserting a layer (M8)
+### 7.12 Stack surgery: inserting a layer (M9)
 
 **Scenario this exists for:** `main ← a ← b ← c`; `a` is squash-merged; a bug in `a` must be fixed
 *before* `b` merges. `a` is gone (merged), so the fix is a new CR, and it must sit **below `b`** so
@@ -754,7 +905,7 @@ completion the next refresh finishes the CR side and clears the record.
 **README (not automated):** the trivial-fix alternative (amend into `b`, then `gs upstack restack`),
 and never try to reopen or amend a merged CR.
 
-### 7.13 The git-spice backend (M5–M8)
+### 7.13 The git-spice backend (M5–M9)
 
 Source: https://github.com/abhinav/git-spice — `brew install git-spice` (also apt/scoop/binary/`go install`).
 Facts verified 2026-09-17 from the docs (CLI reference, config, auth, limits, JSON, changelog v0.31.2):
@@ -821,7 +972,7 @@ commits?: [{ sha, subject }]                           // gs log long only
 `…` › Stack gains **Sync Stack** (`gs repo sync --restack upstack`) — the one-button "make everything
 right after merges" — and **Merge Bottom PR…**. "Track Stack with git-spice" appears when untracked.
 
-#### 7.13.4 GitHub native stack link (`core/nativeStack.ts`, M6 — required on GitHub)
+#### 7.13.4 GitHub native stack link (`core/nativeStack.ts`, M7 — required on GitHub)
 Docs (GitHub, "Stacked pull requests CLI commands"): `gh stack link [flags] <stack-number | branch-or-pr>
 <branch-or-pr> [...]` — "Link pull requests into a stack on GitHub without local tracking … designed for
 people who manage branches with other tools locally." Arguments bottom→top; existing open PRs are used;
@@ -856,7 +1007,12 @@ refuses to run without it on GitHub (native view is required, so a half-done sta
              "pull request", "merge request"],
 "categories": ["SCM Providers"],
 "contributes": {
-  "views": { "scm": [ { "id": "prCascade", "name": "Stack", "icon": "$(layers)" } ] },
+  "viewsContainers": { "activitybar": [ { "id": "prCascade", "title": "PR Cascade", "icon": "resources/pr-cascade.svg" } ] },
+  "views": {
+    "scm":       [ { "id": "prCascade", "name": "Stack", "icon": "$(layers)" } ],
+    "explorer":  [ { "type": "webview", "id": "prCascade.smartlog", "name": "Stack", "icon": "$(layers)", "visibility": "visible" } ],
+    "prCascade": [ { "type": "webview", "id": "prCascade.graph", "name": "Stack Graph", "visibility": "visible" } ]
+  },
   "commands": [
     { "command": "prCascade.refresh",   "title": "Refresh Stack",        "icon": "$(refresh)" },
     { "command": "prCascade.openDiff",  "title": "Open Changes" },
@@ -880,6 +1036,11 @@ refuses to run without it on GitHub (native view is required, so a half-done sta
 },
 "activationEvents": ["onStartupFinished"]
 ```
+The `scm` tree entry is v0.1 (M1–M4) and is removed in M6; the two webview entries and the container
+arrive with M6 (§7.1). A container icon must be an image file (VS Code's `viewsExtensionPoint.ts`, checked
+2026-09-20, accepts no `$(codicon)` there); view icons may use `$(codicon)`. `webview/context` menu
+entries mirror the `view/item/context` ones with `webviewId == 'prCascade.smartlog' || webviewId ==
+'prCascade.graph'` and `webviewSection == 'layer'` in their `when`, plus the row's own keys (§7.1.1).
 
 ---
 
@@ -900,8 +1061,8 @@ refuses to run without it on GitHub (native view is required, so a half-done sta
 | E11 | Path with spaces / unicode / `#` | URI round-trips; `git show` gets the exact path (`-z` parsing). |
 | E12 | Rebase in progress | Banner node; `pushStack`/`checkout` refuse with a message. |
 | E13 | Dirty working tree + checkout | Refused with message; nothing changed. |
-| E14 | Bottom layer amended (descendants now stale) | After amending the bottom, the amended branch is *no longer* an ancestor of HEAD, so it drops out of the HEAD stack and the old commit shows as an unnamed layer. Render what git says; git-spice marks it `needsRestack` once tracked (M5) and M8's restack fixes it. Test documents the behavior. |
-| E15 | Bottom PR squash-merged, local branch still exists | Its commits are not in trunk (squash rewrote them), so it still shows as a layer until `sync` (M8) removes it and restacks the rest. Test documents this. |
+| E14 | Bottom layer amended (descendants now stale) | After amending the bottom, the amended branch is *no longer* an ancestor of HEAD, so it drops out of the HEAD stack and the old commit shows as an unnamed layer. Render what git says; git-spice marks it `needsRestack` once tracked (M5) and M9's restack fixes it. Test documents the behavior. |
+| E15 | Bottom PR squash-merged, local branch still exists | Its commits are not in trunk (squash rewrote them), so it still shows as a layer until `sync` (M9) removes it and restacks the rest. Test documents this. |
 | E16 | Second, unrelated stack exists in the repo | Not shown (not ancestors of HEAD). Never mixed in. |
 | E17 | `git` missing / wrong path | One clear error node, not a crash loop. |
 | E18 | Large layer (1000+ files) | `-z` parsing handles it; tree renders (VS Code virtualizes). `maxBuffer` sufficient. |
@@ -962,6 +1123,11 @@ refuses to run without it on GitHub (native view is required, so a half-done sta
 | E73 | `Relink Stack on GitHub` on an already-linked stack | Idempotent: no new stack, bases untouched. |
 | E74 | GitLab repo, createPRs | MRs target parent branches; GitLab's header dropdown shows the stack with no extra step; no `gh` involved anywhere. |
 | E75 | Bitbucket/Gitea/Forgejo/Azure repo | Tree and diffs work; CR actions show "v1 supports GitHub and GitLab" (git-spice could do it, but there is no native stack view to show). |
+| E77 | Drag a layer row and drop it | Onto another layer → confirm → `moveOnto(L, B)` exactly once with the dragged and target names; onto trunk → base is the trunk ref; onto its own descendant → refused before the confirm (E53), no git call; onto a file/message row, or across repositories → no drop target, nothing runs; during a rebase or with a dirty tree → refused with the E12/E13 message; cancelling the confirm → no call. |
+| E78 | Lane layout (`core/graph.ts`) | One stack → one lane; a second stack on the same parent → lane +1 with `joinsLane` on its lowest row; a stack rooted on a middle layer of another stack → lane +1 from that layer; trunk-only repo → just the trunk row; the checked-out layer is `filled`; dirty tree → a `dashed` working-tree row directly above the checked-out row; elided trunk history between the lowest stack and `main` → one `elided` row; lanes never cross (a stack always sits right of everything drawn above it). Table-driven. |
+| E79 | Webview protocol | Every refresh posts a model with a rising `seq`; a command message carrying an older `seq` is dropped (a click on a row that no longer exists); a command from a view runs exactly the registered command with the row's `name` as argument; a hidden view receives the current model when it becomes visible; the host evaluates nothing the view sends except a command id that must start with `prCascade.` and its string arguments. |
+| E80 | Narrow smartlog | At 260 px the tail shows only the PR circle and the age, the rest is tooltip; at 200 px only the PR circle; the name is ellipsised and the row stays one line; nothing overflows horizontally. |
+| E81 | Both views, one state | After any refresh the smartlog and the graph show the same rows, indicators and checked-out row (one model object is posted to both); a command run from either view refreshes both. |
 | E76 | A stack branch was rewritten on the remote by someone else (GitHub's "Rebase stack" button, `gh stack sync`, a co-worker's force-push) — with and without unpushed local commits | Sync Stack detects it after fetch (`push.ahead > 0 && push.behind > 0`, or neither tip an ancestor of the other) and **adopts** the remote before any restack: no unpushed work → `git branch -f <b> origin/<b>`; unpushed work → `git rebase --onto origin/<b> origin/<b>@{1} <b>` after confirming; then `gs stack restack` is a no-op. Restack/submit **refuse** while a branch is diverged and unadopted; the banner names the branch. Never force-push over a diverged remote (git-spice's lease only protects a clone that has not fetched). Procedure verified 2026-09-20, §13.4. |
 
 ---
@@ -974,6 +1140,10 @@ refuses to run without it on GitHub (native view is required, so a half-done sta
    `changes.ts` parsers (name-status `-z`, numstat, rename/copy scores), `uri.ts` round-trips,
    `stack.ts` ordering/parent assignment given a `FakeGitRunner` with canned outputs, `debounce.ts`.
    Target: **≥ 95 % line coverage of `src/core`**.
+1b. **Renderer tests (Vitest with a DOM, `test/webview`, M6)** — `render(model)` from `src/webview/*` run
+   under `happy-dom` or `jsdom` (§11.3 decision in item 23c): row count and order, lane geometry classes,
+   tail glyphs per indicator, the E80 condensing at a given width, keyboard handling, and drag-and-drop by
+   dispatching `dragstart`/`drop` events and asserting the posted message. No VS Code, no git.
 2. **Git integration tests (Vitest, real `git`, temp repos, no vscode)** — every row of §8 that is
    about git state. Uses the fixture builder (§9.3). Hermetic: each test gets `fs.mkdtemp`, and the
    runner env sets `HOME=<tmp>`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`,
@@ -985,6 +1155,8 @@ refuses to run without it on GitHub (native view is required, so a half-done sta
    executing `prCascade.openDiff` opens a tab whose input is a diff with `stackdiff:` URIs
    (`vscode.window.tabGroups`); refresh command updates after an external `git commit`; nested-repo
    workspace (E1) shows the repo. Keep these few and slow-tolerant; the bulk of coverage is layers 1–2.
+   From M6 the same tests read the last model each webview provider posted (a test-mode-only handle,
+   §13.4) instead of `getChildren()`.
 
 4. **Opt-in end-to-end tests against a real github.com scratch repo (Vitest, `test/e2e`)** — skipped
    unless `PRCASCADE_E2E_REPO=owner/repo` (GitHub) / `PRCASCADE_E2E_GITLAB=group/project` (GitLab) is
@@ -994,7 +1166,8 @@ refuses to run without it on GitHub (native view is required, so a half-done sta
    before tagging a release; not part of `npm test`.
 
 `activate()` must **return** `{ provider, refresh }` so extension-host tests can reach the tree
-without poking at private state.
+without poking at private state. (M6, item 23d: the tree provider goes away; keep `refresh`, and expose the
+webview providers' last posted model only under `ExtensionMode.Test` — §13.4.)
 
 ### 9.2 Tooling / scripts
 
@@ -1003,18 +1176,19 @@ npm run typecheck   tsc --noEmit
 npm run lint        eslint (incl. the no-vscode-in-core rule)
 npm run test:unit   vitest run test/unit
 npm run test:git    vitest run test/git        (requires git ≥ 2.38 on PATH)
+npm run test:webview   vitest run test/webview  (M6: the two renderers under a DOM)
 npm run test:ext    vscode-test               (downloads VS Code; slow; needs xvfb on Linux CI)
 npm run test:e2e    PRCASCADE_E2E_REPO=you/scratch vitest run test/e2e/github   (manual, real github.com)
 npm run test:e2e:gitlab   PRCASCADE_E2E_GITLAB=you/scratch vitest run test/e2e/gitlab   (manual, real gitlab.com)
-npm test            typecheck + lint + test:unit + test:git
-npm run build       esbuild src/extension.ts --bundle --external:vscode --platform=node --outfile=dist/extension.js
+npm test            typecheck + lint + test:unit + test:git (+ test:webview from M6)
+npm run build       esbuild: src/extension.ts → dist/extension.js (node); M6 adds src/webview/{smartlog,graph}/main.ts → dist/webview/*.js (browser)
 npm run package     vsce package
 npm run watch       esbuild --watch (dev loop, §11.2)
 npm run analyze     esbuild --metafile + analyze: what each package contributes to dist/extension.js (§11.3)
 npm run depcheck -- <pkg>   prints the §11.3 dependency card (downloads, dates, maintainers, deps, size, license)
 npm run fixture     build a fixture repo at ../fixture-repo for the Extension Development Host
 ```
-Vitest config: `test/unit` and `test/git` projects; coverage via `@vitest/coverage-v8` on `src/core`.
+Vitest config: `test/unit`, `test/git` and (M6) `test/webview` projects; coverage via `@vitest/coverage-v8` on `src/core`.
 
 ### 9.3 Fixture builder (`test/helpers/fixture.ts`)
 
@@ -1055,6 +1229,12 @@ Every layer commits one distinct file (`a`, `b`, `c`, …) so file lists are tri
 | `unit/prstatus.test.ts` | §7.8 JSON parsing → map by head; missing fields; empty list; malformed JSON → "no PR info" |
 | `git/surgery.git.test.ts` | real fixture **through the backend (real `gs`)**: `squashMergeBottomIntoTrunk()` → sync → insert below → finish; assert graph + `git patch-id` stability (E48); middle insert (E49); cycle refusal (E53); conflict path leaves gs paused and the record kept (E52) |
 | `ext/insert.test.ts` | phase 1 creates branch + pending node + status bar text; Finish refuses without commits (E50); chains Restack After Merge when stale (E51, fake runner); after Finish the PR pipeline is invoked with the expected create/fix operations; cancel (E54) |
+| `ext/dragdrop.test.ts` | host side of E77: a `moveOnto` message from a view → confirm → `moveOnto(L, B)` exactly once (fake backend records argv); every E77 refusal produces no call; the picker command and the drop share one code path (the view side is in `webview/*`) |
+| `unit/graph.test.ts` | E78 lane layout, table-driven over fixture shapes: one stack, sibling stacks, a stack off a middle layer, trunk-only, dirty tree, elided history |
+| `unit/viewmodel.test.ts` | every `Indicator` kind from its source field (§7.8 tiers, `gh` extras, git ahead/behind); the working-tree row; message rows for E3/E4/E5/E12; ages formatted from a fixed clock |
+| `webview/smartlog.test.ts` | `render(model)` → rows, lanes, tail glyphs; E80 at 260/200 px; ↑/↓/Enter; the `data-vscode-context` JSON per row; `dragstart`/`drop` posts `moveOnto` with (L, B) and nothing for the refusals decided in the view (file rows, trunk as source) |
+| `webview/graph.test.ts` | `render(model)` → diamonds, circles, pills; files under the checked-out row; trunk-commit rows capped at 50; the same context and drag assertions |
+| `ext/views.test.ts` | both providers resolve and receive the same model after `refresh` (E81); a posted command runs the registered command with the row name (fake runner records argv); a stale `seq` is ignored and a non-`prCascade.` command id is rejected (E79); hidden → visible re-posts the model |
 | `unit/gsLog.test.ts` | §7.13.2 stream parsing: full objects, minimal objects, `--cr-status` fields, unknown fields tolerated, malformed line isolated (E57), CRLF, empty output |
 | `unit/readiness.test.ts` | every branch of §7.13.1 with a fake runner (E55, E59, E62, E67); memoization; version parsing |
 | `unit/forge.test.ts` | every URL form (E21, E65): ssh, scp-like, https, ports, `user@`, no `.git`, trailing slash, garbage → null; forge kind per host; `spice.forge.*.url` override; `ghEnv()` sets `GH_HOST` |
@@ -1143,35 +1323,46 @@ GitHub extras/native link. Tests: E12, E21–E25, E55–E57, E59, E62, E65, E67,
 `git/gitspice.git` (init/track/log). No CR creation yet. Also settle §12 item 9 here (exit codes,
 paused-op detection).
 
-**M6 — Change requests: status, create one, create the stack, GitHub native link.**
+**M6 — The two views.**
+`core/graph.ts` lanes, `core/viewmodel.ts`, the webview build (second esbuild target, CSP shell), the
+smartlog rail (§7.1.1) with its panel, keyboard, `webview/context` menu and drag-and-drop message, then
+the graph view (§7.1.2); the native tree is deleted in the last PR once every §7.1.0 behaviour has a
+smartlog equivalent. Indicators that need M7 data (PR state, checks, comments) light up when M7 lands —
+the view model already has the fields. Tests: `unit/graph`, `unit/viewmodel`, `webview/*`, `ext/views`,
+E78–E81; the `ext/tree` rows migrate to `ext/views`.
+*Done when:* on a fixture with two stacks the Explorer view shows the Graphite-style rail with both lanes
+and the working-tree row, condenses at 220 px without overflow, ↑/↓/Enter and right-click work, and the
+graph view shows the same state in its own container.
+
+**M7 — Change requests: status, create one, create the stack, GitHub native link.**
 §7.8 status (both tiers), the §7.7 planner as a pure function, `createPR` / `createStackPRs` via
 `gs branch submit` with progress and cancellation, `setDraft` / `markReady*`, then **`core/nativeStack.ts`**
 (§7.13.4): `gh stack link` after createPRs on GitHub, `Relink Stack`, settle §12 items 8b/8c. Tests: `unit/prs`, `unit/prstatus`, `ext/createStackPRs`, `ext/markReady`, `ext/nativeStack`, E26–E32,
 E45–E47, E61, E62b, E66, E68, E73, E74 (fake). Verify on the github.com scratch repo (e2e: PRs show the native badge and map) and on a gitlab.com
 scratch project (e2e: header dropdown) **before** using it on the work repo.
 
-**M7 — PR descriptions: the plan document.**
+**M8 — PR descriptions: the plan document.**
 `core/prdraft.ts`, `core/template.ts`, `core/prplan.ts` (pure, unit-tested first), then the
-`prcascade-prplan` document, CodeLens, keybinding, `workspaceState` drafts. Until this lands, M6 uses
+`prcascade-prplan` document, CodeLens, keybinding, `workspaceState` drafts. Until this lands, M7 uses
 `prDescriptionMode: "auto"`. Tests: `unit/prdraft`, `unit/prplan`, `unit/template`, `ext/prplan`,
 E33–E36, E38–E43.
 *Done when:* "Create PRs for Stack" opens one document with three editable sections, Cmd+Enter
 creates all three with the edited text, and each CR shows git-spice's navigation comment.
 
-**M8 — Restack, sync, stack surgery, merge.**
+**M9 — Restack, sync, stack surgery, merge.**
 `restack`, `sync`, `moveOnto`, `insertBranchBelow` / `finishInsert` / `cancelInsert`, pending-insert
 node, `mergeBottom`; rebase banner with `gs rebase continue`; **Sync Stack**, **Merge Bottom PR**.
 Tests: `git/gitspice.git` surgery rows, `ext/insert`, E48–E54, E58, E63, contract table (§9.6) green.
 *Done when:* the E48 scenario runs end-to-end against the fixture, and on the scratch repo the
 resulting CR bases are `fix→main`, `b→fix`, `c→b`.
 
-**M9 — Multi-stack (optional).**
-Tip detection: branches not merged into trunk that no other such branch contains; one tree section
-per tip. Only if M1–M8 prove useful.
+**M10 — Multi-stack.** Folded into M6: `core/graph.ts` computes every stack (tips = branches not merged
+into trunk that no other such branch contains) because the views draw them all; what was a "Show All
+Stacks" toggle is now the "Show Only This Stack" filter on the view model (§7.2.1). Nothing remains here.
 
 ---
 
-**M10 — Other forges (Bitbucket, Gitea, Forgejo, Azure DevOps) — only when they ship a native stack view.**
+**M11 — Other forges (Bitbucket, Gitea, Forgejo, Azure DevOps) — only when they ship a native stack view.**
 git-spice already supports them; the work is the forge-kind gate (E75), auth guidance, and an e2e.
 Not planned.
 
@@ -1229,7 +1420,32 @@ one PR — the split is itself the lesson in how the layers relate.
     item 7 (exit codes, paused-op detection) and write the first §9.6 contract rows.
 23. `gh` readiness on GitHub repos (E62b) + `gh` login flow. Tests: `unit/ghstatus`, `ext/login` rows.
 
-**M6 stack — "create the PRs, natively stacked"**
+**M6 stack — "the two views"** (numbered 23a–23j so every item number below stays true)
+23a. `core/graph`: every stack in the repo (tips, parents), lane assignment, elision. Pure; the E78 table.
+23b. `core/viewmodel` + `src/webview/protocol.ts`: `StackViewModel`, every `Indicator` from its source
+     field, message rows, ages. Pure; `unit/viewmodel`.
+23c. webview build: second esbuild target (`platform: "browser"`, one IIFE per view) → `dist/webview/`;
+     `@vscode/codicons` copied in; the `test/webview` Vitest project; the ESLint rule for `src/webview/**`.
+     **Library decision:** `happy-dom` vs `jsdom` for renderer tests (dev-only; pick by the §11.3 table).
+23d. `vscode/views/base` + `vscode/views/smartlog`: HTML shell with CSP nonce, posts the model on refresh
+     and on visibility, routes `command` messages to registered commands (E79); `package.json` gains the
+     `explorer` webview view; rows rendered as plain text for now; `ext/views` first rows; the test-mode
+     handle replacing `provider` (§9.1).
+23e. smartlog renderer: rail, lanes, nodes (E78 geometry), tail glyphs, condensing (E80), theme variables;
+     `webview/smartlog` tests. *This is the PR that makes it look like the mockup.*
+23f. smartlog keyboard, focus, `data-vscode-context` and the `webview/context` menu entries (the §7.2.1
+     command ids); `accessibilityHelpContent`.
+23g. smartlog lower panel: the focused layer's files as a folder tree, click → `openDiff`, Submit /
+     Check out buttons (Submit is disabled with a tooltip until M7).
+23h. drag and drop in the webview → the `moveOnto` message; the host confirms and, until M9 implements
+     `moveOnto`, reports that the command arrives in M9. Tests: `webview/*` drag rows, `ext/dragdrop`.
+23i. graph view: `vscode/views/graph`, the `prCascade` container + SVG icon, the renderer (§7.1.2) with
+     trunk-commit rows and the files under the checked-out row; `webview/graph` tests; E81 in `ext/views`.
+23j. delete `vscode/tree.ts` and the `scm` view; migrate the remaining `ext/tree` assertions to
+     `ext/views`; status bar click → `prCascade.smartlog.focus`; README screenshots. *Manual check: open the
+     fixture and the work repo, drag the Stack view between containers, resize the sidebar to 200 px.*
+
+**M7 stack — "create the PRs, natively stacked"**
 24. `core/prs` planner (pure). Tests: `unit/prs` (E26–E31).
 25. `core/prstatus`: `--cr-status` tier + `gh` extras merge. Tests: `unit/prstatus`.
 26. backend `createPRs` (`gs branch submit …` per layer) + `setDraft`. Tests: argv rows (E61).
@@ -1242,17 +1458,17 @@ one PR — the split is itself the lesson in how the layers relate.
 30. e2e PR: `e2e/gitspice.github` and `e2e/gitspice.gitlab`; run both by hand; record results in
     the PR body. Milestone done only when both pass.
 
-**M7 stack — "descriptions you actually edit"**
+**M8 stack — "descriptions you actually edit"**
 31. `core/prdraft` (E33, E38). 32. `core/template` (E34, GitHub + GitLab paths). 33. `core/prplan`
     render/parse round-trip (E35, E36, E39, E41–E43). 34. `vscode/prplan`: document, CodeLens,
     keybinding. 35. drafts in `workspaceState` (E40). 36. wire `prDescriptionMode: edit` into
     `createStackPRs`; update the e2e to submit edited text.
 
-**M8 stack — "restack, sync, surgery, merge"**
+**M9 stack — "restack, sync, surgery, merge"**
 37. backend `restack` + `sync` + `rebaseState` → **Restack onto Trunk**, **Sync Stack**, rebase
     banner (E58, E63). Sync Stack is fetch → detect diverged remotes → adopt (E76, procedure in §13.4)
     → `gs repo sync --restack upstack` → submit; restack and submit refuse on an unadopted diverged
-    branch. Tests: `git/sync.git.test.ts` with a second clone rewriting the remote, both E76 variants. 38. `moveOnto` + command + cycle check (E53). 39. `insertBranchBelow` /
+    branch. Tests: `git/sync.git.test.ts` with a second clone rewriting the remote, both E76 variants. 38. `moveOnto` + command + cycle check (E53). 38b. **drag-and-drop move**: wire the webviews' `moveOnto` message (item 23h) to the real `moveOnto` after the confirm; refusals per E77; tests `ext/dragdrop` (added 2026-09-20; moved from a `TreeDragAndDropController` to the webviews when the views were decided the same day). 39. `insertBranchBelow` /
     `finishInsert` / `cancelInsert` + pending node + status bar text (E48–E52, E54, E72).
 40. `mergeBottom` + **Merge Bottom PR…** + `mergeMethod`. 41. `git/surgery.git` + remaining §9.6
     contract rows; e2e surgery pass on the scratch repo.
@@ -1409,6 +1625,9 @@ folder in a second window called the **Extension Development Host**.
    first window's Debug Console; the extension's own output channel is in the dev host's Output panel.
 6. `npm test` in Terminal 2 whenever a PR is ready (`test:ext` launches its own headless VS Code and
    does not need the dev host).
+7. (M6) The webviews are bundled by the same `esbuild.mjs` into `dist/webview/` and the watcher covers
+   them. To iterate on a view: **Developer: Reload Webviews** in the dev host reloads them without a
+   window reload; **Developer: Open Webview Developer Tools** opens Chrome's inspector on the view's DOM.
 
 **`.vscode/launch.json` (part of the M1 scaffold PR)**
 ```json
@@ -1502,6 +1721,10 @@ extension without libraries is expected to be ~150 KB.
 | Validate `gs log --json` and `gh … --json` shapes (`core/gsLog.ts`, PR status) | `zod` | hand-written type guards | Schemas double as readable documentation of the JSON for the reader; `.passthrough()` implements "tolerate unknown fields" (E57) |
 | Debounce (`core/debounce.ts`) | — hand-roll | `lodash.debounce` | 10 lines |
 | Markdown / diff rendering | — none | — | VS Code renders both natively |
+| DOM for renderer tests (`test/webview`, M6) | `happy-dom` or `jsdom` | hand-written DOM stubs | Dev-only, no bundle cost; decided in item 23c by the table above |
+| Icons in the webviews | `@vscode/codicons` (Microsoft) | inline SVG | The glyphs VS Code itself uses; CSS + font copied into `dist/webview/` at build time |
+| Lane layout (`core/graph.ts`) | — hand-roll | a graph-drawing library | ~80 lines and entirely our domain: branches, one parent each, no cycles |
+| Webview UI toolkit | — none | `@vscode/webview-ui-toolkit` | Deprecated by Microsoft (archived January 2025); plain DOM styled with `--vscode-*` variables |
 
 **The dependency card** — pasted into the PR body's *Dependencies* section for every package added:
 ```
@@ -1548,7 +1771,8 @@ no footer/nav comment by default on GitHub/GitLab (native views).
 **Open — ask, unless he has said "go with the recommendations":**
 1. **Commits as an intermediate tree level?** Recommendation: no — branch → files. Squash merge
    flattens commits anyway.
-2. **Only the stack containing HEAD, or all stacks?** Recommendation: HEAD-only for v0.1; M9 adds all.
+2. **Only the stack containing HEAD, or all stacks?** **Resolved 2026-09-20:** the v0.1 tree is HEAD-only;
+   the views (M6) draw every stack, with an optional "Show Only This Stack" filter.
 3. **Status letters as label prefix vs icon?** Recommendation: prefix (`M  path`).
 4. **PR description defaults:** title from first commit (vs branch name); template after the commit
    summary (vs before); `prDescriptionMode` default `edit`; `prDraft` default `false`. Recommend all four.
@@ -1564,7 +1788,13 @@ no footer/nav comment by default on GitHub/GitLab (native views).
 8. **Library decisions** (§11.3, §10.2): `hosted-git-info` (PR 16), `zod` (PR 17), `semver` (PR 18),
    `execa` vs a hand-rolled `execFile` wrapper (PR 21 — measure the 12-dependency cost). Each decided
    in its adopting PR with the full library-decision section; hand-roll is a legitimate outcome.
-9. **A gitlab.com scratch project** for the GitLab e2e — he needs an account; confirm before M6.
+9. **A gitlab.com scratch project** for the GitLab e2e — he needs an account; confirm before M7.
+10. **Default container for the smartlog:** Explorer (Ric's stated daily use) or SCM (the original §3
+    choice). Recommendation: Explorer; anyone can drag it elsewhere. Decide before item 23d.
+11. **Keep the native tree behind a setting after M6?** Recommendation: no — delete it in item 23j; one
+    model, two renderers, no third to keep in step.
+12. **Smartlog row height:** VS Code's list height (22 px) or Graphite's 19 px. Recommendation: 22 px, the
+    Explorer's own rhythm. Decide in item 23e by looking at both.
 
 ---
 
@@ -1600,7 +1830,7 @@ Expected `git log --oneline --decorate main..retry-metrics` for the base fixture
 
 ## Appendix B — `git-sync` reference implementation (tested; **reference only** — `gs upstack restack` replaces it)
 
-Bugs found while writing this, which the M7 tests must cover:
+Bugs found while writing this, which the M8 tests must cover:
 1. **Reflog walk matched branch-creation entries at trunk**, making an *unrelated* branch look like it
    had "left the stack" — the first version grafted a whole stack onto an unrelated branch. Fix: stop
    the walk as soon as a reflog entry is an ancestor of trunk.
@@ -1782,6 +2012,26 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
 - Whether the ≤ 300-line guideline should exclude comment lines (D23).
 - Whether E14's wording should change to match D16, and whether to add the tag case as E76.
 - M5 heads-up: the `gs` vs `git-spice` binary name (13.1).
+- **Drag-and-drop move added to M9 (2026-09-20, Ric's request):** he likes the visual stack views in Graphite
+  and VisualJJ; the drag gesture is the first UI borrowed from them and rides on M9's `moveOnto` (§7.2.1, E77,
+  §10.1 item 38b). Later the same day he chose the **views** (next bullet), so the gesture lives in the
+  webviews rather than in a `TreeDragAndDropController`.
+- **DECIDED 2026-09-20: two views, both webviews (§3, §7.1, new M6).** After the view-lab mockups
+  (`docs/view-lab.html`: the plan's tree, a Graphite-style smartlog, a VisualJJ-style graph — one scenario,
+  every indicator drawn) Ric chose *both* graph renderings: the compact smartlog is what he will keep in
+  the Explorer for daily use because it condenses to a narrow pane; the detailed graph gets the
+  extension's own container as the "elegant" view. Consequences taken: a new M6 (old M6–M10 renumbered
+  M7–M11; §10.1 item numbers unchanged, the new PRs are 23a–23j); multi-stack (old M9) folds into M6; the
+  native tree is deleted at the end of M6; item 38b's drag and drop moves into the webviews; §7.9's
+  no-webview principle is unchanged (it is about text editing). The accepted costs are in §7.1.3 — the
+  largest is losing the user's file-icon theme on file rows. The mockup page's third-party reference
+  frames (Graphite's and VisualJJ's own demo GIFs) are linked from it, not committed. **Order is his
+  call:** M6 sits before PR creation because the later tree items (20, 29, 39, 38b) would otherwise be
+  built twice; if he would rather create PRs from the tree first, swap M6 and M7 — nothing in M7 depends
+  on the views. Verified for this decision (VS Code source and docs, 2026-09-20): `contributes.views`
+  entries take `type: "webview"` in `explorer`, `scm`, `debug`, `test`, `remote` and custom containers;
+  `webview/context` menus with `data-vscode-context` give native context menus; container icons are image
+  files, not codicons; `retainContextWhenHidden` is documented as high-memory and is not needed here.
 - **DECIDED 2026-09-19: `ExtensionApi` stays as is** — a plain `{ provider, refresh }` test seam (§9.1), no
   rename, no `getAPI(version)` shell like the built-in git extension (no external consumers exist or are
   planned). **M5 design note:** the fake runner/terminal injection §9.4 needs for extension-host tests must
@@ -1789,7 +2039,7 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
   `context.extensionMode === vscode.ExtensionMode.Test`, keeping `{ provider, refresh }` unconditional.
 - **`gh stack link` changes the checked-out branch (found 2026-09-19).** After the 8-branch relink the
   working tree was left on `m1/01-scaffold` (reflog: "moving from m1/08-vscode-scan-settings to
-  m1/01-scaffold"). For §7.13.4 / M6: `core/nativeStack.ts` must record HEAD before the link and restore it
+  m1/01-scaffold"). For §7.13.4 / M7: `core/nativeStack.ts` must record HEAD before the link and restore it
   after (`git checkout -` or by name), and refuse to run with a dirty tree.
 - **SonarQube Cloud (connected by Ric 2026-09-19).** Automatic analysis; default "Sonar way" gate (new
   reliability/security/maintainability A, duplication ≤ 3 %, hotspots 100 % reviewed — no coverage
@@ -1815,7 +2065,7 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
   locale-dependent; primer §26 corrected), then restacking. **Result 2026-09-20: all eight PRs green on CI
   and on the Sonar gate, zero open new-code issues.** Open question for Ric after reading the unit tests:
   keep the repeated arrange blocks (tests as self-contained specifications) or fold them into small builders.
-- **M8 "Sync Stack" MUST handle a remote rewritten by someone else (verified by simulation 2026-09-20).**
+- **M9 "Sync Stack" MUST handle a remote rewritten by someone else (verified by simulation 2026-09-20).**
   GitHub's "Rebase stack" button does a server-side cascading rebase and force-pushes every branch; a
   co-worker (or `gh stack sync`) can do the same. git-spice does not notice: `gs repo sync` fetches only
   trunk, `gs stack restack` then builds a *third* lineage, and `gs stack submit` uses

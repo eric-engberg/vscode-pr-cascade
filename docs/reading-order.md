@@ -177,7 +177,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
     (E14), the bottom layer squash-merged (E15), and a tag sharing a branch's name (the
     names, `head` and SHAs are the branches', not `heads/<name>` or the tag's). The E14
     and E15 blocks document what the tree shows in those states — git's answer, until
-    git-spice restacks or syncs in M8 — rather than a fix.
+    git-spice restacks or syncs in M9 — rather than a fix.
 18. **`src/core/changes.ts`** — the first M2 file: the files one layer changes against the
     layer below it, and which of them are binary. Read the doc comment on
     `parseNameStatus` for the `-z` format (quoted from git 2.50, verified on a real
