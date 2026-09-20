@@ -1,0 +1,563 @@
+<!--
+  PR Cascade · view lab (plan §7.1). Three mockups of one sample stack: A the v0.1 native tree,
+  B the Graphite-style smartlog (compact, Explorer), C the VisualJJ-style graph (detailed, own container),
+  followed by the inventory of every indicator and action and where its data comes from.
+  Built 2026-09-20 as a claude.ai artifact; this copy drops the two embedded frames of Graphite's and
+  VisualJJ's demo GIFs (linked instead). Open the file in a browser; it needs no server.
+  Excluded from the .vsix by .vscodeignore (docs/**).
+-->
+<title>Stack View Lab</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #f6f5f2; --ground-2: #eeece7; --ink: #1f2328; --muted: #5b6068; --rule: #dcd9d3;
+    --accent: #3b6d9c; --accent-soft: #e6eef6; --accent-ink: #244b70;
+    --open: #2da44e; --draft: #6e7781; --merged: #8250df; --closed: #cf222e;
+    --warn: #b08800; --err: #cf222e; --info: #0969da; --add: #1a7f37; --del: #cf222e;
+    --chip: #ebe9e3; --chip-ink: #3d4148;
+    --vs-bg: #181818; --vs-panel: #1f1f1f; --vs-row-hover: #2a2d2e; --vs-current: #04395e; --vs-rule: #2b2b2b;
+    --vs-fg: #cccccc; --vs-dim: #9d9d9d; --vs-dimmer: #6e7681; --vs-blue: #3794ff; --vs-open: #3fb950; --vs-draft: #8b949e;
+    --vs-merged: #a371f7; --vs-warn: #d8af1b; --vs-err: #f14c4c; --vs-yellow: #e2c08d; --vs-add: #81b88b; --vs-del: #c74e39;
+    --vs-status: #0078d4; --vs-btn: #0078d4; --vs-focus: #007fd4;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #17191d; --ground-2: #1f2227; --ink: #e6e4df; --muted: #9a9ea5; --rule: #2c3036;
+      --accent: #7fa9d4; --accent-soft: #20303f; --accent-ink: #b7d0e8;
+      --open: #3fb950; --draft: #8b949e; --merged: #a371f7; --closed: #f85149;
+      --warn: #d8af1b; --err: #f85149; --info: #58a6ff; --add: #3fb950; --del: #f85149;
+      --chip: #262a30; --chip-ink: #c9cdd3;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #17191d; --ground-2: #1f2227; --ink: #e6e4df; --muted: #9a9ea5; --rule: #2c3036;
+    --accent: #7fa9d4; --accent-soft: #20303f; --accent-ink: #b7d0e8;
+    --open: #3fb950; --draft: #8b949e; --merged: #a371f7; --closed: #f85149;
+    --warn: #d8af1b; --err: #f85149; --info: #58a6ff; --add: #3fb950; --del: #f85149;
+    --chip: #262a30; --chip-ink: #c9cdd3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding-block: 32px 64px; padding-inline: clamp(16px, 4vw, 48px);
+    background: var(--ground); color: var(--ink);
+    font-family: "Public Sans", "Helvetica Neue", Arial, sans-serif; font-size: 15px; line-height: 1.5;
+  }
+  h1, h2, h3 { font-family: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif; font-weight: 700; text-wrap: balance; margin: 0; }
+  h1 { font-size: clamp(30px, 4vw, 44px); font-variation-settings: "opsz" 96; line-height: 1.05; letter-spacing: -0.01em; }
+  h2 { font-size: 24px; margin-block: 48px 8px; }
+  h3 { font-size: 17px; font-weight: 500; margin-block: 0 4px; }
+  p { max-width: 68ch; margin-block: 0 12px; }
+  code, .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 0.92em; }
+  .lede { font-size: 17px; color: var(--muted); max-width: 70ch; }
+  .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent-ink); }
+  .header { display: grid; gap: 12px; margin-bottom: 28px; }
+  .scenario { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 28px; border-block: 1px solid var(--rule); padding-block: 14px; margin-block: 8px 32px; }
+  .scenario dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 14px; }
+  .scenario dt { color: var(--muted); }
+  .scenario dd { margin: 0; }
+  .panes { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 20px; align-items: start; }
+  .pane-head { display: grid; gap: 4px; margin-bottom: 10px; }
+  .pane-head .ref { font-size: 13px; color: var(--muted); }
+  .pane-head .cost { font-size: 13px; }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--chip); color: var(--chip-ink); font-size: 12px; font-weight: 500; white-space: nowrap; }
+  .chip.own { background: var(--accent-soft); color: var(--accent-ink); }
+  .chip.m { font-family: "IBM Plex Mono", monospace; }
+  .note { border-left: 3px solid var(--accent); padding: 8px 14px; background: var(--ground-2); border-radius: 0 6px 6px 0; max-width: 80ch; font-size: 14px; margin-block: 12px; }
+
+  /* ---------- the three panes: VS Code Dark Modern, painted explicitly ---------- */
+  .vs { background: var(--vs-bg); color: var(--vs-fg); border: 1px solid var(--vs-rule); border-radius: 8px; overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Ubuntu, sans-serif; font-size: 13px; line-height: 22px; }
+  .vs .title { display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 20px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--vs-fg); border-bottom: 1px solid var(--vs-rule); }
+  .vs .title .sp { flex: 1; }
+  .vs .tb { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 4px; color: var(--vs-fg); }
+  .vs .tb:hover { background: var(--vs-row-hover); }
+  .i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; flex: none; vertical-align: -3px; }
+  .i.fill { fill: currentColor; stroke: none; }
+  .row { display: flex; align-items: center; gap: 6px; height: 22px; padding-right: 8px; white-space: nowrap; overflow: hidden; }
+  .row:hover { background: var(--vs-row-hover); }
+  .row .lbl { overflow: hidden; text-overflow: ellipsis; }
+  .row .desc { color: var(--vs-dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .row .sp { flex: 1; }
+  .row .badge { font-size: 11px; font-weight: 600; padding-inline: 4px; border-radius: 3px; }
+  .row .acts { display: none; gap: 2px; }
+  .row.current { background: var(--vs-current); }
+  .row.current .acts { display: inline-flex; }
+  .row .chev { width: 16px; height: 16px; flex: none; color: var(--vs-fg); }
+  .row .chev.none { visibility: hidden; }
+  .row.file { font-size: 13px; }
+  .c-blue { color: var(--vs-blue); } .c-open { color: var(--vs-open); } .c-draft { color: var(--vs-draft); } .c-merged { color: var(--vs-merged); }
+  .c-warn { color: var(--vs-warn); } .c-err { color: var(--vs-err); } .c-dim { color: var(--vs-dim); } .c-dimmer { color: var(--vs-dimmer); } .c-yellow { color: var(--vs-yellow); }
+  .c-add { color: var(--vs-add); } .c-del { color: var(--vs-del); }
+  .status { display: flex; align-items: center; gap: 6px; height: 22px; padding-inline: 10px; background: var(--vs-status); color: #fff; font-size: 12px; }
+  .banner { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font-size: 12px; background: rgba(216,175,27,0.12); border-bottom: 1px solid var(--vs-rule); color: var(--vs-fg); line-height: 16px; }
+  .banner .fix { margin-left: auto; color: var(--vs-blue); white-space: nowrap; }
+  .vbtn { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; height: 22px; border-radius: 3px; background: var(--vs-btn); color: #fff; font-size: 12px; font-weight: 500; white-space: nowrap; }
+  .vbtn.ghost { background: transparent; border: 1px solid #3c3c3c; color: var(--vs-fg); }
+  .vbtn.off { opacity: 0.45; }
+  .pill { display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 6px 0 5px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 16px; border: 1px solid transparent; white-space: nowrap; }
+  .pill .i { width: 12px; height: 12px; }
+  .pill.open { background: rgba(63,185,80,0.16); color: var(--vs-open); }
+  .pill.draft { background: rgba(139,148,158,0.18); color: var(--vs-draft); }
+  .pill.merged { background: rgba(163,113,247,0.18); color: var(--vs-merged); }
+  .pill.ring { box-shadow: 0 0 0 1.5px var(--vs-blue); }
+  .pill.here { background: var(--vs-blue); color: #fff; }
+  .pill.trunk { background: rgba(157,157,157,0.15); color: var(--vs-dim); }
+  .pill.wc { background: rgba(226,192,141,0.18); color: var(--vs-yellow); }
+  .pill.pos { font-weight: 700; opacity: 0.9; }
+  .age { color: var(--vs-dimmer); font-size: 11px; margin-left: auto; padding-left: 6px; }
+
+  /* cards (Graphite-style) */
+  .g-head { padding: 6px 10px 2px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; color: var(--vs-dim); }
+  .g-tools { display: flex; align-items: center; gap: 4px; padding: 2px 8px 6px; border-bottom: 1px solid var(--vs-rule); }
+  .g-tools .sp { flex: 1; }
+  .g-summary { padding: 4px 10px; font-size: 11px; color: var(--vs-dim); border-bottom: 1px solid var(--vs-rule); }
+  .rail { position: relative; padding: 6px 0 4px; }
+  .rail::before { content: ""; position: absolute; left: 21px; top: 6px; bottom: 26px; width: 2px; background: #3c3c3c; }
+  .rrow { position: relative; display: flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 8px 2px 36px; }
+  .rrow .node { position: absolute; left: 15px; top: 50%; width: 14px; height: 14px; margin-top: -7px; border-radius: 50%; border: 2px solid #8b949e; background: var(--vs-bg); }
+  .rrow .node.filled { background: var(--vs-blue); border-color: var(--vs-blue); }
+  .rrow .node.hollow { border-style: dashed; }
+  .rrow .node.merged { background: var(--vs-merged); border-color: var(--vs-merged); transform: rotate(45deg); border-radius: 2px; }
+  .rrow .node.wc { background: var(--vs-yellow); border-color: var(--vs-yellow); width: 10px; height: 10px; left: 17px; margin-top: -5px; }
+  .rrow .node.trunk { background: #6e7681; border-color: #6e7681; }
+  .rrow.current { background: var(--vs-current); }
+  .rrow.current::before { content: ""; position: absolute; left: 4px; top: 50%; margin-top: -5px; border: 5px solid transparent; border-left: 6px solid var(--vs-fg); }
+  .rrow.focused { outline: 1px solid var(--vs-focus); outline-offset: -1px; }
+  .rrow .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+  .rrow .meta { color: var(--vs-dimmer); font-size: 11px; white-space: nowrap; }
+  .rrow .tail { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+  .rrow .grip { color: var(--vs-dimmer); opacity: 0; }
+  .rrow:hover .grip { opacity: 1; }
+  .panel { border-top: 1px solid var(--vs-rule); }
+  .panel .ph { display: flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+  .panel .pl { padding: 0 10px 6px; font-size: 12px; color: var(--vs-dim); }
+  .panel .files .row { padding-left: 10px; height: 20px; }
+  .panel .pact { display: flex; gap: 6px; padding: 6px 10px 10px; }
+  .foot { display: flex; align-items: center; gap: 6px; padding: 3px 10px; border-top: 1px solid var(--vs-rule); font-size: 11px; color: var(--vs-dim); }
+
+  /* graph (VisualJJ / ISL-style) */
+  .gtools { display: flex; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--vs-rule); flex-wrap: wrap; }
+  .gfilter { display: flex; gap: 2px; padding: 4px 8px; border-bottom: 1px solid var(--vs-rule); font-size: 11px; }
+  .gfilter span { padding: 1px 8px; border-radius: 3px; color: var(--vs-dim); }
+  .gfilter span.on { background: var(--vs-row-hover); color: var(--vs-fg); }
+  .grow { display: grid; grid-template-columns: 52px 1fr; min-height: 30px; align-items: stretch; }
+  .grow:hover .content { background: var(--vs-row-hover); }
+  .grow .glyph { position: relative; }
+  .grow .glyph svg { display: block; width: 52px; height: 100%; min-height: 30px; }
+  .grow .content { display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 0; min-height: 30px; flex-wrap: wrap; row-gap: 2px; }
+  .grow .content .t { font-weight: 500; }
+  .grow .content .sha { color: var(--vs-dimmer); font-family: ui-monospace, Menlo, monospace; font-size: 11px; background: #2b2b2b; padding: 0 4px; border-radius: 3px; }
+  .grow.current .content { background: rgba(4,57,94,0.55); }
+  .hover-acts { display: flex; gap: 4px; flex-basis: 100%; }
+  .wcfiles { flex-basis: 100%; display: grid; gap: 1px; font-size: 12px; padding-left: 2px; }
+  .wcfiles span { display: flex; gap: 6px; align-items: center; }
+  .legend-edge { display: inline-block; width: 26px; border-top: 2px dashed var(--vs-warn); vertical-align: middle; }
+
+  /* smartlog rail (Graphite dialect) */
+  .srow { display: grid; grid-template-columns: 40px 1fr; min-height: 24px; align-items: stretch; }
+  .srow .glyph svg { display: block; width: 40px; height: 100%; min-height: 24px; }
+  .srow .c { display: flex; align-items: center; gap: 6px; padding: 0 8px 0 0; min-height: 24px; overflow: hidden; }
+  .srow .n { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .srow .tail { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
+  .srow:hover .c { background: var(--vs-row-hover); }
+  .srow.current .c { background: var(--vs-current); }
+  .srow.current { position: relative; }
+  .srow.current::before { content: ""; position: absolute; left: 2px; top: 50%; margin-top: -5px; border: 5px solid transparent; border-left: 6px solid var(--vs-fg); }
+  .srow.focused .c { outline: 1px solid var(--vs-focus); outline-offset: -1px; }
+  .srow.confirm .c { color: var(--vs-open); }
+  .srow.ghost .c { opacity: 0.5; outline: 1px solid var(--vs-focus); outline-offset: -1px; }
+  .prdot { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 50%; color: #fff; }
+  .prdot .i { width: 10px; height: 10px; stroke-width: 1.8; }
+  .prdot.open { background: var(--vs-open); } .prdot.draft { background: var(--vs-draft); } .prdot.merged { background: var(--vs-merged); }
+  /* ---- Graphite near-identical (B) ---- */
+  .gr { background: #171717; color: #cccccc; border: 1px solid #2b2b2b; border-radius: 8px; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 12.5px; line-height: 19px; }
+  .gr .sp { flex: 1; }
+  .gr-head { padding: 6px 10px 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #cccccc; }
+  .gr-tools { display: flex; align-items: center; gap: 10px; padding: 4px 10px 8px; }
+  .gr-sync { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 0 0 8px; background: #2d2d2d; border-radius: 3px; font-size: 12.5px; }
+  .gr-sync-chev { display: inline-flex; align-items: center; height: 24px; padding: 0 6px; border-left: 1px solid #171717; }
+  .gr-ico { width: 15px; height: 15px; color: #cccccc; }
+  .gr-row { display: grid; grid-template-columns: 40px 1fr; height: 19px; }
+  .gr-row .g svg { display: block; width: 40px; height: 19px; }
+  .gr-row .c { display: flex; align-items: center; gap: 6px; height: 19px; padding-right: 8px; overflow: hidden; }
+  .gr-row .c.lane { padding-left: 10px; }
+  .gr-row .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #cccccc; }
+  .gr-row:hover .c { background: #2a2d2e; }
+  .gr-row.cur .c { background: #01375f; }
+  .gr-row.cur .name { color: #ffffff; }
+  .gr-row.foc .c { outline: 1px solid #6a9bd1; outline-offset: -1px; }
+  .gr-tail { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; flex: none; }
+  .gr-cloud { width: 15px; height: 15px; color: #abacad; }
+  .gr-restack { color: #cccccc; font-size: 12px; line-height: 1; }
+  .gr-dot { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; color: #fff; }
+  .gr-dot .i { width: 9px; height: 9px; stroke-width: 2; }
+  .gr-dot.open { background: #327e43; } .gr-dot.draft { background: #6e7681; } .gr-dot.merged { background: #8250df; }
+  .gr-age { width: 28px; text-align: right; color: #8b8b8b; font-size: 11.5px; }
+  .gr-fill { height: 72px; }
+  .gr-small { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; line-height: 1; }
+  .gr-row .c-blue, .gr-cloud.c-blue { color: var(--vs-blue); } .gr-row .c-warn, .gr-cloud.c-warn { color: var(--vs-warn); }
+  .gr-row .c-err { color: var(--vs-err); } .gr-row .c-yellow { color: var(--vs-yellow); } .gr-row .c-dim { color: #8b8b8b; }
+  .gr-panel { border-top: 1px solid #2b2b2b; padding-top: 2px; }
+  .gr-ph { display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 10px 0 6px; font-weight: 700; font-size: 12.5px; }
+  .gr-trow { display: flex; align-items: center; gap: 5px; height: 19px; white-space: nowrap; overflow: hidden; }
+  .gr-trow .i { width: 15px; height: 15px; color: #cccccc; }
+  .gr-mod, .gr-mod .i { color: #e2c08d; }
+  .gr-btns { display: flex; gap: 6px; padding: 8px 10px 10px; }
+  .gr-btn { flex: 1; text-align: center; height: 24px; line-height: 24px; border-radius: 2px; background: #3e3e3d; color: #cccccc; font-size: 12.5px; }
+  .gr-btn.primary { background: #43a3eb; color: #ffffff; }
+  .gr-status { display: flex; align-items: center; gap: 14px; height: 22px; padding: 0 10px; background: #141719; border-top: 1px solid #2b2b2b; font-size: 11.5px; color: #cccccc; white-space: nowrap; overflow: hidden; }
+  .gr-status span { display: inline-flex; align-items: center; gap: 4px; }
+
+  /* ---- VisualJJ near-identical (C) ---- */
+  .vj { background: #151515; color: #c8c8c8; border: 1px solid #2b2b2b; border-radius: 8px; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 13.5px; }
+  .vj-head { padding: 8px 12px 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #cccccc; }
+  .vj-tools { display: flex; gap: 8px; padding: 2px 12px 14px; flex-wrap: wrap; }
+  .vj-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; background: #2f2f2f; border-radius: 6px; color: #d4d4d4; font-size: 13.5px; }
+  .vj-btn.sq { padding: 0; width: 28px; justify-content: center; }
+  .vj-btn .i { width: 16px; height: 16px; }
+  .vj-row { display: grid; grid-template-columns: 58px 1fr; position: relative; }
+  .vj-row.tail { height: 30px; }
+  .vj-row .g { position: relative; }
+  .vj-row .g > i { position: absolute; top: 0; bottom: 0; width: 3px; background: #c5c5c5; }
+  .vj-row .g > i.m { left: 14.5px; }
+  .vj-row .g > i.r { left: 38.5px; }
+  .vj-row .g > i.up { bottom: auto; height: 20px; }
+  .vj-row .g > i.dn { top: 20px; }
+  .vj-row .g > i.dnj { top: 20px; bottom: 18px; }
+  .vj-row .g > i.dash { background: repeating-linear-gradient(to bottom, #c5c5c5 0 3px, transparent 3px 8px); }
+  .vj-row .g > b { position: absolute; display: block; }
+  .vj-row .g > b.dot { left: 30px; top: 10px; width: 20px; height: 20px; border-radius: 50%; background: #c5c5c5; }
+  .vj-row .g > b.dot.blue { background: #2860b0; }
+  .vj-row .g > b.dia { left: 8px; top: 12px; width: 16px; height: 16px; transform: rotate(45deg); background: #c1c2c1; }
+  .vj-row .g > b.dia.teal { background: #73b8b1; }
+  .vj-row .g > svg.j { position: absolute; left: 0; bottom: 0; width: 58px; height: 18px; display: block; }
+  .vj-row .g > svg.sq { position: absolute; left: 0; top: 0; width: 58px; height: 30px; display: block; }
+  .vj-row .c { padding: 9px 12px 14px 0; line-height: 22px; min-width: 0; overflow-wrap: anywhere; }
+  .vj-row .t { color: #e0e0e0; }
+  .vj-row .t.dim { color: #9a9a9a; }
+  .vj-age { color: #8a8a8a; white-space: nowrap; }
+  .vj-unpushed { color: #58a6ff; font-size: 12px; white-space: nowrap; }
+  .vj-pill { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; height: 20px; margin: 0 6px 2px 0; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #f2f2f2; white-space: nowrap; }
+  .vj-pill .i { width: 12px; height: 12px; stroke-width: 1.8; }
+  .vj-pill.main { background: #2f2f2f; color: #cfcfcf; font-weight: 500; border-radius: 4px; }
+  .vj-pill.editing { background: #2860b0; }
+  .vj-pill.draft { background: #565d65; }
+  .vj-pill.review { background: #885b04; }
+  .vj-pill.approved { background: #1f6f3a; }
+  .vj-pill.merged { background: #6b46b8; }
+  .vj-pill.restack { background: #7a4a12; }
+  .vj-pill.base { background: #7a4a12; }
+  .vj-pill.fail { background: #8e2b2b; }
+  .vj-pill.nt { background: #3a3a3a; color: #bdbdbd; font-weight: 500; }
+  .vj-check { float: right; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; margin: -4px 0 4px 8px; border-radius: 6px; background: #026dcd; color: #fff; }
+  .vj-check .i { width: 16px; height: 16px; stroke-width: 2; }
+  .vj-files { display: flex; flex-direction: column; gap: 2px; padding: 4px 0 0 4px; line-height: 20px; }
+  .vj-file { display: inline-flex; align-items: center; gap: 6px; }
+  .vj-file .i { width: 15px; height: 15px; }
+  .vj-file.add { color: #5ec06e; } .vj-file.mod { color: #e2c08d; }
+  .vj-menu { position: absolute; left: 112px; top: 30px; width: 228px; padding: 4px 0; background: #1f1f1f; border: 1px solid #454545; border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.5); font-size: 12.5px; color: #d4d4d4; z-index: 3; }
+  .vj-menu div { padding: 3px 12px; line-height: 18px; }
+  .vj-menu div.on { background: #04395e; color: #fff; }
+  .vj-menu .sep { height: 1px; padding: 0; margin: 4px 8px; background: #454545; }
+  .vj-fill { height: 170px; }
+
+  .refshot { margin: 14px 0 0; }
+  .refshot img { display: block; max-width: 100%; border-radius: 8px; border: 1px solid var(--rule); }
+  .refshot figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .refshot a { color: var(--accent); }
+
+  /* matrices */
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; margin-block: 12px 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--rule); }
+  th { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: var(--ground-2); position: sticky; top: 0; }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.k { white-space: nowrap; font-weight: 500; }
+  td.ms { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td .src { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); }
+  .seen { display: flex; flex-wrap: wrap; gap: 4px; }
+  .actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px 28px; margin-top: 8px; }
+  .actions h3 { margin-bottom: 6px; }
+  .actions ul { margin: 0; padding-left: 18px; font-size: 14px; }
+  .actions li { margin-bottom: 3px; }
+  .actions li .tr { color: var(--muted); }
+  .decide { display: grid; gap: 14px; max-width: 80ch; }
+  .decide .q { padding: 12px 16px; background: var(--ground-2); border-radius: 8px; }
+  .decide .q b { display: block; margin-bottom: 4px; font-family: "Bricolage Grotesque", sans-serif; font-weight: 700; font-size: 16px; }
+  .sources { font-size: 13px; color: var(--muted); }
+  .sources a { color: var(--accent); }
+  @media (max-width: 720px) { .row .desc { display: none; } }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="pr" viewBox="0 0 16 16"><circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><circle cx="12" cy="12.5" r="1.6"/><path d="M4 5.1v5.8M12 10.9V7a2 2 0 0 0-2-2H8.2"/><path d="M9.7 3.6 8.2 5l1.5 1.4"/></symbol>
+  <symbol id="pr-draft" viewBox="0 0 16 16"><circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><circle cx="12" cy="12.5" r="1.6"/><path d="M4 5.1v5.8"/><path d="M12 10.9V8.2M12 6.2V5.5" stroke-dasharray="1.5 1.6"/></symbol>
+  <symbol id="pr-new" viewBox="0 0 16 16"><circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><path d="M4 5.1v5.8M11.5 4v5M9 6.5h5"/></symbol>
+  <symbol id="merge" viewBox="0 0 16 16"><circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><circle cx="12" cy="7.5" r="1.6"/><path d="M4 5.1v5.8M4 6c.4 2.4 2.6 3 6.4 3"/></symbol>
+  <symbol id="check" viewBox="0 0 16 16"><path d="M3 8.6l3.2 3.2L13 4.8"/></symbol>
+  <symbol id="x" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
+  <symbol id="warn" viewBox="0 0 16 16"><path d="M8 2.6 14 13.2H2z"/><path d="M8 6.6v3.2M8 11.4v.2"/></symbol>
+  <symbol id="cloud-up" viewBox="0 0 16 16"><path d="M5.2 12.5H4.6a3 3 0 0 1-.3-6 4 4 0 0 1 7.7-1 3.2 3.2 0 0 1 .3 6.4h-1.5"/><path d="M8 14.2V8.4M5.9 10.5 8 8.4l2.1 2.1"/></symbol>
+  <symbol id="cloud-down" viewBox="0 0 16 16"><path d="M5.2 12.5H4.6a3 3 0 0 1-.3-6 4 4 0 0 1 7.7-1 3.2 3.2 0 0 1 .3 6.4h-1.5"/><path d="M8 8.4v5.8M5.9 12.1 8 14.2l2.1-2.1"/></symbol>
+  <symbol id="comment" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7.2H7.4L4.6 13.4v-2.7H2.5z"/></symbol>
+  <symbol id="target" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6"/><circle cx="8" cy="8" r="1.8"/></symbol>
+  <symbol id="layers" viewBox="0 0 16 16"><path d="M8 2.6 14 6 8 9.4 2 6z"/><path d="M2 9.6 8 13l6-3.4"/></symbol>
+  <symbol id="chev-r" viewBox="0 0 16 16"><path d="M6 3.6 10.4 8 6 12.4"/></symbol>
+  <symbol id="chev-d" viewBox="0 0 16 16"><path d="M3.6 6 8 10.4 12.4 6"/></symbol>
+  <symbol id="refresh" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13.2 2.6V6H9.8"/></symbol>
+  <symbol id="gear" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6 5 5M11 11l1.4 1.4M12.4 3.6 11 5M5 11l-1.4 1.4"/></symbol>
+  <symbol id="branch" viewBox="0 0 16 16"><circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><circle cx="12" cy="5" r="1.6"/><path d="M4 5.1v5.8M12 6.6c0 3.2-8 1.2-8 4.4"/></symbol>
+  <symbol id="branch-changes" viewBox="0 0 16 16"><circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><path d="M4 5.1v5.8"/><path d="M9 4.5h5M9 8h5M9 11.5h3"/></symbol>
+  <symbol id="compare" viewBox="0 0 16 16"><circle cx="4" cy="4" r="1.6"/><circle cx="12" cy="12" r="1.6"/><path d="M4 5.6v3.2A2.2 2.2 0 0 0 6.2 11H9M12 10.4V7.2A2.2 2.2 0 0 0 9.8 5H7"/><path d="M8.4 9.6 10 11l-1.6 1.4M7.6 6.4 6 5l1.6-1.4"/></symbol>
+  <symbol id="trash" viewBox="0 0 16 16"><path d="M3 4.5h10M6.5 2.5h3M4.3 4.5l.6 8.5h6.2l.6-8.5M6.8 7v4M9.2 7v4"/></symbol>
+  <symbol id="grip" viewBox="0 0 16 16"><circle cx="6" cy="4" r="1" class="d"/><circle cx="10" cy="4" r="1"/><circle cx="6" cy="8" r="1"/><circle cx="10" cy="8" r="1"/><circle cx="6" cy="12" r="1"/><circle cx="10" cy="12" r="1"/></symbol>
+  <symbol id="sync" viewBox="0 0 16 16"><path d="M3 6.5a5 5 0 0 1 8.6-1.9M13 9.5a5 5 0 0 1-8.6 1.9"/><path d="M11.8 1.8v3h-3M4.2 14.2v-3h3"/></symbol>
+  <symbol id="ellipsis" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r="1.1"/><circle cx="8" cy="8" r="1.1"/><circle cx="12.5" cy="8" r="1.1"/></symbol>
+  <symbol id="circle-slash" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6"/><path d="M4.2 11.8l7.6-7.6"/></symbol>
+  <symbol id="open-ext" viewBox="0 0 16 16"><path d="M7 3.5H3.5v9h9V9"/><path d="M9.5 3h3.5v3.5M13 3 7.5 8.5"/></symbol>
+  <symbol id="repo" viewBox="0 0 16 16"><path d="M4.5 2.5h8v11h-7a1.5 1.5 0 0 1-1.5-1.5V4a1.5 1.5 0 0 1 1.5-1.5z"/><path d="M4.5 11.5h8M6.5 5.2h4"/></symbol>
+  <symbol id="folder" viewBox="0 0 16 16"><path d="M2 4.5h4l1.5 1.5H14v7H2z"/></symbol>
+  <symbol id="dotfile" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><circle cx="8" cy="8" r="2" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="undo" viewBox="0 0 16 16"><path d="M4 6.5h5.5a3 3 0 0 1 0 6H7"/><path d="M6.5 3.5 3.5 6.5l3 3"/></symbol>
+  <symbol id="redo" viewBox="0 0 16 16"><path d="M12 6.5H6.5a3 3 0 0 0 0 6H9"/><path d="M9.5 3.5l3 3-3 3"/></symbol>
+  <symbol id="boxplus" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M8 5.5v5M5.5 8h5"/></symbol>
+  <symbol id="boxm" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5.5 10.5v-5l2.5 3 2.5-3v5"/></symbol>
+</svg>
+
+<div class="header">
+  <div class="eyebrow">PR Cascade · view decision</div>
+  <h1>Stack View Lab</h1>
+  <p class="lede">One sample stack, rendered three ways, with every indicator any of the reference tools shows drawn in. The panes are mockups, not screenshots: each sits in a VS Code Dark Modern frame and shows exactly what that rendering technology can and cannot display. Below them, the full inventory says where each indicator's data comes from and which milestone can compute it.</p>
+</div>
+
+<div class="scenario">
+  <dl>
+    <dt>Repo</dt><dd><span class="mono">platform-services</span> on github.com, native stack #17 linked; a second root <span class="mono">platform-infra</span> is on <span class="mono">main</span></dd>
+    <dt>Trunk</dt><dd><span class="mono">origin/main @ 9f3e2a1</span>; local <span class="mono">main</span> ↓3 behind, the stack's base ↓5 behind (one of those is #480's squash)</dd>
+    <dt>HEAD</dt><dd>on layer 3, working tree dirty (2 files)</dd>
+  </dl>
+  <dl>
+    <dt>Layer 4</dt><dd><span class="mono">…-part4</span> · untracked by git-spice, no PR, never pushed, 1 commit, 15 min old</dd>
+    <dt>Layer 3</dt><dd><span class="mono">…-part3</span> · #482 draft, checks 2 of 7 failing, needs restack, current</dd>
+    <dt>Layer 2</dt><dd><span class="mono">…-part2</span> · #481 open, changes requested, 2 unresolved comments, ↑1 unpushed, PR base moved to <span class="mono">main</span></dd>
+    <dt>Layer 1</dt><dd><span class="mono">…-part1</span> · #480 merged by squash, branch still local</dd>
+    <dt>Other stacks</dt><dd><span class="mono">fix/FWRK-1500-retry-timeout</span> · one layer, #479 open, 1 week old · and <span class="mono">other-work</span>, an unrelated branch off <span class="mono">main</span>, no PR, never pushed</dd>
+  </dl>
+</div>
+<div class="note"><b>One correction after seeing Graphite's demo.</b> Its current view is not a list: it is a smartlog, a fork of Sapling's Interactive Smartlog, and so is VisualJJ's. Both draw <em>every</em> stack in the repository on one rail. So the real choice has two steps: the native tree (A) against a smartlog webview, then, within the smartlog, Graphite's dialect (B: dense rows, a lower panel with buttons) or VisualJJ's (C: pills, chips, hover actions). Drawing all stacks is what the plan schedules for M9; a smartlog would pull that forward.</div>
+
+<div class="panes">
+
+  <!-- ================= A. native tree ================= -->
+  <section>
+    <div class="pane-head">
+      <h3>A · Native tree <span class="chip">what M1–M3 built</span></h3>
+      <div class="ref">VS Code <span class="mono">TreeView</span> in the Source Control panel. Reference: the plan's §7.1, the GitHub Pull Requests extension.</div>
+      <div class="cost">Per row: one icon, a label, one dim description, one 1–2 character badge, up to two hover actions. No rails, no pills, no buttons, no lower panel. Keyboard, theming, decorations and drag-and-drop come free.</div>
+    </div>
+    <div class="vs">
+      <div class="title">Stack <span class="sp"></span>
+        <span class="tb"><svg class="i"><use href="#refresh"/></svg></span>
+        <span class="tb"><svg class="i"><use href="#pr-new"/></svg></span>
+        <span class="tb"><svg class="i"><use href="#ellipsis"/></svg></span>
+      </div>
+      <div class="row" style="padding-left:8px"><svg class="i chev"><use href="#chev-d"/></svg><svg class="i c-dim"><use href="#branch"/></svg><span class="lbl">platform-services</span><span class="desc">4 layers · Stack #17</span></div>
+      <div class="row" style="padding-left:24px"><svg class="i chev none"><use href="#chev-r"/></svg><svg class="i c-warn"><use href="#warn"/></svg><span class="lbl">PR #480 merged</span><span class="desc">Sync Stack drops part1, restacks 3</span><span class="sp"></span><span class="badge c-blue">Sync</span></div>
+      <div class="row" style="padding-left:24px"><svg class="i chev"><use href="#chev-r"/></svg><svg class="i c-dimmer"><use href="#circle-slash"/></svg><span class="lbl">feat/FWRK-1434-part4</span><span class="desc">1 commit · not tracked · no PR</span><span class="sp"></span><span class="badge c-blue" title="never pushed">↑</span></div>
+      <div class="row" style="padding-left:24px"><svg class="i chev none"><use href="#chev-r"/></svg><svg class="i c-yellow"><use href="#branch-changes"/></svg><span class="lbl">Uncommitted changes</span><span class="desc">2 files</span></div>
+      <div class="row current" style="padding-left:24px"><svg class="i chev"><use href="#chev-d"/></svg><svg class="i c-blue"><use href="#target"/></svg><span class="lbl">feat/FWRK-1434-part3</span><span class="desc">#482 · draft · 2 checks failing · current</span><span class="sp"></span><span class="acts"><span class="tb"><svg class="i"><use href="#open-ext"/></svg></span><span class="tb"><svg class="i"><use href="#cloud-up"/></svg></span></span><span class="badge c-warn" title="needs restack">⇈</span></div>
+      <div class="row file" style="padding-left:56px"><span class="c-yellow" style="width:14px">M</span><span class="lbl">ingress.ts</span><span class="desc">src/collector</span></div>
+      <div class="row file" style="padding-left:56px"><span class="c-add" style="width:14px">A</span><span class="lbl">ingress.test.ts</span><span class="desc">src/collector</span></div>
+      <div class="row file" style="padding-left:56px"><span class="c-yellow" style="width:14px">M</span><span class="lbl">package.json</span></div>
+      <div class="row" style="padding-left:24px"><svg class="i chev"><use href="#chev-r"/></svg><svg class="i c-open"><use href="#pr"/></svg><span class="lbl">feat/FWRK-1434-part2</span><span class="desc">#481 · open · changes requested · 2 unresolved</span><span class="sp"></span><span class="badge c-blue" title="needs push">↑1</span></div>
+      <div class="row" style="padding-left:24px"><svg class="i chev"><use href="#chev-r"/></svg><svg class="i c-merged"><use href="#merge"/></svg><span class="lbl">feat/FWRK-1434-part1</span><span class="desc">#480 · merged · 2 commits</span></div>
+      <div class="row" style="padding-left:24px"><svg class="i chev none"><use href="#chev-r"/></svg><svg class="i c-dimmer"><use href="#cloud-down"/></svg><span class="lbl c-dim">origin/main</span><span class="desc">@ 9f3e2a1 · ↓5 behind</span></div>
+      <div class="row" style="padding-left:8px"><svg class="i chev"><use href="#chev-r"/></svg><svg class="i c-dim"><use href="#branch"/></svg><span class="lbl">platform-infra</span><span class="desc">Not on a stack</span></div>
+      <div class="status"><svg class="i" style="width:14px;height:14px"><use href="#layers"/></svg> feat/FWRK-1434-part3* · 3 of 4</div>
+    </div>
+    <div class="note">What it cannot show without a tooltip: +/− lines, checks by name, review decision <em>and</em> comment count at once (the description is one string), the PR base mismatch, age. The badge holds one attention flag per row, chosen by priority: conflict › diverged › restack › push › failing checks › unresolved. Other stacks (<span class="mono">fix/FWRK-1500</span>, <span class="mono">other-work</span>) appear only with M9's "Show all stacks", as one collapsible section per stack tip; a tree cannot draw the fork.</div>
+  </section>
+
+  <!-- ================= B. smartlog ================= -->
+  <section>
+    <div class="pane-head">
+      <h3>B · Smartlog rail <span class="chip">Graphite, near-identical</span></h3>
+      <div class="ref">Redrawn from <a href="https://raw.githubusercontent.com/withgraphite/gti-vscode-images/master/gti-demo.gif">Graphite's demo GIF</a> (not embedded here: it is theirs): one lane graph carrying every stack, right lanes curving into their parent, an elided dashed segment above <span class="mono">main</span>, 19-pixel rows, a fixed tail of cloud · PR circle · ⇈ · age, a lower panel with a folder tree and Submit / Check out.</div>
+      <div class="cost">What differs from theirs is colour and a few extra tail glyphs, all in their 19-pixel row: the PR circle takes the PR's state (green open, grey draft, purple merged); ⇈ goes amber when a restack is needed; red <span class="mono">✕ 2/7</span> is failing checks and red <span class="mono">💬 2</span> unresolved comments; blue <span class="mono">↑1</span> plus a blue cloud is unpushed work; the amber compare icon is a PR whose base drifted from the local parent; dim names are merged or untracked layers; the yellow dashed node is the uncommitted working tree, which Graphite also draws.</div>
+    </div>
+    <div class="gr">
+      <div class="gr-head">PR Cascade</div>
+      <div class="gr-tools"><span class="gr-sync"><svg class="i"><use href="#repo"/></svg><span>Sync</span><span class="gr-sync-chev"><svg class="i" style="width:12px"><use href="#chev-d"/></svg></span></span><span class="sp"></span><svg class="i gr-ico"><use href="#refresh"/></svg><svg class="i gr-ico"><use href="#cloud-down"/></svg><svg class="i gr-ico"><use href="#gear"/></svg></div>
+
+      <div class="gr-row"><div class="g"><svg viewBox="0 0 40 19"><path d="M12 9.5V19" stroke="#c2c3c5" stroke-width="1.5"/><circle cx="12" cy="9.5" r="3.5" fill="#171717" stroke="#c2c3c5" stroke-width="1.5"/></svg></div><div class="c"><span class="name">feat/FWRK-1610-e-collector-ui</span><span class="gr-tail"><svg class="i gr-cloud"><use href="#cloud-up"/></svg><span class="gr-age">3m</span></span></div></div>
+      <div class="gr-row"><div class="g"><svg viewBox="0 0 40 19"><path d="M12 0v19" stroke="#c2c3c5" stroke-width="1.5"/><circle cx="12" cy="9.5" r="3.5" fill="#171717" stroke="#c2c3c5" stroke-width="1.5"/></svg></div><div class="c"><span class="name">feat/FWRK-1610-d-collector-api</span><span class="gr-tail"><svg class="i gr-cloud"><use href="#cloud-up"/></svg><span class="gr-age">3m</span></span></div></div>
+      <div class="gr-row"><div class="g"><svg viewBox="0 0 40 19"><path d="M12 0v19" stroke="#c2c3c5" stroke-width="1.5"/><circle cx="12" cy="9.5" r="3.5" fill="#171717" stroke="#c2c3c5" stroke-width="1.5"/></svg></div><div class="c"><span class="name">feat/FWRK-1610-c-collector-tests</span><span class="gr-tail"><svg class="i gr-cloud"><use href="#cloud-up"/></svg><span class="gr-age">3m</span></span></div></div>
+      <div class="gr-row"><div class="g"><svg viewBox="0 0 40 19"><path d="M12 0v19" stroke="#c2c3c5" stroke-width="1.5"/><circle cx="12" cy="9.5" r="3.5" fill="#171717" stroke="#c2c3c5" stroke-width="1.5"/></svg></div><div class="c"><span class="name">feat/FWRK-1610-b-collector-auth</span><span class="gr-tail"><svg class="i gr-cloud"><use href="#cloud-up"/></svg><span class="gr-age">3m</span></span></div></div>
+      <div class="gr-row"><div class="g"><svg viewBox="0 0 40 19"><path d="M12 0v19" stroke="#c2c3c5" stroke-width="1.5"/><circle cx="12" cy="9.5" r="3.5" fill="#171717" stroke="#c2c3c5" stroke-width="1.5"/></svg></div><div class="c"><span class="name">feat/FWRK-1610-a-collector-core</span><span class="gr-tail"><svg class="i gr-cloud"><use href="#cloud-up"/></svg><span class="gr-age">3m</span></span></div></div>
+
+      <div class="gr-row"><div class="g"><svg viewBox="0 0 40 19"><path d="M12 0v19" stroke="#c2c3c5" stroke-width="1.5"/><path d="M24 9.5V19" stroke="#c2c3c5" stroke-width="1.5"/><circle cx="24" cy="9.5" r="3.5" fill="#171717" stroke="#c2c3c5" stroke-width="1.5"/></svg></div><div class="c lane"><span class="name c-dim">feat/FWRK-1434-part4</span><span class="gr-tail"><span class="gr-small c-dim" title="no git-spice metadata, no PR">not tracked</span><svg class="i gr-cloud" title="never pushed"><use href="#cloud-up"/></svg><span class="gr-age">15m</span></span></div></div>
+      <div class="gr-row"><div class="g"><svg viewBox="0 0 40 19"><path d="M12 0v19" stroke="#c2c3c5" stroke-width="1.5"/><path d="M24 0v19" stroke="#c2c3c5" stroke-width="1.5"/><circle cx="24" cy="9.5" r="3" fill="#171717" stroke="#e2c08d" stroke-width="1.5" stroke-dasharray="2 1.5"/></svg></div><div class="c lane"><span class="name c-yellow">Uncommitted changes</span><span class="gr-tail"><span class="gr-small c-yellow">2 files</span><span class="gr-age">now</span></span></div></div>
+      <div class="gr-row cur"><div class="g"><svg viewBox="0 0 40 19"><path d="M12 0v19" stroke="#c2c3c5" stroke-width="1.5"/><path d="M24 0v19" stroke="#c2c3c5" stroke-width="1.5"/><circle cx="24" cy="9.5" r="3.5" fill="#ffffff" stroke="#ffffff" stroke-width="1.5"/></svg></div><div class="c lane"><span class="name">feat/FWRK-1434-part3</span><span class="gr-tail"><span class="gr-restack c-warn" title="needs restack: parent moved">⇈</span><span class="gr-small c-err" title="2 of 7 checks failing"><svg class="i" style="width:11px;height:11px"><use href="#x"/></svg>2/7</span><span class="gr-dot draft" title="#482 draft"><svg class="i"><use href="#pr-draft"/></svg></span><span class="gr-age">2d</span></span></div></div>
+      <div class="gr-row"><div class="g"><svg viewBox="0 0 40 19"><path d="M12 0v19" stroke="#c2c3c5" stroke-width="1.5"/><path d="M24 0v9.5" stroke="#c2c3c5" stroke-width="1.5"/><path d="M24 13c0 4-12 2-12 6" fill="none" stroke="#c2c3c5" stroke-width="1.5"/><circle cx="24" cy="9.5" r="3.5" fill="#171717" stroke="#c2c3c5" stroke-width="1.5"/></svg></div><div class="c lane"><span class="name">feat/FWRK-1434-part2</span><span class="gr-tail"><span class="gr-small c-err" title="2 unresolved review comments"><svg class="i" style="width:11px;height:11px"><use href="#comment"/></svg>2</span><svg class="i gr-cloud c-warn" title="PR base is main, local parent is part1"><use href="#compare"/></svg><span class="gr-small c-blue" title="1 commit not pushed">↑1</span><svg class="i gr-cloud c-blue" title="needs push"><use href="#cloud-up"/></svg><span class="gr-dot open" title="#481 open · changes requested"><svg class="i"><use href="#pr"/></svg></span><span class="gr-age">40m</span></span></div></div>
+      <div class="gr-row"><div class="g"><svg viewBox="0 0 40 19"><path d="M12 0v19" stroke="#c2c3c5" stroke-width="1.5"/><circle cx="12" cy="9.5" r="3.5" fill="#171717" stroke="#c2c3c5" stroke-width="1.5"/></svg></div><div class="c"><span class="name c-dim">feat/FWRK-1434-part1</span><span class="gr-tail"><span class="gr-dot merged" title="#480 merged"><svg class="i"><use href="#merge"/></svg></span><span class="gr-age">3d</span></span></div></div>
+
+      <div class="gr-row"><div class="g"><svg viewBox="0 0 40 19"><path d="M12 0v19" stroke="#c2c3c5" stroke-width="1.5"/><path d="M24 13c0 4-12 2-12 6" fill="none" stroke="#c2c3c5" stroke-width="1.5"/><circle cx="24" cy="9.5" r="3.5" fill="#171717" stroke="#c2c3c5" stroke-width="1.5"/></svg></div><div class="c lane"><span class="name">fix/FWRK-1500-retry-timeout</span><span class="gr-tail"><span class="gr-dot open"><svg class="i"><use href="#pr"/></svg></span><span class="gr-age">1w</span></span></div></div>
+      <div class="gr-row foc"><div class="g"><svg viewBox="0 0 40 19"><path d="M12 0v19" stroke="#c2c3c5" stroke-width="1.5"/><path d="M24 13c0 4-12 2-12 6" fill="none" stroke="#c2c3c5" stroke-width="1.5"/><circle cx="24" cy="9.5" r="3.5" fill="#171717" stroke="#c2c3c5" stroke-width="1.5"/></svg></div><div class="c lane"><span class="name">chore/FWRK-1011-update-kbs-settings</span><span class="gr-tail"><span class="gr-restack">⇈</span><svg class="i gr-cloud"><use href="#cloud-up"/></svg><span class="gr-dot open"><svg class="i"><use href="#pr"/></svg></span><span class="gr-age">2mo</span></span></div></div>
+      <div class="gr-row"><div class="g"><svg viewBox="0 0 40 19"><path d="M12 0v6" stroke="#c2c3c5" stroke-width="1.5" stroke-dasharray="2 2"/><circle cx="12" cy="9.5" r="3.5" fill="#171717" stroke="#c2c3c5" stroke-width="1.5"/></svg></div><div class="c"><span class="name c-dim">main</span><span class="gr-tail"><span class="gr-small c-dim" title="trunk is 5 behind origin; local main 3 behind">↓5 · local ↓3</span><span class="gr-age">26h</span></span></div></div>
+      <div class="gr-fill"></div>
+
+      <div class="gr-panel">
+        <div class="gr-ph"><svg class="i" style="width:14px;height:14px"><use href="#chev-d"/></svg><span>chore/FWRK-1011-update-kbs-settings</span><span class="sp"></span><svg class="i"><use href="#ellipsis"/></svg></div>
+        <div class="gr-tree">
+          <div class="gr-trow" style="padding-left:18px"><svg class="i" style="width:14px;height:14px"><use href="#chev-d"/></svg><svg class="i"><use href="#folder"/></svg><span>apps/public</span></div>
+          <div class="gr-trow" style="padding-left:34px"><svg class="i" style="width:14px;height:14px"><use href="#chev-d"/></svg><svg class="i"><use href="#folder"/></svg><span>collector-app/src/router-pages/settings</span></div>
+          <div class="gr-trow gr-mod" style="padding-left:52px"><svg class="i" style="width:14px;height:14px"><use href="#dotfile"/></svg><span>Preferences.tsx</span></div>
+          <div class="gr-trow" style="padding-left:34px"><svg class="i" style="width:14px;height:14px"><use href="#chev-d"/></svg><svg class="i"><use href="#folder"/></svg><span>splash-page</span></div>
+        </div>
+        <div class="gr-btns"><span class="gr-btn">Submit</span><span class="gr-btn primary">Check out</span></div>
+      </div>
+      <div class="gr-status"><span><svg class="i" style="width:13px;height:13px"><use href="#branch"/></svg> feat/FWRK-1434-part3</span><span><svg class="i" style="width:13px;height:13px"><use href="#sync"/></svg></span><span>⊗ 0 ⚠ 1</span><span><svg class="i" style="width:13px;height:13px"><use href="#pr"/></svg> Pull Request #482</span></div>
+    </div>
+    <div class="note">Reading the rail: the five-layer <span class="mono">FWRK-1610</span> stack is built on <span class="mono">part1</span>; <span class="mono">part3</span> and <span class="mono">part2</span> hang on a right lane that curves into <span class="mono">part1</span>; two single branches curve into <span class="mono">main</span>; the dashed segment is elided history. The focused row (outlined) drives the panel; the checked-out row is filled and blue; the yellow "Uncommitted changes" row above it and the untracked <span class="mono">part4</span> above that are both children of the checked-out commit. Graphite's drag gesture (an inline green "Move … ? ✕ ✓" row) is not drawn here; it appears only mid-drag.</div>
+  </section>
+  <!-- ================= C. graph ================= -->
+  <section>
+    <div class="pane-head">
+      <h3>C · Change graph <span class="chip">VisualJJ, near-identical</span></h3>
+      <div class="ref">Redrawn from <a href="https://www.visualjj.com/images/demo.gif">VisualJJ's demo GIF</a> (not embedded here: it is theirs): a thick light rail, <span class="mono">main</span> on the left lane as diamonds (teal for its tip), work as big filled circles on a right lane that curves back into <span class="mono">main</span>, tall wrapping rows, pills before the title, files listed under the change being edited, and a right-click menu.</div>
+      <div class="cost">What differs from theirs is only vocabulary: rows are branches (layers) rather than jj changes, so the title is the branch name plus its first commit subject, and the menu lists our commands. The added pills are ours, styled like their "Needs Review": amber "Restack needed" and "base: main" (PR base drifted from the local parent), red "2/7 checks" and "2 unresolved", grey "Not tracked" for a layer with no git-spice metadata and no PR; "↑1 unpushed" and "↓5 behind origin" are plain text.</div>
+    </div>
+    <div class="vj">
+      <div class="vj-head">PR Cascade</div>
+      <div class="vj-tools"><span class="vj-btn"><svg class="i"><use href="#cloud-down"/></svg>Fetch</span><span class="vj-btn"><svg class="i"><use href="#cloud-up"/></svg>Push</span><span class="vj-btn sq"><svg class="i"><use href="#gear"/></svg></span><span class="vj-btn sq"><svg class="i"><use href="#undo"/></svg></span><span class="vj-btn sq"><svg class="i"><use href="#redo"/></svg></span><span class="vj-btn sq"><svg class="i"><use href="#refresh"/></svg></span></div>
+
+      <div class="vj-row"><div class="g"><i class="m dn"></i><b class="dia teal"></b></div>
+        <div class="c"><span class="vj-pill main">main</span><span class="t dim">FWRK-1434 part1: extract ingress config (#480)</span> <span class="vj-age">26h · ↓5 behind origin</span></div></div>
+
+      <div class="vj-row"><div class="g"><i class="m"></i><i class="r dn"></i><b class="dot"></b></div>
+        <div class="c"><span class="vj-pill nt">Not tracked</span><span class="t dim">feat/FWRK-1434-part4 · batch flush (never pushed)</span> <span class="vj-age">15m</span></div></div>
+      <div class="vj-row"><div class="g"><i class="m"></i><i class="r"></i><b class="dot blue"></b></div>
+        <div class="c"><span class="vj-check"><svg class="i"><use href="#check"/></svg></span><span class="vj-pill editing">Editing</span><span class="vj-pill draft"><svg class="i"><use href="#pr"/></svg>Draft</span><span class="vj-pill fail"><svg class="i"><use href="#x"/></svg>2/7 checks</span><span class="vj-pill restack">Restack needed</span><span class="t">feat/FWRK-1434-part3 · wire ingress metrics</span> <span class="vj-age">2d</span>
+          <div class="vj-files"><span class="vj-file add"><svg class="i"><use href="#boxplus"/></svg>ingress.test.ts</span><span class="vj-file mod"><svg class="i"><use href="#boxm"/></svg>ingress.ts</span></div></div></div>
+      <div class="vj-row"><div class="g"><i class="m"></i><i class="r"></i><b class="dot"></b></div>
+        <div class="c"><span class="vj-pill review"><svg class="i"><use href="#pr"/></svg>Changes requested</span><span class="vj-pill fail"><svg class="i"><use href="#comment"/></svg>2 unresolved</span><span class="vj-pill base"><svg class="i"><use href="#compare"/></svg>base: main</span><span class="t">feat/FWRK-1434-part2 · retry on 5xx</span> <span class="vj-age">40m</span> <span class="vj-unpushed">↑1 unpushed</span></div></div>
+      <div class="vj-row"><div class="g"><i class="m"></i><i class="r up"></i><i class="r dnj"></i><svg class="j" viewBox="0 0 58 18"><path d="M40 0c0 10-24 6-24 18" fill="none" stroke="#c5c5c5" stroke-width="3"/></svg><b class="dot"></b></div>
+        <div class="c"><span class="vj-pill merged"><svg class="i"><use href="#merge"/></svg>Merged</span><span class="t dim">feat/FWRK-1434-part1 · extract ingress config</span> <span class="vj-age">3d</span></div></div>
+
+      <div class="vj-row"><div class="g"><i class="m up"></i><i class="m dn dash"></i><b class="dia"></b></div>
+        <div class="c"><span class="t dim">FWRK-1290: collector config loader</span> <span class="vj-age">5d</span></div></div>
+
+      <div class="vj-row"><div class="g"><i class="m"></i><i class="r dn"></i><b class="dot"></b></div>
+        <div class="c"><span class="vj-pill approved"><svg class="i"><use href="#pr"/></svg>Approved</span><span class="t">fix/FWRK-1500-retry-timeout · cap retry backoff at 30 s</span> <span class="vj-age">1w</span></div></div>
+      <div class="vj-row"><div class="g"><i class="m"></i><i class="r up"></i><i class="r dnj"></i><svg class="j" viewBox="0 0 58 18"><path d="M40 0c0 10-24 6-24 18" fill="none" stroke="#c5c5c5" stroke-width="3"/></svg><b class="dot"></b></div>
+        <div class="c"><span class="t">other-work · spike: batch uploads</span> <span class="vj-age">4w</span></div>
+        <div class="vj-menu">
+          <div class="on">Create Pull Request</div><div>Open Changes</div><div>Check Out</div><div class="sep"></div>
+          <div>Move Layer and Above Onto…</div><div>Insert Branch Below…</div><div>Restack onto Trunk</div><div class="sep"></div>
+          <div>Copy Branch Name</div><div>Copy Commit SHA</div>
+        </div></div>
+
+      <div class="vj-row"><div class="g"><i class="m"></i><b class="dia"></b></div>
+        <div class="c"><span class="t dim">FWRK-1102: initial collector skeleton</span> <span class="vj-age">3w</span></div></div>
+      <div class="vj-row tail"><div class="g"><svg class="sq" viewBox="0 0 58 30"><path d="M16 0v8q6 4 0 8t0 8" fill="none" stroke="#c5c5c5" stroke-width="3"/></svg></div><div class="c"></div></div>
+      <div class="vj-fill"></div>
+    </div>
+    <div class="note">The right-click menu is drawn open on <span class="mono">other-work</span>, a branch with no PR, so "Create Pull Request" is the highlighted first item. In this dialect there are no hover buttons and no lower panel: everything is a pill you click (the PR pill opens the PR; its tooltip reads "Click to open Pull Request #482 in GitHub") or a menu item.</div>
+  </section>
+</div>
+
+<div class="note" style="margin-top:20px"><b>Two things the mockups do not paper over.</b> Layer 4 sits <em>above</em> HEAD, and the plan's §5 only finds ancestors of HEAD, so it is visible here through git-spice's <span class="mono">ups</span> (M5) or a descendant scan; E44's "2 of 3" implies the plan wants layers above HEAD, which is an open question for the plan. And the numbers on part2 and part3 are the git-spice-enriched view (M5+): in the pure-git model, part2's new commit means part2 is no longer an ancestor of HEAD, which is E14.</div>
+
+<h2>On each layer</h2>
+<p>Everything a row, card or node could carry. "Seen in" is backed by the tools' own docs; own ideas are marked. The milestone is when PR Cascade can first compute it.</p>
+<div class="tbl-wrap"><table>
+  <thead><tr><th>Indicator</th><th>Meaning</th><th>Data source</th><th>From</th><th>Seen in</th><th>Glyph</th></tr></thead>
+  <tbody>
+<tr><td class="k">PR badge: #number + state (open / draft / merged / closed)</td><td>Whether this layer has a change request and what state it is in.</td><td><span class="src">gs log short --json change.id (#123 / !123) and change.url …</span></td><td class="ms">M5 → M6</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">VisualJJ</span><span class="chip">ISL</span><span class="chip">GitLens</span><span class="chip">GitHub PRs</span></div></td><td><span class="mono">git-pull-request</span></td></tr>
+<tr><td class="k">No PR yet (create affordance doubles as indicator)</td><td>Tracked layer with no change request; the inline action to create one is the indicator (Graphite&#x27;s cloud-upload, ISL&#x27;s Submit button, VisualJJ&#x27;s &#x27;New&#x27;).</td><td><span class="src">gs log short --json: layer present but no change object (M5…</span></td><td class="ms">M5 / M6</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">VisualJJ</span><span class="chip">ISL</span></div></td><td><span class="mono">git-pull-request-create</span></td></tr>
+<tr><td class="k">Review decision: approved / changes requested / review required</td><td>Forge review state of the layer&#x27;s PR.</td><td><span class="src">gh pr list --json reviewDecision (APPROVED | CHANGES_REQUES…</span></td><td class="ms">M6</td><td><div class="seen"><span class="chip">VisualJJ</span><span class="chip">ISL</span><span class="chip">GitLens</span><span class="chip">GitHub PRs</span></div></td><td><span class="mono">check</span></td></tr>
+<tr><td class="k">CI checks: pass / fail / pending (with failed-count)</td><td>Rollup of status checks on the PR head.</td><td><span class="src">gh pr list --json statusCheckRollup (per-check state + conc…</span></td><td class="ms">M6</td><td><div class="seen"><span class="chip">VisualJJ</span><span class="chip">ISL</span><span class="chip">GitLens</span><span class="chip">GitHub PRs</span></div></td><td><span class="mono">pass or check-all</span></td></tr>
+<tr><td class="k">Comment count with unresolved variant</td><td>&#x27;2 unresolved&#x27; (or &#x27;5 comments&#x27; when all resolved).</td><td><span class="src">gs log short --json --cr-status change.comments {resolved, …</span></td><td class="ms">M6</td><td><div class="seen"><span class="chip">ISL</span><span class="chip">GitHub PRs</span></div></td><td><span class="mono">comment-unresolved</span></td></tr>
+<tr><td class="k">Needs push — local ahead of the PR branch (↑N)</td><td>Local branch has commits not on origin/&lt;branch&gt; (the PR is stale relative to local).</td><td><span class="src">gs log short --json push.ahead &gt; 0 / push.needsPush (local …</span></td><td class="ms">M5</td><td><div class="seen"><span class="chip">VisualJJ</span><span class="chip">ISL</span><span class="chip">GitLens</span><span class="chip">VS Code SCM</span></div></td><td><span class="mono">cloud-upload with text ↑N</span></td></tr>
+<tr><td class="k">Never pushed / no remote branch</td><td>Branch has no origin/&lt;b&gt; at all (distinct from &#x27;ahead&#x27;).</td><td><span class="src">git rev-parse --verify --quiet refs/remotes/origin/&lt;b&gt; fail…</span></td><td class="ms">derivable now with one git …</td><td><div class="seen"><span class="chip">GitLens</span><span class="chip">VS Code SCM</span></div></td><td><span class="mono">cloud-upload</span></td></tr>
+<tr><td class="k">Remote ahead — PR branch has commits you don&#x27;t have (↓N)</td><td>origin/&lt;b&gt; moved beyond local (someone pushed to your PR branch, e.g.</td><td><span class="src">gs log short --json push.behind &gt; 0 with push.ahead == 0 (a…</span></td><td class="ms">M5; M8 adoption action</td><td><div class="seen"><span class="chip">ISL</span><span class="chip">GitLens</span><span class="chip">VS Code SCM</span></div></td><td><span class="mono">cloud-download with text ↓N</span></td></tr>
+<tr><td class="k">Diverged — remote rewritten (E76: ahead&gt;0 &amp;&amp; behind&gt;0)</td><td>Both tips have commits the other lacks: GitHub&#x27;s &#x27;Rebase stack&#x27; button, gh stack sync, or a co-worker&#x27;s force-push rewrote origin/&lt;b&gt;.</td><td><span class="src">gs log short --json push.ahead &gt; 0 &amp;&amp; push.behind &gt; 0, or n…</span></td><td class="ms">M5 / M8</td><td><div class="seen"><span class="chip">ISL</span><span class="chip">GitLens</span></div></td><td><span class="mono">warning</span></td></tr>
+<tr><td class="k">Needs restack — base moved under this layer</td><td>The layer below (or trunk) changed since this branch was last rebased; the PR diff will show the parent&#x27;s changes until restacked.</td><td><span class="src">gs log short --json down.needsRestack (local tier). Note E1…</span></td><td class="ms">M5 / M8</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">ISL</span></div></td><td><span class="mono">fold-up</span></td></tr>
+<tr><td class="k">Behind trunk count (stack base vs origin/main)</td><td>How many trunk commits landed since this stack was based.</td><td><span class="src">git rev-list --count &lt;merge-base layer trunk&gt;..&lt;trunk&gt; (git…</span></td><td class="ms">derivable now; accurate onl…</td><td><div class="seen"><span class="chip">GitLens</span><span class="chip">VisualJJ</span><span class="chip">VS Code SCM</span></div></td><td><span class="mono">arrow-down with text &#x27;↓N behind main&#x27;; alt git-fetch</span></td></tr>
+<tr><td class="k">Files changed and +/− line counts</td><td>&#x27;6 files · +214 −37&#x27; per layer (vs its parent, not cumulative).</td><td><span class="src">git diff --numstat -z &lt;parent&gt; &lt;branch&gt; — already run at M2…</span></td><td class="ms">M2</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">VisualJJ</span><span class="chip">GitLens</span><span class="chip">GitHub PRs</span></div></td><td><span class="mono">diff-multiple; colors gitDecoration.addedResourceForeground #81b88b</span></td></tr>
+<tr><td class="k">Commit count (&#x27;3 commits&#x27;)</td><td>Commits in parent..branch.</td><td><span class="src">StackLayer.commitCount = git rev-list --count &lt;trunk&gt;..&lt;bra…</span></td><td class="ms">M1</td><td><div class="seen"><span class="chip">GitHub PRs</span></div></td><td><span class="mono">git-commit</span></td></tr>
+<tr><td class="k">Relative age of last commit (&#x27;4m&#x27;, &#x27;20h&#x27;, &#x27;2w&#x27;)</td><td>Right-aligned short relative timestamp on every row; all three stacked-PR tools show it.</td><td><span class="src">git log -1 --format=%ct &lt;branch&gt; (one call per layer, or on…</span></td><td class="ms">derivable now</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">VisualJJ</span><span class="chip">ISL</span><span class="chip">GitLens</span></div></td><td></td></tr>
+<tr><td class="k">Author avatar / initials on the row</td><td>ISL fills the node circle with the author avatar; GitHub PRs uses the author avatar as the row icon; GitLens has an avatar column; VisualJJ tints own vs others&#x27; drafts.</td><td><span class="src">git log -1 --format=%an|%ae &lt;branch&gt;; avatar would need gh …</span></td><td class="ms">derivable now; not planned</td><td><div class="seen"><span class="chip">VisualJJ</span><span class="chip">ISL</span><span class="chip">GitLens</span><span class="chip">GitHub PRs</span></div></td><td><span class="mono">account</span></td></tr>
+<tr><td class="k">Current / HEAD marker</td><td>Which layer the working copy is on.</td><td><span class="src">StackLayer.isCurrent (git symbolic-ref HEAD, M1); null when…</span></td><td class="ms">M1</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">VisualJJ</span><span class="chip">ISL</span><span class="chip">GitLens</span><span class="chip">GitHub PRs</span><span class="chip">VS Code SCM</span></div></td><td><span class="mono">target</span></td></tr>
+<tr><td class="k">Uncommitted changes on the current layer (* / count)</td><td>Per-row form of the working-tree state: built-in status bar appends &#x27;*&#x27; (working tree) &#x27;+&#x27; (staged) &#x27;!&#x27; (merge/rebase) to the branch name and swaps to the git-branch-cha…</td><td><span class="src">git status --porcelain (M4, already used to refuse checkout…</span></td><td class="ms">M4</td><td><div class="seen"><span class="chip">GitLens</span><span class="chip">VS Code SCM</span><span class="chip">Graphite</span><span class="chip">ISL</span></div></td><td><span class="mono">git-branch-changes</span></td></tr>
+<tr><td class="k">Not tracked by git-spice</td><td>Layer found by git ancestry but absent from gs log (created with plain git checkout -b).</td><td><span class="src">Layer name absent from gs log short --json output (M5). Bef…</span></td><td class="ms">M5</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">VisualJJ</span></div></td><td><span class="mono">circle-outline</span></td></tr>
+<tr><td class="k">Conflict / rebase paused on this layer</td><td>A rebase (git) or gs operation (restack/sync/onto/merge) stopped on conflicts while rewriting this branch.</td><td><span class="src">rebaseInProgress via git rev-parse --git-path rebase-merge …</span></td><td class="ms">M4 / M5 / M8</td><td><div class="seen"><span class="chip">VisualJJ</span><span class="chip">ISL</span><span class="chip">GitLens</span><span class="chip">VS Code SCM</span></div></td><td><span class="mono">git-branch-conflicts or error in gitDecoration.conflictingResourceForeground #e4676b; tree badge &#x27;!&#x27;</span></td></tr>
+<tr><td class="k">Stack position n/N</td><td>&#x27;3/4&#x27; so the reader knows where the layer sits and how deep the stack is.</td><td><span class="src">Index in RepoState.layers (bottom→top) and layers.length (M…</span></td><td class="ms">M1</td><td><div class="seen"><span class="chip">VisualJJ</span><span class="chip">GitLens</span></div></td><td></td></tr>
+<tr><td class="k">In GitHub native stack (linked)</td><td>This PR belongs to the gh stack link&#x27;ed Stack (badge + popover on GitHub).</td><td><span class="src">Stack number recorded in workspaceState after gh stack link…</span></td><td class="ms">M6</td><td><div class="seen"><span class="chip">VisualJJ</span><span class="chip">GitLens</span></div></td><td><span class="mono">layers</span></td></tr>
+<tr><td class="k">PR base ≠ local parent</td><td>The forge PR targets a branch other than the layer&#x27;s local parent — happens after GitHub retargets when the layer below merges (E71) or after a wrong-base create (E28).</td><td><span class="src">gh pr list --json baseRefName,headRefName compared with Sta…</span></td><td class="ms">M6</td><td><div class="seen"><span class="chip own">own idea</span></div></td><td><span class="mono">git-compare in list.warningForeground; tooltip &#x27;PR targets main, local parent is feat</span></td></tr>
+<tr><td class="k">Mergeability: conflicts with base / behind base</td><td>Forge-side merge check.</td><td><span class="src">gh pr list --json mergeable (MERGEABLE | CONFLICTING | UNKN…</span></td><td class="ms">M6</td><td><div class="seen"><span class="chip">VisualJJ</span><span class="chip">GitLens</span><span class="chip">GitHub PRs</span></div></td><td><span class="mono">merge or git-merge with list.errorForeground when CONFLICTING; red ring on the badge in webviews</span></td></tr>
+<tr><td class="k">Merge queued / shipping</td><td>PR is in the merge queue.</td><td><span class="src">gh pr view --json mergeQueueEntry (or isInMergeQueue); GitH…</span></td><td class="ms">M8</td><td><div class="seen"><span class="chip">VisualJJ</span><span class="chip">ISL</span><span class="chip">GitHub PRs</span></div></td><td><span class="mono">git-pull-request + sync~spin, label &#x27;queued&#x27;</span></td></tr>
+<tr><td class="k">Merged upstream but branch still local (E15)</td><td>The bottom PR was squash-merged; the local branch and its commits linger until Sync Stack removes it and restacks the rest.</td><td><span class="src">change.status == merged (--cr-status, M6) while the branch …</span></td><td class="ms">M6 / M8</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">VisualJJ</span><span class="chip">ISL</span></div></td><td><span class="mono">git-merge</span></td></tr>
+<tr><td class="k">Unnamed / obsolete commit layer (E14)</td><td>A commit in HEAD&#x27;s ancestry that no branch points at any more — the pre-amend version of a lower layer.</td><td><span class="src">Pure git (M1): ancestry commits between named layers; the s…</span></td><td class="ms">M1 / M8</td><td><div class="seen"><span class="chip">VisualJJ</span><span class="chip">ISL</span></div></td><td><span class="mono">circle-slash, label &#x27;&lt;short sha&gt;</span></td></tr>
+<tr><td class="k">Empty layer — same commit as parent (E6/E30)</td><td>Two branches on one commit or a branch with zero commits vs its parent; Create PRs skips it with a warning.</td><td><span class="src">sha == parentSha / commitCount == 0 (M1).</span></td><td class="ms">M1</td><td><div class="seen"><span class="chip">VisualJJ</span></div></td><td><span class="mono">circle-outline</span></td></tr>
+<tr><td class="k">Pending insert — commit your fix, then Finish Insert</td><td>A branch created by Insert Branch Below that has no commits yet; inline Finish / Cancel; status bar &#x27;&lt;new&gt; · pending insert&#x27;.</td><td><span class="src">workspaceState pending-insert record + commitCount == 0 (M8…</span></td><td class="ms">M8</td><td><div class="seen"><span class="chip">VisualJJ</span><span class="chip own">own idea</span></div></td><td><span class="mono">git-branch-create with inline check</span></td></tr>
+<tr><td class="k">Operation running on this layer (spinner + verb)</td><td>&#x27;pushing…&#x27;, &#x27;restacking…&#x27;, &#x27;creating PR…&#x27; inline while the backend runs.</td><td><span class="src">Extension&#x27;s own CommandSink state (which layers an in-fligh…</span></td><td class="ms">M6 / M8</td><td><div class="seen"><span class="chip">VisualJJ</span><span class="chip">ISL</span><span class="chip">GitHub PRs</span></div></td><td><span class="mono">loading~spin</span></td></tr>
+<tr><td class="k">Checked out in another worktree</td><td>Layer is HEAD of a sibling worktree, so checkout here would fail.</td><td><span class="src">gs log short --json worktree (M5) or git worktree list --po…</span></td><td class="ms">M5</td><td><div class="seen"><span class="chip">ISL</span><span class="chip">GitLens</span></div></td><td><span class="mono">worktree</span></td></tr>
+<tr><td class="k">PR title (as description or tooltip, never as the label)</td><td>Graphite lets a setting swap the row label between branch name and PR title; the plan&#x27;s rule is labels are always branch names, so the title belongs in the tooltip or a…</td><td><span class="src">gh pr list --json title (GitHub); gs log has no title field.</span></td><td class="ms">M6</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">GitHub PRs</span></div></td><td></td></tr>
+<tr><td class="k">Labels / requested reviewers / assignees</td><td>Small tag and account chips.</td><td><span class="src">gh pr list --json labels,reviewRequests,assignees (GitHub).</span></td><td class="ms">M6 / not planned</td><td><div class="seen"><span class="chip">GitHub PRs</span><span class="chip">GitLens</span></div></td><td><span class="mono">tag</span></td></tr>
+<tr><td class="k">CR info unavailable (gs missing / not initialized / gh not logged in)</td><td>Degraded state per layer: description shows the hint (&#x27;log in to gh for status&#x27;, &#x27;not initialized for git-spice&#x27;) instead of PR data (E23, E57, E59, E62).</td><td><span class="src">Readiness probe result (§7.13.1) and enrich failure (E57).</span></td><td class="ms">M5</td><td><div class="seen"><span class="chip">ISL</span><span class="chip own">own idea</span></div></td><td><span class="mono">question</span></td></tr>
+<tr><td class="k">Per-file status letter + color (child rows)</td><td>M/A/D/R/C/T prefix and gitDecoration color on each file under the layer; renames show &#x27;old → new&#x27;.</td><td><span class="src">ChangedFile.status from git diff --name-status -M -z (M2); …</span></td><td class="ms">M2</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">VisualJJ</span><span class="chip">ISL</span><span class="chip">GitHub PRs</span><span class="chip">VS Code SCM</span></div></td><td><span class="mono">diff-added</span></td></tr>
+<tr><td class="k">Agent / Copilot activity on the layer (not planned)</td><td>GitLens shows Claude Code sessions as rows with working/idle/needs-input state; VisualJJ shows per-workspace agent dots; GitHub PRs badges Copilot changes.</td><td><span class="src">None in the plan.</span></td><td class="ms">not planned</td><td><div class="seen"><span class="chip">VisualJJ</span><span class="chip">GitLens</span><span class="chip">GitHub PRs</span></div></td><td><span class="mono">copilot</span></td></tr>
+  </tbody>
+</table></div>
+
+<h2>Once per stack</h2>
+<div class="tbl-wrap"><table>
+  <thead><tr><th>Element</th><th>Meaning</th><th>Data source</th><th>From</th><th>Seen in</th></tr></thead>
+  <tbody>
+<tr><td class="k">Trunk row (origin/main @ sha) at the bottom</td><td>Anchors the stack: Graphite puts main at the bottom of the tree, ISL shows remote/main as a single grey node with the rest of history elided to a dashed line, VisualJJ r…</td><td><span class="src">RepoState.trunk (M1, §5 auto-detect or prCascade.trunk); be…</span></td><td class="ms">M1 / derivable now / M5</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">VisualJJ</span><span class="chip">ISL</span><span class="chip">GitLens</span><span class="chip">VS Code SCM</span></div></td></tr>
+<tr><td class="k">Local trunk behind remote (fetch needed)</td><td>VisualJJ turns the Fetch button blue with &#x27;Remote trunk has updates to fetch&#x27;; ISL shows time since last Pull; built-in shows &#x27;N↓&#x27;.</td><td><span class="src">git rev-list --count main..origin/main after a fetch; fresh…</span></td><td class="ms">derivable now; meaningful w…</td><td><div class="seen"><span class="chip">VisualJJ</span><span class="chip">ISL</span><span class="chip">VS Code SCM</span></div></td></tr>
+<tr><td class="k">&#x27;Uncommitted changes&#x27; pseudo-node above the current layer</td><td>Graphite&#x27;s yellow node directly above the checked-out branch (focusing it turns the panel into a staging area); ISL renders the working copy as a virtual row under &#x27;You…</td><td><span class="src">git status --porcelain (M4): file list with status letters;…</span></td><td class="ms">M4</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">VisualJJ</span><span class="chip">ISL</span><span class="chip">GitLens</span></div></td></tr>
+<tr><td class="k">GitHub native stack link badge (Stack #17 · 3 PRs · linked)</td><td>One badge per stack saying the PRs are linked into a GitHub Stack (badge + popover + merge-box map on github.com), with &#x27;Relink&#x27; when a layer&#x27;s PR is missing from it and…</td><td><span class="src">Stack number recorded in workspaceState after gh stack link…</span></td><td class="ms">M6</td><td><div class="seen"><span class="chip">VisualJJ</span><span class="chip">GitLens</span></div></td></tr>
+<tr><td class="k">Repo name node in multi-root workspaces</td><td>Graphite shows a &#x27;REPO: &lt;name&gt;&#x27; strip above the toolbar; the plan&#x27;s §6 discovery makes one RepoNode per root (label = basename) when a workspace has several repos, each…</td><td><span class="src">Discovery (git rev-parse --show-toplevel per folder, M1); f…</span></td><td class="ms">M1</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">VS Code SCM</span></div></td></tr>
+<tr><td class="k">Sync-state banner (one line, top of the stack)</td><td>Next-step guidance, one variant at a time by priority: rebase in progress (E12) → git-spice operation paused, run gs rebase continue (E58) → diverged branch unadopted, n…</td><td><span class="src">rebaseInProgress (M4), readiness (M5), gs log flags (M5), -…</span></td><td class="ms">M4 → M5 → M6 → M8</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">VisualJJ</span><span class="chip">ISL</span></div></td></tr>
+<tr><td class="k">PR chain on the forge ≠ local order</td><td>The forge&#x27;s base chain (#481 → main after GitHub retargeted, #482 → part2) disagrees with the local parent chain (part2 → part1 → main), or the native Stack lists PRs in…</td><td><span class="src">gh pr list --json number,headRefName,baseRefName for all la…</span></td><td class="ms">M6</td><td><div class="seen"><span class="chip own">own idea</span></div></td></tr>
+<tr><td class="k">Stack summary line (&#x27;4 layers · 2 PRs open · 1 draft · 1 needs push · 1 needs restack&#x27;)</td><td>Aggregate of the per-layer attention indicators so the reader sees the stack&#x27;s health without scanning rows; GitHub PRs and GitLens Launchpad group PRs by needs-attentio…</td><td><span class="src">Aggregated from the enriched RepoState (M5/M6).</span></td><td class="ms">M5 / M6</td><td><div class="seen"><span class="chip">GitLens</span><span class="chip">GitHub PRs</span><span class="chip own">own idea</span></div></td></tr>
+<tr><td class="k">&#x27;Create N PRs&#x27; / &#x27;Push stack&#x27; count button</td><td>Graphite&#x27;s checked-out row carries a blue &#x27;Submit N PRs&#x27; button (N = branches that would be submitted); ISL&#x27;s stack root has &#x27;Submit stack&#x27; / &#x27;Resubmit stack&#x27; (when any…</td><td><span class="src">count of layers without change.id (M5) and count with push.…</span></td><td class="ms">M5 / M6</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">ISL</span></div></td></tr>
+<tr><td class="k">Last command echo strip (✓ gs stack submit --no-publish · 2.1 s)</td><td>Graphite prints the exact gt command each UI action ran; ISL&#x27;s bottom strip shows the sl command, exit status, progress and an Abort button.</td><td><span class="src">CommandSink log (M5): argv, cwd, exit code, duration; termi…</span></td><td class="ms">M5; tree: an output channel…</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">ISL</span></div></td></tr>
+<tr><td class="k">Status bar &#x27;$(layers) &lt;branch&gt; · 3 of 4&#x27;</td><td>Plan §7.1: current branch + position; click focuses the view.</td><td><span class="src">isCurrent + layers (M1/M4), git status (M4), push.ahead (M5…</span></td><td class="ms">M4</td><td><div class="seen"><span class="chip">VS Code SCM</span><span class="chip">GitLens</span></div></td></tr>
+<tr><td class="k">CR status freshness (&#x27;status 42 s ago&#x27; / offline)</td><td>--cr-status is debounced and cached 60 s; showing the age (and &#x27;offline — showing cached&#x27; on failure) explains stale badges.</td><td><span class="src">enrich cache timestamp and last failure (M6).</span></td><td class="ms">M6</td><td><div class="seen"><span class="chip">ISL</span><span class="chip">VisualJJ</span></div></td></tr>
+<tr><td class="k">Activity-bar view badge (count of layers needing attention)</td><td>ViewBadge {value, tooltip} on the Stack view container: number of layers that need push/restack/have failing checks/unresolved comments.</td><td><span class="src">Aggregate of per-layer attention flags (M5/M6).</span></td><td class="ms">M5</td><td><div class="seen"><span class="chip">VisualJJ</span><span class="chip">GitHub PRs</span></div></td></tr>
+<tr><td class="k">Informational state nodes: No trunk / Detached HEAD / Not on a stack / No git repository / git missing</td><td>Plan §7.1 special nodes (E3, E4, E5, E17, §6 zero repos).</td><td><span class="src">RepoState.trunk null, head null, layers empty, discovery re…</span></td><td class="ms">M4</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">VisualJJ</span></div></td></tr>
+<tr><td class="k">&#x27;PR #480 merged — Sync Stack to drop feat/…-part1 and restack&#x27; hint</td><td>Stack-level companion of merged-still-local: ISL&#x27;s Clean up / Clean up stack (&#x27;hide landed or closed&#x27;), VisualJJ&#x27;s one-click cleanup that rebases descendants onto main,…</td><td><span class="src">any layer with change.status == merged (M6); action M8.</span></td><td class="ms">M6 / M8</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">VisualJJ</span><span class="chip">ISL</span></div></td></tr>
+<tr><td class="k">One section per stack tip / &#x27;Show all stacks&#x27; (M9)</td><td>VisualJJ orders subtrees by most recent commit and hides fully-immutable ones; Graphite shows sibling stacks as separate indented rails; GitLens scopes the graph via bra…</td><td><span class="src">Tip detection: branches not merged into trunk that no other…</span></td><td class="ms">M9</td><td><div class="seen"><span class="chip">Graphite</span><span class="chip">VisualJJ</span><span class="chip">GitLens</span></div></td></tr>
+  </tbody>
+</table></div>
+
+<h2>Actions, by the milestone that delivers them</h2>
+<p>Every action is the same command whichever view fires it; the views differ only in the trigger.</p>
+<div class="actions">
+<div><h3>M1 · already shipped</h3><ul><li>Refresh Stack <span class="tr">— view-title inline icon $(refresh) navigation@1; also automatic on window focus / editor c…</span></li></ul></div>
+<div><h3>M2 · already shipped</h3><ul><li>Focus / select a layer without checking out <span class="tr">— single-click a row (Graphite: blue outline + panel shows its files; VisualJJ/ISL: select…</span></li></ul></div>
+<div><h3>M3 · under review</h3><ul><li>Open Changes (file) <span class="tr">— click on a file node (tree) / click file in the panel (cards) / click file in expanded ro…</span></li><li>Open File / Open File at Parent / Copy Path <span class="tr">— file node right-click context menu</span></li><li>Open All Changes in Layer (multi-diff) <span class="tr">— layer context menu or click on the &#x27;6 files&#x27; chip</span> <span class="chip own">own idea</span></li></ul></div>
+<div><h3>M4 · refresh, state, status bar</h3><ul><li>Check Out Branch <span class="tr">— context menu on a non-current layer; cards: double-click row or &#x27;Check out&#x27; button in the…</span></li><li>Copy Branch Name <span class="tr">— layer context › 2_copy</span></li><li>Collapse All <span class="tr">— … › 3_view@2</span></li><li>PR Cascade Settings… <span class="tr">— … › 9_settings@1; cards/graph: gear icon (Graphite / VisualJJ / ISL)</span></li><li>Focus the Stack view <span class="tr">— click the status bar item</span> <span class="chip own">own idea</span></li></ul></div>
+<div><h3>M5 · git-spice backend and push</h3><ul><li>Push Whole Stack <span class="tr">— … › Stack 2_stack@1; VisualJJ: Push toolbar button (highlighted when needed); ISL: Resubm…</span></li><li>Fetch (refresh ahead/behind numbers only) <span class="tr">— toolbar button or part of refresh when the user opts in</span> <span class="chip own">own idea</span></li><li>Track Stack with git-spice <span class="tr">— … › Stack 2_stack@8 (only when untracked layers exist); inline &#x27;Track&#x27; on an untracked la…</span></li><li>Open Compare on Forge <span class="tr">— layer context › 2_copy</span> <span class="chip own">own idea</span></li><li>Install git-spice / Initialize git-spice / gs auth login / gh auth login / install gh-stack <span class="tr">— buttons in the state banner or readiness node (one-click, decline remembered); Graphite:…</span></li></ul></div>
+<div><h3>M6 · pull requests</h3><ul><li>Create Pull Request (this layer) <span class="tr">— inline icon $(git-pull-request-create) on a layer without a PR + context menu; Graphite:…</span></li><li>Create PRs for Stack… <span class="tr">— view-title inline icon $(git-pull-request-create) navigation@2 (hidden when stack empty)…</span></li><li>Create PRs for Stack (all as drafts) <span class="tr">— … › 1_pullrequests@2</span></li><li>Open Pull Request <span class="tr">— inline icon ↗ on a layer with a PR + context menu; cards/graph: click (VisualJJ: double-c…</span></li><li>Mark Ready for Review <span class="tr">— context menu on a layer with a draft PR</span> <span class="chip own">own idea</span></li><li>Mark All Drafts Ready <span class="tr">— … › 1_pullrequests@3; also inline on the top layer when any draft exists</span> <span class="chip own">own idea</span></li><li>Relink Stack on GitHub <span class="tr">— … › Pull requests 1_pullrequests@4 (GitHub only); also the click target of a &#x27;not in stac…</span> <span class="chip own">own idea</span></li><li>Refresh Navigation Comments / Fix PR bases <span class="tr">— … › Pull requests 1_pullrequests@5 (when navComment ≠ never); also the &#x27;Fix N bases?&#x27; con…</span> <span class="chip own">own idea</span></li><li>Copy PR URL <span class="tr">— layer context › 2_copy (has PR)</span></li><li>Open Stack on GitHub <span class="tr">— click the native-stack badge</span> <span class="chip own">own idea</span></li></ul></div>
+<div><h3>M7 · PR descriptions</h3><ul><li>Create pull requests / Cancel (plan document) <span class="tr">— CodeLens on the prcascade-prplan document; cmd+enter</span> <span class="chip own">own idea</span></li></ul></div>
+<div><h3>M8 · restack, sync, surgery, merge</h3><ul><li>Move Layer and Above Onto… <span class="tr">— … › Stack 2_stack@5 and layer context menu → quick-pick of bases</span></li><li>Drag a layer onto a new parent (rebase) <span class="tr">— drag-and-drop a row onto another row (tree: TreeDragAndDropController; webviews: HTML5 Dn…</span></li><li>Insert Branch Below… <span class="tr">— layer context menu</span></li><li>Finish Insert <span class="tr">— inline icon on the pending-insert node</span> <span class="chip own">own idea</span></li><li>Cancel Insert <span class="tr">— inline icon on the pending-insert node</span> <span class="chip own">own idea</span></li><li>Restack onto Trunk <span class="tr">— … › Stack 2_stack@2; also the natural click target of the needs-restack indicator (own id…</span></li><li>Restack After Merge… <span class="tr">— … › Stack 2_stack@3 and the merged-cleanup hint</span></li><li>Sync After Amend <span class="tr">— … › Stack 2_stack@4</span> <span class="chip own">own idea</span></li><li>Sync Stack <span class="tr">— … › Stack 2_stack@6; cards: Graphite-style &#x27;Sync&#x27; split button top-left; graph: VisualJJ…</span></li><li>Adopt remote version of &lt;branch&gt; (E76) <span class="tr">— inline on a diverged layer / button in the banner; ISL: &#x27;Download New Version&#x27; cloud-down…</span> <span class="chip own">own idea</span></li><li>Merge Bottom PR… <span class="tr">— … › Stack 2_stack@7; GitLens: &#x27;Land it&#x27; split button; VisualJJ: Ship Request (PR)</span></li><li>Open the paused operation&#x27;s terminal (gs rebase continue / abort) <span class="tr">— button on the E58 banner; ISL: Continue / Abort buttons; VisualJJ: Resolve conflicts (ope…</span> <span class="chip own">own idea</span></li><li>Clean up merged layer <span class="tr">— inline trash on a merged-still-local layer or the merged-cleanup hint; ISL: Clean up stac…</span></li></ul></div>
+<div><h3>M9 · multi-stack</h3><ul><li>Show All Stacks (toggle) <span class="tr">— … › 3_view@1</span></li></ul></div>
+<div><h3>Not in a milestone yet</h3><ul><li>Copy Commit Hash <span class="tr">— layer context › 2_copy (SHAs otherwise live only in tooltips)</span> <span class="chip own">own idea</span></li></ul></div>
+</div>
+
+<h2>What to decide</h2>
+<div class="decide">
+  <div class="q"><b>1 · Which rendering?</b> A is done and free to keep as a secondary view. B and C are the same kind of thing, a smartlog webview, in two dialects; they cost about the same and can share one render layer. The choice inside the smartlog is between a focused-row panel with buttons (B) and a glyph-and-pill language read at a glance (C); a hybrid, C's rows over B's panel, is a real option. Either pulls "all stacks" (M9) forward, because a smartlog with one stack is a straight line.</div>
+  <div class="q"><b>2 · Which indicators are worth their pixels?</b> The table is the candidate list, not the plan. The ones you named, a PR badge and "local is ahead of the PR branch", arrive with M5 and M6 regardless of view. Pick the row set; everything else stays in tooltips.</div>
+  <div class="q"><b>3 · When?</b> M4 ships v0.1 on the tree and is view-independent. M6's per-layer actions are where the view starts to shape the code, so the pick should land before M6: a short "view lab" stack after M4 that builds the chosen rendering (or both B and C as prototypes on one shared model) against real data.</div>
+</div>
+
+<h2>Sources</h2>
+<p class="sources">
+  <a href="https://graphite.com/docs/vs-code-extension">Graphite for VS Code</a> · <a href="https://graphite.com/docs/vs-code-extension-quick-start">Graphite quick start</a> · <a href="https://www.visualjj.com/">VisualJJ</a> · <a href="https://www.visualjj.com/docs/quickstart">VisualJJ quickstart</a> · <a href="https://sapling-scm.com/docs/addons/isl">Sapling Interactive Smartlog</a> · <a href="https://github.com/microsoft/vscode-pull-request-github">GitHub Pull Requests extension</a> · <a href="https://github.com/gitkraken/vscode-gitlens">GitLens Commit Graph</a> · <a href="https://code.visualstudio.com/api/references/icons-in-labels">VS Code codicons</a> · <a href="https://code.visualstudio.com/api/references/theme-color">VS Code theme colors</a>
+</p>
