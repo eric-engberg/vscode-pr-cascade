@@ -93,18 +93,13 @@ function describeFailure(failure: GitFailure): string {
   }
   if (failure.startFailure === 'unusable-directory') {
     // `detail` says what is wrong with the directory (see describeDirectoryProblem); the
-    // plain wording is for a GitError built without one.
-    let problem = 'cannot be used as the working directory';
-    if (failure.detail !== undefined) {
-      problem = failure.detail;
-    }
+    // wording after `??` is the default, for a GitError built without one.
+    // see primer §30 (`??`: a default for a missing value)
+    const problem = failure.detail ?? 'cannot be used as the working directory';
     return `${command} could not run: ${failure.cwd} ${problem}`;
   }
   if (failure.exitCode === null) {
-    let reason = 'no further detail';
-    if (failure.detail !== undefined) {
-      reason = failure.detail;
-    }
+    const reason = failure.detail ?? 'no further detail';
     return `${command} did not exit normally in ${failure.cwd}: ${reason}`;
   }
   // stderr from git already ends in a newline; trim so the message is one tidy line.
@@ -225,16 +220,15 @@ function classifyStartFailure(error: ExecFileException): StartFailure {
  * (plan §3 "Git access").
  */
 // see primer §13 (class, extends and constructor: `implements`, `private`, default parameters)
+// and §47 (parameter properties: the constructor line below declares the field and fills it)
 export class RealGitRunner implements GitRunner {
-  private readonly gitPath: string;
-
-  /**
-   * `gitPath` is the `prCascade.gitPath` setting (PR 6): normally just `git`, resolved via
-   * PATH the same way a terminal would; a full path when git is somewhere unusual.
-   */
-  constructor(gitPath: string = 'git') {
-    this.gitPath = gitPath;
-  }
+  constructor(
+    /**
+     * `gitPath` is the `prCascade.gitPath` setting (PR 6): normally just `git`, resolved via
+     * PATH the same way a terminal would; a full path when git is somewhere unusual.
+     */
+    private readonly gitPath: string = 'git',
+  ) {}
 
   // see primer §5 (arrow functions), §15 (new Promise) and §16 (object literals: shorthand
   // keys and spread)
@@ -289,18 +283,12 @@ export class RealGitRunner implements GitRunner {
           // Node reuses `error.code` for two different things: a number is git's exit
           // status; a string is Node's own reason the process failed (classifyStartFailure
           // sorts out the two strings that mean E17).
-          // see primer §17 (narrowing with typeof)
-          let exitCode: number | null = null;
-          if (typeof error.code === 'number') {
-            exitCode = error.code;
-          }
+          // see primer §17 (narrowing with typeof) and §48 (the conditional expression)
+          const exitCode = typeof error.code === 'number' ? error.code : null;
           const startFailure = classifyStartFailure(error);
           // Node's own words for what is left: no exit code and git did start — a signal,
           // or the output overflow of E18.
-          let detail: string | undefined = undefined;
-          if (exitCode === null && startFailure === null) {
-            detail = error.message;
-          }
+          const detail = exitCode === null && startFailure === null ? error.message : undefined;
           reject(new GitError({ gitPath: this.gitPath, args, cwd, exitCode, stderr, startFailure, detail }));
         });
       } catch (error) {

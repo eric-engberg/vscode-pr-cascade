@@ -159,22 +159,22 @@ export function buildStack(options: FixtureOptions = {}): Fixture {
  * plain way to keep them together. Not exported: tests only ever see the Fixture
  * interface, which is all they need.
  */
-// see primer §13 (class, extends and constructor: `implements`, `private`, default parameters)
-// and §14 (readonly)
+// see primer §13 (class, extends and constructor: `implements`, `private`, default parameters),
+// §14 (readonly) and §47 (parameter properties)
 class StackFixture implements Fixture {
-  readonly dir: string;
-  private readonly scratchDir: string;
-  private readonly trunk: string;
-  private readonly layers: string[];
-  private readonly hasRemote: boolean;
-
-  constructor(scratchDir: string, repoDir: string, trunk: string, layers: string[], hasRemote: boolean) {
-    this.scratchDir = scratchDir;
-    this.dir = repoDir;
-    this.trunk = trunk;
-    this.layers = layers;
-    this.hasRemote = hasRemote;
-  }
+  constructor(
+    /** Holds `repo/` and `origin.git/` side by side; what `cleanup` removes. */
+    private readonly scratchDir: string,
+    /**
+     * The repository root. A parameter property is named after the field it declares, and
+     * the Fixture interface calls this one `dir`, so the parameter is `dir` too (buildStack
+     * passes its `repoDir` variable here; the argument is positional, so nothing there changed).
+     */
+    readonly dir: string,
+    private readonly trunk: string,
+    private readonly layers: string[],
+    private readonly hasRemote: boolean,
+  ) {}
 
   // see primer §28 (the Sync variants of Node's functions) and §16 (object literals: spread)
   git(args: string[]): string {
