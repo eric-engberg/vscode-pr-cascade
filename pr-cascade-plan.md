@@ -375,7 +375,7 @@ any conflict.
 | `prCascade.createStackPRsAsDrafts` | Create PRs for Stack (all as drafts) | view title overflow | §7.7 with every `Draft: yes`, still opens the plan document unless mode is `auto`. |
 | `prCascade.markReadyForReview` | Mark Ready for Review | context menu on a draft PR layer | backend `setDraft(layer, false)` = `gs branch submit --branch <l> --update-only --no-draft` (both forges), then refresh. |
 | `prCascade.markStackReady` | Mark All Drafts Ready | view title overflow; also inline on the top layer when any draft exists | Confirm `"Mark N draft pull requests ready for review?"` listing them → `setDraft(layer, false)` for each draft in the stack, **bottom → top**, stop on first failure and report which succeeded → refresh. No-op with a message when the stack has no drafts. |
-| `prCascade.moveOnto` | Move Layer and Above Onto… | `…` › Stack; layer context | §7.12 primitive. |
+| `prCascade.moveOnto` | Move Layer and Above Onto… | `…` › Stack; layer context; **drag and drop** (§7.2.1) | §7.12 primitive. |
 | `prCascade.insertBranchBelow` | Insert Branch Below… | layer context | §7.12 phase 1. |
 | `prCascade.finishInsert` | Finish Insert | inline on pending-insert node | §7.12 phase 2. |
 | `prCascade.cancelInsert` | Cancel Insert | inline on pending-insert node | Clears the pending record only. |
@@ -441,6 +441,18 @@ The trailing `…` in a title means "opens something before acting" (the plan do
                                 GitLab: <host>/<owner>/<repo>/-/compare/<parent>...<branch>
 ```
 Pending-insert node: `contextValue = stackPendingInsert`, inline `Finish Insert` + `Cancel Insert`.
+
+**Drag and drop (M8, added 2026-09-20 at Ric's request — the gesture Graphite and VisualJJ offer):**
+a `TreeDragAndDropController` on the Stack view (`dragMimeTypes` / `dropMimeTypes` =
+`application/vnd.code.tree.prCascade`). Only **layer rows** can be dragged; a layer can be dropped on
+another **layer row** or on the **trunk** (the repo row in a multi-root window, or an explicit
+"trunk" drop zone in the single-repo tree — decide at implementation, the test names both). A drop
+means `prCascade.moveOnto(L = dragged, B = target)`, i.e. `gs branch onto <B> --branch <L> --restack
+upstack` (§7.12), **after** a confirmation `Move <L> and the N layer(s) above it onto <B>?` — a rebase
+that can pause on conflicts must not fire on an accidental drop. Refusals, checked before the confirm:
+B is L or a descendant of L (E53, cycle); rebase in progress (E12); dirty working tree; L and B in
+different repositories. File rows, message rows and the pending-insert row are neither draggable nor
+drop targets. Nothing else changes: the picker command stays for keyboard users.
 
 Layer `contextValue` vocabulary: `stackBranch`, `stackBranchWithPR`, `stackBranchWithDraftPR`, with
 `Current` appended when HEAD is on it (e.g. `stackBranchWithPRCurrent`) so "Check Out" hides on the
@@ -962,6 +974,7 @@ refuses to run without it on GitHub (native view is required, so a half-done sta
 | E73 | `Relink Stack on GitHub` on an already-linked stack | Idempotent: no new stack, bases untouched. |
 | E74 | GitLab repo, createPRs | MRs target parent branches; GitLab's header dropdown shows the stack with no extra step; no `gh` involved anywhere. |
 | E75 | Bitbucket/Gitea/Forgejo/Azure repo | Tree and diffs work; CR actions show "v1 supports GitHub and GitLab" (git-spice could do it, but there is no native stack view to show). |
+| E77 | Drag a layer row and drop it | Onto another layer → confirm → `moveOnto(L, B)` exactly once with the dragged and target names; onto trunk → base is the trunk ref; onto its own descendant → refused before the confirm (E53), no git call; onto a file/message row, or across repositories → no drop target, nothing runs; during a rebase or with a dirty tree → refused with the E12/E13 message; cancelling the confirm → no call. |
 | E76 | A stack branch was rewritten on the remote by someone else (GitHub's "Rebase stack" button, `gh stack sync`, a co-worker's force-push) — with and without unpushed local commits | Sync Stack detects it after fetch (`push.ahead > 0 && push.behind > 0`, or neither tip an ancestor of the other) and **adopts** the remote before any restack: no unpushed work → `git branch -f <b> origin/<b>`; unpushed work → `git rebase --onto origin/<b> origin/<b>@{1} <b>` after confirming; then `gs stack restack` is a no-op. Restack/submit **refuse** while a branch is diverged and unadopted; the banner names the branch. Never force-push over a diverged remote (git-spice's lease only protects a clone that has not fetched). Procedure verified 2026-09-20, §13.4. |
 
 ---
@@ -1055,6 +1068,7 @@ Every layer commits one distinct file (`a`, `b`, `c`, …) so file lists are tri
 | `unit/prstatus.test.ts` | §7.8 JSON parsing → map by head; missing fields; empty list; malformed JSON → "no PR info" |
 | `git/surgery.git.test.ts` | real fixture **through the backend (real `gs`)**: `squashMergeBottomIntoTrunk()` → sync → insert below → finish; assert graph + `git patch-id` stability (E48); middle insert (E49); cycle refusal (E53); conflict path leaves gs paused and the record kept (E52) |
 | `ext/insert.test.ts` | phase 1 creates branch + pending node + status bar text; Finish refuses without commits (E50); chains Restack After Merge when stale (E51, fake runner); after Finish the PR pipeline is invoked with the expected create/fix operations; cancel (E54) |
+| `ext/dragdrop.test.ts` | the controller's `handleDrag` puts the layer in the data transfer under the view's MIME type; `handleDrop` on a layer/trunk target calls `moveOnto` with (L, B) after the confirm (fake backend records argv); every E77 refusal produces no call; file/message rows are not drop targets; the picker command and the drop share one code path |
 | `unit/gsLog.test.ts` | §7.13.2 stream parsing: full objects, minimal objects, `--cr-status` fields, unknown fields tolerated, malformed line isolated (E57), CRLF, empty output |
 | `unit/readiness.test.ts` | every branch of §7.13.1 with a fake runner (E55, E59, E62, E67); memoization; version parsing |
 | `unit/forge.test.ts` | every URL form (E21, E65): ssh, scp-like, https, ports, `user@`, no `.git`, trailing slash, garbage → null; forge kind per host; `spice.forge.*.url` override; `ghEnv()` sets `GH_HOST` |
@@ -1252,7 +1266,7 @@ one PR — the split is itself the lesson in how the layers relate.
 37. backend `restack` + `sync` + `rebaseState` → **Restack onto Trunk**, **Sync Stack**, rebase
     banner (E58, E63). Sync Stack is fetch → detect diverged remotes → adopt (E76, procedure in §13.4)
     → `gs repo sync --restack upstack` → submit; restack and submit refuse on an unadopted diverged
-    branch. Tests: `git/sync.git.test.ts` with a second clone rewriting the remote, both E76 variants. 38. `moveOnto` + command + cycle check (E53). 39. `insertBranchBelow` /
+    branch. Tests: `git/sync.git.test.ts` with a second clone rewriting the remote, both E76 variants. 38. `moveOnto` + command + cycle check (E53). 38b. **drag-and-drop move**: `TreeDragAndDropController` on the view → the same `moveOnto` after a confirm; refusals per E77; tests `ext/dragdrop` (added 2026-09-20). 39. `insertBranchBelow` /
     `finishInsert` / `cancelInsert` + pending node + status bar text (E48–E52, E54, E72).
 40. `mergeBottom` + **Merge Bottom PR…** + `mergeMethod`. 41. `git/surgery.git` + remaining §9.6
     contract rows; e2e surgery pass on the scratch repo.
@@ -1776,6 +1790,10 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
 - Whether the ≤ 300-line guideline should exclude comment lines (D23).
 - Whether E14's wording should change to match D16, and whether to add the tag case as E76.
 - M5 heads-up: the `gs` vs `git-spice` binary name (13.1).
+- **Drag-and-drop move added to M8 (2026-09-20, Ric's request):** he likes the visual stack views in Graphite
+  and VisualJJ; the drag gesture is the first UI borrowed from them and rides on M8's `moveOnto` (§7.2.1, E77,
+  §10.1 item 38b). Deliberate limit: the tree remains the v1 view; a richer graph view is **not** planned
+  unless he asks — it would be a webview, which §7.9's principle avoids for anything that is not a picture.
 - **DECIDED 2026-09-19: `ExtensionApi` stays as is** — a plain `{ provider, refresh }` test seam (§9.1), no
   rename, no `getAPI(version)` shell like the built-in git extension (no external consumers exist or are
   planned). **M5 design note:** the fake runner/terminal injection §9.4 needs for extension-host tests must
