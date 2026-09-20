@@ -6,7 +6,7 @@
  * gitignored), launches it with this repo as the extension under development, and runs
  * the Mocha tests listed here inside it. Depends on: @vscode/test-cli, the compiled
  * fixture builder out/test/helpers/fixture.js. Depended on by: `npm run test:ext`.
- * Plan: §9.1 layer 3, §9.2, §8 E1b/E2.
+ * Plan: §9.1 layer 3, §9.2, §8 E1b/E2/E7/E10.
  */
 import { defineConfig } from '@vscode/test-cli';
 import * as fs from 'node:fs';
@@ -21,6 +21,24 @@ import { buildStack } from './out/test/helpers/fixture.js';
 // subfolder (E1b) and show it once (E2). Built in a temporary directory: `<scratch>/repo`
 // with `origin.git` beside it.
 const fixture = buildStack();
+// Two changes to the Appendix A stack, both folded into the top layer's own commit
+// (test/ext/tree.test.ts looks at them). First, so the view has a rename to show (E7):
+// the top layer also moves `b`, which the middle layer added, to `b2`. Two things about
+// how. The move is folded in with `--amend` (buildStack leaves HEAD on the top layer),
+// because a second commit would change the `3 commits` every other test asserts;
+// amending the top is safe, as no branch is built on it (E14 is about amending a
+// *lower* layer). And it is `b`, not the top layer's own `c`, because the tree lists
+// what a layer changes as a diff of two snapshots — the parent's and the layer's
+// (core/changes.ts) — and a rename can only appear in that diff when the file exists at
+// the parent: `c` does not, so `git mv c c2` would show up as nothing but an added `c2`.
+fixture.git(['mv', 'b', 'b2']);
+// Second, so the view has a binary file to show (E10; the `stackFileBinary` row): git
+// calls a file binary when there is a NUL byte in its first 8000 bytes, and a `\0` in
+// the text written here is that byte — the idiom test/git/changes.git.test.ts uses. It
+// sorts after `c`, so it is the top layer's last row.
+fs.writeFileSync(path.join(fixture.dir, 'logo.png'), 'PNG\0not a real picture, but binary to git\0');
+fixture.git(['add', 'logo.png']);
+fixture.git(['commit', '-q', '--amend', '--no-edit']);
 // The CLI process that loads this file outlives the VS Code it launches, so the scratch
 // directory is removed when that process exits — after every test has run. A Ctrl+C
 // during the run gets there too: @vscode/test-electron (what the CLI launches VS Code

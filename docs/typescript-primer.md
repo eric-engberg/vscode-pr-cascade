@@ -911,7 +911,9 @@ are set — `encoding` (text rather than raw bytes) and `stdio` (close stdin so 
 can wait for input) are the two that matter. A few more of the same kind appear in the
 fixture and its test: `fs.rmSync(dir, { recursive: true, force: true })` is `rm -rf`;
 `fs.statSync(p).isFile()` is `test -f`; `path.resolve(base, p)` makes a relative path
-absolute (`realpath -m`), and `path.dirname(p)` is `dirname`. Three more in
+absolute (`realpath -m`), `path.dirname(p)` is `dirname`, and `path.basename(p)` is
+`basename` — the last piece of a path, which `src/vscode/tree.ts` uses for a row's label
+(`RepoNode` since PR 6, `FileNode` since PR 11). Three more in
 `test/git/changes.git.test.ts` (PR 10): `fs.mkdirSync(p, { recursive: true })` is
 `mkdir -p` (the fixture builder uses it too), `fs.copyFileSync(a, b)` is `cp a b`, and
 `fs.symlinkSync(target, p)` is `ln -s target p` — the arguments in that order, target
@@ -1091,6 +1093,12 @@ provider.refresh(); }` inside `activate` is the same thing with `provider`. A sh
 function that reads a variable set in the script around it is the closest analogy, except
 that here the variable survives the script's end.
 
+The provider's second loader (PR 11) is `(root: string, layer: StackLayer) =>
+Promise<ChangedFile[]>`, and `src/extension.ts` hands it `(root, layer) =>
+loadChangedFiles(output, root, layer)`: an arrow whose two parameters carry no types of
+their own, because the compiler takes them from the parameter the arrow is passed to
+(§3), and which closes over `output` exactly as the first loader does.
+
 ## 34. A union of classes, narrowed with instanceof
 
 *First seen in `src/vscode/tree.ts` (`StackNode`).*
@@ -1118,6 +1126,21 @@ Many TypeScript codebases give each class a `kind: 'repo' | 'layer'` field and n
 that instead. `instanceof` was chosen here because it is already known from §18 and needs
 no extra field.
 
+The union has since grown a member — `FileNode`, in PR 11: `RepoNode | LayerNode |
+FileNode | MessageNode`. Adding it was one line here; what happened elsewhere is the
+lesson. `getTreeItem` needed nothing, because the new class has a `toTreeItem` like the
+others. `getChildren` needed a new `instanceof LayerNode` branch to list a layer's files —
+and had that branch been forgotten, the compiler would *not* have said so, because the
+chain of `if`s ends in a `return []` that answers for every kind not named above it, the
+new one included. A fall-through like that is convenient and quiet, which is why the
+comment on it names the kinds it is meant to cover ("a file or a message"). The compiler
+cannot check an `instanceof` chain for completeness: dropping the `return []` only makes
+it refuse the function outright (TS2366, "Function lacks ending return statement…"),
+whether or not every kind is handled, because it never treats such a chain as having
+covered the whole union. A completeness check is what the other pattern above — a `kind`
+field and a `switch` over it — would buy; that construct belongs to the PR that first
+needs it. With `instanceof`, the comment on the fall-through is the check.
+
 ## 35. Enum values from the VS Code API
 
 *First seen in `src/vscode/tree.ts` (`vscode.TreeItemCollapsibleState.None`).*
@@ -1134,7 +1157,9 @@ shown open) — and a value of that type must be one of them, written
 number that is not one of the members' values — though a bare `1` slips through, which is
 one reason to always write the name. It is the same job the exact-string unions of §10 do
 (`FileStatus`, `StartFailure`), which is why this codebase uses the API's enums where the
-API demands them and defines none of its own (plan §11.1).
+API demands them and defines none of its own (plan §11.1). All three members are in use
+since PR 11: a `LayerNode` is `Collapsed` — it has children, its files, and starts
+folded — a `FileNode` and a `MessageNode` are `None`, a `RepoNode` is `Expanded`.
 
 ## 36. export const: a shared constant object
 
@@ -1433,6 +1458,12 @@ function nextWorkspaceFoldersChange(): Promise<void> {
   folder is `file:///private/tmp/...`, and later the two sides of a diff will be
   `stackdiff:` URIs (plan §7.4). `Uri.file` builds the URI for a local path; `.fsPath`,
   which `src/extension.ts` already reads off each workspace folder, goes the other way.
+  Its first use in shipped code is PR 11's `FileNode.toTreeItem` (`src/vscode/tree.ts`):
+  `item.resourceUri = vscode.Uri.file(path.join(root, file.path))`. `resourceUri` is the
+  `TreeItem` field that says "this row *is* that file" — VS Code then draws the icon the
+  user's icon theme has for the file type and applies its file decorations, and the code
+  needs to know nothing about either. `test/ext/tree.test.ts` reads the `.fsPath` back
+  off the drawn row and compares it with the path it expects.
 - **`updateWorkspaceFolders(start, deleteCount, ...toAdd)`** — one call that removes
   `deleteCount` folders at position `start` and inserts the ones given, so it adds
   (`(folders.length, 0, { uri })`), removes (`(index, 1)`) or replaces. It returns `true`
@@ -1576,3 +1607,61 @@ up the chain, gets it: `parseNameStatus`, then `changedFiles`, then the tree (PR
 shows the message under the layer. Because a `throw` is how an `async` function's Promise
 rejects (§7), the test for it is a plain `expect(() => parseNameStatus(output)).toThrow(...)`
 on the synchronous function and `rejects` on the asynchronous one.
+
+## 46. A cache: a Map keyed by two values joined into one string, and `clear`
+
+*First seen in `src/vscode/tree.ts` (`StackTreeProvider.filesByCommitPair`, `filesForLayer`,
+`refresh`).*
+
+```ts
+private readonly filesByCommitPair = new Map<string, ChangedFile[]>();
+
+const key = `${node.layer.parentSha}:${node.layer.sha}`;
+let files = this.filesByCommitPair.get(key);
+if (files === undefined) {
+  try {
+    files = await this.loadFiles(node.root, node.layer);
+  } catch (error) {
+    ...
+    return [new MessageNode(message, 'error')];
+  }
+  this.filesByCommitPair.set(key, files);
+}
+return files.map((file) => new FileNode(node.root, file));
+
+refresh(): void {
+  this.filesByCommitPair.clear();
+  this.changeEmitter.fire(undefined);
+}
+```
+
+No new syntax — §19's `Map`, §12's template string, §8's narrowing — but a pattern worth
+naming: a **cache**, "ask once, remember the answer". Four things in it.
+
+- **The key.** A `Map` has one key per entry, and the answer here depends on two things,
+  the parent's SHA and the layer's. The plain way to make one key from two values is to
+  join them into one string with a separator between: `${parentSha}:${sha}`. Without a
+  separator `ab` + `c` and `a` + `bc` would both become `abc`; with one, the same collision
+  needs the separator inside a value — `a:b` + `c` and `a` + `b:c` both become `a:b:c` — so
+  it must be a character the values cannot contain. A SHA is hexadecimal digits only (forty
+  of them; sixty-four in a SHA-256 repository) and never a colon, so here it is safe; with
+  paths or free text it would not be, and the comment on the field should always say why
+  the separator is fine.
+- **The lookup and the fill.** `get` answers `undefined` for a key it has not seen (§19);
+  the `if` computes the answer and `set`s it for next time. Note the `let files` (§4): its
+  type is `ChangedFile[] | undefined`, from `get`, and after the `if` the compiler treats
+  it as a `ChangedFile[]` — on the path through the `if` it was assigned one (or the
+  function returned), on the path around it it was never `undefined`. §8's narrowing,
+  applied by an assignment rather than a check; nothing has to be written for it.
+- **What is not cached.** The `set` comes after the `try` / `catch` (§18), so a failure
+  leaves the map untouched and the next open of the layer asks git again. A cached error
+  would be an error the user could never get rid of.
+- **`clear()`** empties the map. §19's list of `Map` methods did not need it; a cache does.
+  Why it is called at all is the interesting part, and the comment on the field says it:
+  the key names two exact commits, and the same two commits always have the same diff, so
+  an entry can never be *wrong* — a branch that moved has a new SHA, hence a new key. The
+  map is emptied on refresh for the other reason a cache is emptied: memory. Without it a
+  window kept open for a week would hold every list it ever showed. A cache whose keys
+  name the content they were computed from ("content-addressed", as git's own object
+  store is) is the easy kind to get right; the hard kind is one keyed by a *name* whose
+  meaning changes, and that kind this codebase avoids.

@@ -4,16 +4,17 @@
  *
  * Layer: wiring (plan §4.1); the only file VS Code loads directly (package.json "main"
  * points at its bundled form, dist/extension.js). Depends on: the `vscode` module,
- * core/git.ts, core/discovery.ts, core/trunk.ts, core/stack.ts, vscode/config.ts,
- * vscode/tree.ts. Depended on by: VS Code itself, and test/ext/*. Plan: §4.1, §4.2, §6,
- * §7.2 (prCascade.refresh), §9.1 (what activate returns), §10.1 item 6.
+ * core/git.ts, core/discovery.ts, core/trunk.ts, core/stack.ts, core/changes.ts,
+ * vscode/config.ts, vscode/tree.ts. Depended on by: VS Code itself, and test/ext/*.
+ * Plan: §4.1, §9.1 (what activate returns), §10.1 items 6 and M2 9.
  */
 
 // see primer §1 (import / export), §2 (the vscode module) and §9 (`import type`)
 import * as vscode from 'vscode';
+import { changedFiles } from './core/changes';
 import { discoverRepoRoots } from './core/discovery';
 import { RealGitRunner } from './core/git';
-import type { RepoState } from './core/model';
+import type { ChangedFile, RepoState, StackLayer } from './core/model';
 import { computeStack } from './core/stack';
 import { detectTrunk } from './core/trunk';
 import { readSettings } from './vscode/config';
@@ -54,10 +55,16 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
   // is deactivated, so nothing here has to be cleaned up by hand.
   context.subscriptions.push(output);
 
-  // The provider is handed the pipeline as a function and calls it whenever VS Code asks
-  // for the top of the tree (vscode/tree.ts explains why a function and not the result).
-  // see primer §5 (arrow functions)
-  const provider = new StackTreeProvider(() => loadRepoStates(output));
+  // The provider is handed both pipelines as functions and calls them when VS Code asks:
+  // the first for the top of the tree, the second for the rows under a layer the user
+  // opens (vscode/tree.ts explains why functions and not the results). The output
+  // channel goes along so a failure the provider turns into a row is also logged.
+  // see primer §5 (arrow functions) and §33 (function types: a closure over `output`)
+  const provider = new StackTreeProvider(
+    () => loadRepoStates(output),
+    (root, layer) => loadChangedFiles(output, root, layer),
+    output,
+  );
   context.subscriptions.push(provider);
   // "prCascade" is the view id from package.json "contributes.views"; VS Code has
   // already drawn the empty view under Source Control and now knows whom to ask for rows.
@@ -136,4 +143,28 @@ async function loadRepoStates(output: vscode.OutputChannel): Promise<RepoState[]
     states.push(state);
   }
   return states;
+}
+
+/**
+ * The second half of the read pipeline: the files one layer changes against the layer
+ * below it, for the provider to list under the layer's row. Run per layer and on demand
+ * — when the user opens the row — rather than once per refresh, because a diff is only
+ * wanted for a layer someone looks at, and the provider keeps the answer for a pair of
+ * commits it has seen (vscode/tree.ts, filesByCommitPair). `changedFiles`
+ * (core/changes.ts) does the work, over the two SHAs the layer carries rather than the
+ * branch names — its doc comment says why.
+ *
+ * The runner is built here, the way loadRepoStates builds its own: from the setting, on
+ * every call, so a corrected `prCascade.gitPath` takes effect at the next click and not
+ * at the next window. Neither the provider nor the core ever constructs one (plan §4.1):
+ * this function is what activate() hands the provider, and a test could hand it
+ * something else. A failure rejects, and the provider turns it into one error row under
+ * the layer (vscode/tree.ts, filesForLayer).
+ */
+async function loadChangedFiles(output: vscode.OutputChannel, root: string, layer: StackLayer): Promise<ChangedFile[]> {
+  const settings = readSettings();
+  const git = new RealGitRunner(settings.gitPath);
+  const files = await changedFiles(git, root, layer.parentSha, layer.sha);
+  output.appendLine(`${layer.name}: ${files.length} file(s) changed against ${layer.parent}`);
+  return files;
 }

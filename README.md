@@ -61,7 +61,13 @@ folder in a second window, the **Extension Development Host**.
 3. Terminal 1: `npm run watch` — esbuild rebuilds `dist/extension.js` on every save.
 4. Press **F5** ("Run Extension"). A second VS Code window opens with the extension loaded
    and `../fixture-repo/repo` open. Its Source Control side bar has a **Stack** view listing
-   the three branches, top layer first.
+   the three branches, top layer first. Open a layer to see the files it changes against
+   the layer below it — only its own, never the ones the lower layers added — as
+   `A  c` (added), `M  …` (modified), `D  …` (deleted), and `R  b2` with `b → b2` beside it
+   for a rename (the fixture's top layer moves `b` so there is one to see; it also adds a
+   small binary `logo.png`, which looks like any other row for now — milestone 3 treats
+   it differently). The icon is VS Code's own for the file type; clicking a file does
+   nothing yet (milestone 3).
 5. Edit code → in the dev-host window run **Developer: Reload Window** to pick up the rebuild.
    The extension's own log is in that window's Output panel under "PR Cascade".
 

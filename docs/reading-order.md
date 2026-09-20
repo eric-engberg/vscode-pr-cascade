@@ -21,11 +21,14 @@ the repository root; its §13 is the running log of decisions and deviations mad
    given code in `src/extension.ts`. The `scripts` block is every command a developer runs;
    the `devDependencies` block is the toolchain, nothing here ships.
 2. **`src/extension.ts`** — the entry point and the wiring. Read it twice: now for the
-   shape — `activate` builds the provider, registers the view and the command, subscribes
-   to workspace-folder changes, returns `{ provider, refresh }` — and again after item 22,
-   when `loadRepoStates` at the bottom reads as the four core functions in a row: settings
-   → `RealGitRunner` → `discoverRepoRoots` → `detectTrunk` → `computeStack`, one
-   `RepoState` per repository. Nothing else ever happens in this file (plan §4.1).
+   shape — `activate` builds the provider from two loader functions and the output
+   channel, registers the view and the command, subscribes to workspace-folder changes,
+   returns `{ provider, refresh }` — and again after item 22, when `loadRepoStates` at the
+   bottom reads as the four core functions in a row: settings → `RealGitRunner` →
+   `discoverRepoRoots` → `detectTrunk` → `computeStack`, one `RepoState` per repository;
+   and `loadChangedFiles` under it as the fifth, run for one layer when its row is opened:
+   settings → `RealGitRunner` → `changedFiles`. Nothing else ever happens in this file
+   (plan §4.1).
 3. **`src/core/model.ts`** — the shapes every core module shares. First the `GitRunner`
    interface: the two ways core code runs git (`run`, `tryRun`) and what each does when git
    says no — read the doc comment on `tryRun` for the decision PR 2's body flags under
@@ -236,17 +239,28 @@ the repository root; its §13 is the running log of decisions and deviations mad
     unchecked `-5`, `1.5` or a string in place of the list would have quietly done to the
     scan, and the body for why the value is read as `unknown` rather than claimed to be a
     number.
-22. **`src/vscode/tree.ts`** — the Stack view. Three small node classes first: `LayerNode`
+22. **`src/vscode/tree.ts`** — the Stack view. Four small node classes first: `LayerNode`
     (the row is the branch name and nothing else — plan §7.1, E44 — with the count and
     the `· current` marker as the dimmer description, `$(target)` / `$(git-branch)` as the
-    icon, and the SHAs only in the tooltip), `RepoNode` (one per repository, only when the
-    workspace holds several — plan §6) and `MessageNode` (the sentences: no repository,
-    no trunk (E4), not on a stack (E5), git failed (E17)). Then `StackTreeProvider`, the
-    `TreeDataProvider` VS Code asks for rows: read the class comment for why it is handed a
-    *function* that loads the states rather than the states themselves, and how `refresh`
-    (fire the event), `getChildren` (call the loader, or list a repository's layers) and
-    `getTreeItem` (each node draws itself) divide the work. `nodesForRepo` at the bottom is
-    where the layers are turned top-first.
+    icon, and the SHAs only in the tooltip; since M2 it starts collapsed and carries its
+    repository's `root`, and the comment says why), `FileNode` (the row under a layer,
+    M2: `M  ingress.ts` — the status letter as a prefix, plan §12 item 3 — with the
+    directory as the description, or `old → new` for a rename (E7); read the class
+    comment for what `resourceUri` buys — VS Code's own file icon and decorations — and
+    the body for `stackFile` / `stackFileBinary` and why there is no command yet),
+    `RepoNode` (one per repository, only when the workspace holds several — plan §6) and
+    `MessageNode` (the sentences: no repository, no trunk (E4), not on a stack (E5), git
+    failed (E17) — at the top, or under a layer). Then `StackTreeProvider`, the
+    `TreeDataProvider` VS Code asks for rows: read the class comment for why it is handed
+    *functions* that load the states and the files rather than the data itself, the doc
+    comment on `filesByCommitPair` for the cache — keyed on the two SHAs, so an entry can
+    never be wrong, emptied on refresh anyway, for memory, and plain about who consults it
+    today (VS Code keeps a row's children until the next refresh) — and how `refresh` (empty
+    the cache, fire the event), `getChildren` (call the loader, list a repository's
+    layers, or list a layer's files) and `getTreeItem` (each node draws itself) divide the
+    work. `filesForLayer` is where a layer git cannot list becomes one error row under it
+    instead of a broken tree. `nodesForRepo` at the bottom is where the layers are turned
+    top-first.
 23. **`test/ext/activate.test.ts`** — inside a real VS Code: the extension is found by its
     id, activates, returns `{ provider, refresh }` (plan §9.1), and has its view and command
     registered — the view is checked by running the `prCascade.focus` command VS Code
@@ -259,11 +273,23 @@ the repository root; its §13 is the running log of decisions and deviations mad
     so the layers sit at the top level; every label is a branch name, top first, with no
     SHA in any of them (E44); `3 commits · current`, `2 commits`, `1 commit`; the target
     icon and `stackBranchCurrent` on HEAD's layer; the SHAs in the tooltips, checked
-    against `git rev-parse`; nothing under a layer yet (M2); and `refresh()` firing
-    `onDidChangeTreeData` with `undefined`. Then the one-row messages, each test putting
-    the fixture or a setting into the state and undoing it in `finally`: HEAD on trunk
-    (E5), a configured trunk that does not exist (E4), a `gitPath` that does not exist
-    (E17 — the row carries `RealGitRunner`'s own message).
+    against `git rev-parse`; and `refresh()` firing `onDidChangeTreeData` with
+    `undefined`. Then the files under each layer (M2): exactly the layer's own — `A  a`,
+    `A  b`, and the top layer's `R  b2`, `A  c` and `A  logo.png` — never what the layers
+    below it changed (M2 "done when"); layer rows collapsed; `stackFile` on a text file's
+    row and `stackFileBinary` on the binary one (E10); `resourceUri` equal to the file's
+    absolute path; an empty description and the path as tooltip for a root-level file;
+    `R  b2` with `b → b2` (E7); no command and nothing underneath; a second `getChildren`
+    for the same pair of commits answered from the cache — shown by breaking `gitPath`
+    between the two asks with no refresh in between, so only the cache could have
+    answered; and one error row under the layer
+    when `gitPath` is wrong and there *was* a refresh (E17), its message naming the two
+    SHAs the view hands git — read `layerNode` and `filesUnderLayer` at the top for how a
+    row is opened from a test.
+    Last, the one-row messages, each test putting the fixture or a setting into the state
+    and undoing it in `finally`: HEAD on trunk (E5), a configured trunk that does not exist
+    (E4), a `gitPath` that does not exist (E17 — the row carries `RealGitRunner`'s own
+    message).
 25. **`test/ext/scanSettings.test.ts`** — the two scan settings, live: `before` builds
     Ric's layout in a temporary directory (a parent that is not a repository, the
     Appendix A stack in `alpha` and `beta` below it, a third in `group/gamma` two levels
@@ -280,11 +306,14 @@ the repository root; its §13 is the running log of decisions and deviations mad
     leaves the workspace as built for whichever file Mocha runs next (item 24 asserts the
     folder list).
 26. **`.vscode-test.mjs`** — where that workspace comes from: the fixture builder (item 16,
-    its compiled copy under `out/`) makes the stack in a temporary directory, an empty
-    `nested` folder is added inside the repository, and a `.code-workspace` file listing
-    `nested` first and the root second is what the test VS Code opens. Cleaned up when the
-    test process exits — a Ctrl+C during the run included, which the harness turns into a
-    normal exit.
+    its compiled copy under `out/`) makes the stack in a temporary directory, the top
+    layer's commit is amended so it also moves `b` to `b2` (the comment says why it is
+    that file — a rename only shows in a diff of two snapshots when the file exists at
+    the parent — and why `--amend`) and adds a small binary `logo.png` (E10; a NUL byte
+    is what makes git say binary), an empty `nested` folder is added inside the
+    repository, and a `.code-workspace` file listing `nested` first and the root second is
+    what the test VS Code opens. Cleaned up when the test process exits — a Ctrl+C during
+    the run included, which the harness turns into a normal exit.
 
 ## The toolchain (read once, then only when something breaks)
 
@@ -303,7 +332,9 @@ the repository root; its §13 is the running log of decisions and deviations mad
 32. **`.vscode/launch.json`**, **`.vscode/tasks.json`** — F5 (plan §11.2): build, then open a
     second VS Code with the extension loaded and `../fixture-repo/repo` open.
 33. **`scripts/fixture.ts`** — `npm run fixture`: the fixture builder pointed at
-    `../fixture-repo`, so F5 has a stack to show. The comment above its import explains
+    `../fixture-repo`, so F5 has a stack to show — with the same `b` → `b2` move and
+    binary `logo.png` on the top layer as item 26, so F5 shows a rename and a binary file
+    too. The comment above its import explains
     how esbuild bundles the script into `out/` and node runs it from there (the same tool
     that builds the extension; `&&` so a bundling error is not mistaken for success) and
     why Node's own type stripping was not used.
@@ -323,10 +354,12 @@ the repository root; its §13 is the running log of decisions and deviations mad
   `trunk.ts` (which branch is trunk), `stack.ts` (the layers under HEAD) and `changes.ts`
   (the files a layer changes, and which of them are binary).
 - `src/vscode/` — adapters: `config.ts` (settings → plain values, checked) and `tree.ts`
-  (the Stack view). Later milestones add the diff content provider, commands, terminals,
-  the status bar.
-- `src/extension.ts` — the wiring between the two: the pipeline as one function, the view
-  and command registrations, `{ provider, refresh }` for the tests.
+  (the Stack view: the layers, and under each the files it changes, cached per pair of
+  commits). Later milestones add the diff content provider, commands, terminals, the
+  status bar.
+- `src/extension.ts` — the wiring between the two: the two pipelines as two functions
+  (the stack per refresh, the files per opened layer), the view and command
+  registrations, `{ provider, refresh }` for the tests.
 - `test/unit/` (Vitest, no git), `test/git/` (Vitest, real git in temp repos),
   `test/ext/` (Mocha inside VS Code, over a fixture workspace `.vscode-test.mjs` builds),
   `test/helpers/` (the fake git runner and the fixture builder).

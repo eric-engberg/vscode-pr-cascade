@@ -44,6 +44,17 @@ const fixtureDir = path.resolve(projectDir, '..', 'fixture-repo');
 // detection behaves as it does on a clone.
 fs.rmSync(fixtureDir, { recursive: true, force: true });
 const fixture = buildStack({ directory: fixtureDir });
+// The same two changes the extension-host harness makes (.vscode-test.mjs says why these
+// files and why `--amend`), so F5 and the tests show the same stack: the top layer also
+// moves `b` to `b2`, so opening it in the Stack view shows a rename, `R  b2` with
+// `b → b2`, next to its added `c`; and it adds a small binary file, `logo.png` — a `\0`
+// in the text is the NUL byte that makes git call a file binary — whose row is the one
+// M3 will treat differently from the text rows.
+// see primer §44 (`\0` in a string literal)
+fixture.git(['mv', 'b', 'b2']);
+fs.writeFileSync(path.join(fixture.dir, 'logo.png'), 'PNG\0not a real picture, but binary to git\0');
+fixture.git(['add', 'logo.png']);
+fixture.git(['commit', '-q', '--amend', '--no-edit']);
 
 // `git branch` with a format prints one name per line; the `*` marker and colours of the
 // plain form would only confuse a log line.
