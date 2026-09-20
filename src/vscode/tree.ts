@@ -22,16 +22,14 @@ import type { ChangedFile, RepoState, StackLayer } from '../core/model';
  * a FileNode names its file by an absolute path, and a layer on its own does not know
  * which repository it belongs to.
  */
-// see primer §13 (class) and §14 (readonly)
+// see primer §13 (class), §14 (readonly) and §47 (parameter properties: `readonly` on a
+// constructor parameter declares the public field and fills it)
 export class LayerNode {
-  /** The repository the layer is in, as discovery found it (RepoState.root). */
-  readonly root: string;
-  readonly layer: StackLayer;
-
-  constructor(root: string, layer: StackLayer) {
-    this.root = root;
-    this.layer = layer;
-  }
+  constructor(
+    /** The repository the layer is in, as discovery found it (RepoState.root). */
+    readonly root: string,
+    readonly layer: StackLayer,
+  ) {}
 
   /** How VS Code should draw this row. Called by the provider's getTreeItem. */
   // see primer §35 (enum values from the VS Code API: TreeItemCollapsibleState)
@@ -83,14 +81,11 @@ export class LayerNode {
  * (plan §7.2), which will show the file at the parent against the file at the layer.
  */
 export class FileNode {
-  /** The repository root: `file.path` is relative to it, and a URI wants the whole path. */
-  readonly root: string;
-  readonly file: ChangedFile;
-
-  constructor(root: string, file: ChangedFile) {
-    this.root = root;
-    this.file = file;
-  }
+  constructor(
+    /** The repository root: `file.path` is relative to it, and a URI wants the whole path. */
+    readonly root: string,
+    readonly file: ChangedFile,
+  ) {}
 
   /** How VS Code should draw this row. Called by the provider's getTreeItem. */
   toTreeItem(): vscode.TreeItem {
@@ -146,11 +141,7 @@ export class FileNode {
  * RepoNode is made — a row that would always be the only one is noise.
  */
 export class RepoNode {
-  readonly state: RepoState;
-
-  constructor(state: RepoState) {
-    this.state = state;
-  }
+  constructor(readonly state: RepoState) {}
 
   /** How VS Code should draw this row. Called by the provider's getTreeItem. */
   toTreeItem(): vscode.TreeItem {
@@ -174,15 +165,12 @@ export class RepoNode {
  * nodes and may reshape these; here they exist so the view is never silently empty.
  */
 export class MessageNode {
-  readonly message: string;
-  /** A codicon name — `info`, `warning`, `error` — drawn before the text. */
-  readonly icon: string;
-
-  // see primer §13 (default parameters)
-  constructor(message: string, icon: string = 'info') {
-    this.message = message;
-    this.icon = icon;
-  }
+  // see primer §13 (default parameters) and §47 (parameter properties)
+  constructor(
+    readonly message: string,
+    /** A codicon name — `info`, `warning`, `error` — drawn before the text. */
+    readonly icon: string = 'info',
+  ) {}
 
   /** How VS Code should draw this row. Called by the provider's getTreeItem. */
   toTreeItem(): vscode.TreeItem {
@@ -230,15 +218,6 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
   private readonly changeEmitter = new vscode.EventEmitter<StackNode | undefined>();
   readonly onDidChangeTreeData: vscode.Event<StackNode | undefined>;
 
-  /** Runs the whole pipeline and answers with one RepoState per repository, in workspace order. */
-  private readonly loadStates: () => Promise<RepoState[]>;
-
-  /** Lists the files one layer changes against the layer below it, in the repository at `root`. */
-  private readonly loadFiles: (root: string, layer: StackLayer) => Promise<ChangedFile[]>;
-
-  /** The "PR Cascade" entry of the Output panel: a failure that became a row is also written there, in full. */
-  private readonly output: vscode.OutputChannel;
-
   /**
    * The file lists already fetched, by the pair of commits each was computed between —
    * the key is `<parentSha>:<sha>`, two values joined into one string (primer §46).
@@ -259,14 +238,17 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
    */
   private readonly filesByCommitPair = new Map<string, ChangedFile[]>();
 
+  // see primer §47 (parameter properties: the three `private readonly` parameters are the
+  // class's remaining fields; the fields with an initialiser above are set before them, and
+  // the body line runs last)
   constructor(
-    loadStates: () => Promise<RepoState[]>,
-    loadFiles: (root: string, layer: StackLayer) => Promise<ChangedFile[]>,
-    output: vscode.OutputChannel,
+    /** Runs the whole pipeline and answers with one RepoState per repository, in workspace order. */
+    private readonly loadStates: () => Promise<RepoState[]>,
+    /** Lists the files one layer changes against the layer below it, in the repository at `root`. */
+    private readonly loadFiles: (root: string, layer: StackLayer) => Promise<ChangedFile[]>,
+    /** The "PR Cascade" entry of the Output panel: a failure that became a row is also written there, in full. */
+    private readonly output: vscode.OutputChannel,
   ) {
-    this.loadStates = loadStates;
-    this.loadFiles = loadFiles;
-    this.output = output;
     this.onDidChangeTreeData = this.changeEmitter.event;
   }
 

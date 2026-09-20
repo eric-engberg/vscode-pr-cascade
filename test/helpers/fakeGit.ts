@@ -39,12 +39,11 @@ export interface GitCall {
  * A canned Error always means "git ran and said no", so `tryRun` turns it into `null`; the
  * real runner's start failures are covered by test/git/git.git.test.ts instead.
  */
-// see primer §19 (Map) and §13 (class, extends and constructor: `implements`)
+// see primer §19 (Map), §13 (class, extends and constructor: `implements`) and §47
+// (parameter properties)
 export class FakeGitRunner implements GitRunner {
   /** Every call made so far, oldest first, from both run and tryRun. */
   readonly calls: GitCall[] = [];
-
-  private readonly responses: Map<string, string | Error>;
 
   /**
    * Answers that depend on the directory: cwd → (joined args → answer). A Map whose values
@@ -52,9 +51,10 @@ export class FakeGitRunner implements GitRunner {
    */
   private readonly responsesByDirectory: Map<string, Map<string, string | Error>> = new Map();
 
-  constructor(responses: Map<string, string | Error>) {
-    this.responses = responses;
-  }
+  constructor(
+    /** The directory-blind answers: joined args → what git prints, or an Error meaning "git exited non-zero". */
+    private readonly responses: Map<string, string | Error>,
+  ) {}
 
   /**
    * Cans an answer for one command run in one specific directory. It wins over the

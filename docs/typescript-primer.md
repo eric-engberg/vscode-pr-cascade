@@ -345,7 +345,14 @@ export class GitError extends Error implements GitFailure {
   }
 }
 
+export class RealGitRunner implements GitRunner {
+  constructor(private readonly gitPath: string = 'git') {}
+
+  run(args: string[], cwd: string): Promise<string> { ... }
+}
+
 const error = new GitError({ ... });
+const git = new RealGitRunner();
 ```
 
 A **class** is a blueprint for objects that carry both data (**fields**) and behaviour
@@ -367,10 +374,17 @@ class when there is something to *do* or *remember*, an interface when a shape i
   compile error rather than an error object that silently lacks it.
 - A **method** is a function attached to the object: `run(args: string[], cwd: string):
   Promise<string> { ... }` inside the class, `git.run(...)` outside.
-- `private readonly gitPath: string;` — `private` means only code inside the class can
-  read it. Callers see the public surface (the methods) and nothing else.
-- `constructor(gitPath: string = 'git')` — a **default parameter**: `new RealGitRunner()`
-  is the same as `new RealGitRunner('git')`.
+- `private readonly gitPath` (`RealGitRunner`) — `private` means only code inside the class
+  can read it; without `private` a member is public — the default — and anything holding
+  the object may use it. Callers see the public surface (the methods) and nothing else. It
+  is declared inside the constructor's parentheses rather than as a line of its own: a
+  **parameter property**, which declares the field and fills it from the argument in one
+  go — §47 is its section. `GitError` above shows the other way a field is filled, by an
+  assignment in the constructor body (`this.exitCode = failure.exitCode`): the value is
+  *taken out of* an argument there, not the argument itself.
+- `constructor(private readonly gitPath: string = 'git')` — a **default parameter**:
+  `new RealGitRunner()` is the same as `new RealGitRunner('git')`. A default combines with
+  a parameter property as with any other parameter.
 - `readonly calls: GitCall[] = [];` (in the fake) — a field with an initial value, set
   when the object is created; no constructor line needed.
 
@@ -968,6 +982,23 @@ as well, because they are falsy (§24). `options.remote ?? true` keeps a caller'
 remote" fixture (E25) could never be built. `??` looks only for the two "nothing" values,
 which is what "was this option given?" means. Its sibling `?.` — "read this field only if
 the thing before the dot is present" — is not used yet and gets its section when it is.
+
+The same idea on an optional field of an interface (§11) rather than of an options object,
+in `describeFailure` (`src/core/git.ts`):
+
+```ts
+const problem = failure.detail ?? 'cannot be used as the working directory';
+return `${command} could not run: ${failure.cwd} ${problem}`;
+```
+
+`GitFailure.detail` is there when Node had something to say about the directory and absent
+otherwise; the line reads "the detail, or this wording". M1 spelled it as a `let` with the
+default, then `if (failure.detail !== undefined) { problem = failure.detail; }` — four
+lines for one fact, and a `let` (§4) for a value that is decided once and never changes.
+The idiomatic-TypeScript pass (plan §11.1, §13.2 D39) rewrote it: a value that *has a
+default* is a `const` with `??`; the `if` form is kept for a *decision* — `if (node ===
+undefined)` in the tree provider, which chooses between two different things to do, is one,
+and stays as it is.
 
 ## 31. Generics on classes and calls
 
@@ -1665,3 +1696,129 @@ naming: a **cache**, "ask once, remember the answer". Four things in it.
   name the content they were computed from ("content-addressed", as git's own object
   store is) is the easy kind to get right; the hard kind is one keyed by a *name* whose
   meaning changes, and that kind this codebase avoids.
+
+## 47. Parameter properties
+
+*First seen in `src/core/git.ts` (`RealGitRunner`); then in every class of
+`src/vscode/tree.ts`, and in `test/helpers/fakeGit.ts` and `test/helpers/fixture.ts`.
+Added by the idiomatic-TypeScript pass (plan §11.1, §13.2 D39), which rewrote the eight
+constructors M1 and M2 had written the long way.*
+
+```ts
+export class RealGitRunner implements GitRunner {
+  constructor(private readonly gitPath: string = 'git') {}
+}
+```
+
+Writing `private`, `readonly`, `public` or `protected` in front of a constructor parameter
+makes it a **parameter property**: the compiler declares a field with that name and type
+*and* assigns the argument to it, before the constructor body runs. The one line above
+means exactly this, which is how every class in M1 and M2 was written until this section
+existed:
+
+```ts
+export class RealGitRunner implements GitRunner {
+  private readonly gitPath: string;
+
+  constructor(gitPath: string = 'git') {
+    this.gitPath = gitPath;
+  }
+}
+```
+
+The long form is not wrong; it is what TypeScript compiles the short one into. But nobody
+writing TypeScript writes it: it spells the field's name three times and its type twice, and
+the two copies can drift (a field renamed, a `this.gitPath = gitPath` left behind for the
+old name). The plan's rule (§11.1) is that the code look like what a TypeScript developer
+writes and that the *primer* carry the explanation; this section is that explanation.
+
+What to know:
+
+- **The modifier is what makes it a field.** `constructor(gitPath: string)` is an ordinary
+  parameter: a local name, gone when the constructor returns. `constructor(private readonly
+  gitPath: string)` is a field of the object, readable as `this.gitPath` in every method.
+  Nothing else about the line changes.
+- **`readonly` on its own means public and read-only.** `LayerNode` in `src/vscode/tree.ts`
+  is `constructor(readonly root: string, readonly layer: StackLayer) {}`: with no `private`,
+  the field is public — the default for a class member (§13) — and `readonly` says anyone
+  may read it and nobody may assign it (§14). The provider reads them from outside the
+  class — `node.state` in `getChildren`, `node.root` and `node.layer` in `filesForLayer` —
+  on exactly that promise. `private readonly` (the runner's `gitPath`, the provider's two
+  loaders and its output channel, the fake's `responses`) is the field nobody outside the
+  class sees. Each converted class kept the visibility its fields had.
+- **A default value works as before.** `= 'git'` is §13's default parameter; the field takes
+  the default when no argument is passed.
+- **The doc comment goes on the parameter.** A field's comment used to sit above its
+  declaration, `/** ... */ private readonly gitPath: string;`. The declaration is now inside
+  the parentheses, so that is where the comment goes, one parameter per line; editors show
+  the comment attached to the declaration when you hover `this.gitPath`, wherever the
+  declaration is. Read a constructor's parameter list as the class's field list.
+- **Order, when a class has other fields too.** `StackTreeProvider` (`src/vscode/tree.ts`)
+  mixes the three kinds: fields with an initialiser (`private readonly changeEmitter = new
+  vscode.EventEmitter(...)`), parameter properties, and a body line
+  (`this.onDidChangeTreeData = this.changeEmitter.event`). They run in that order — the
+  initialisers, then the parameter-property assignments, then the body — in both `tsc`'s
+  output and esbuild's (checked while writing this). That is the order under this project's
+  ES2022 target, where fields follow JavaScript's own class-field rules (`tsconfig.json`
+  `target`); TypeScript's older emit assigned the parameter properties first, which is what
+  an older answer online will say. An initialiser may therefore not read a parameter
+  property; the compiler refuses it (`Property 'x' is used before its initialization`). The
+  body may read everything.
+- **Named after the field, not the caller's variable.** A parameter property's name *is* the
+  field's name. `StackFixture` in `test/helpers/fixture.ts` implements the `Fixture`
+  interface, whose field is `dir`, so the parameter is `readonly dir: string` even though
+  `buildStack` passes a variable called `repoDir` into it — arguments are positional, so the
+  call site did not change, and the comment on the parameter says so.
+- **What it does not replace.** `GitError` keeps its long form: its constructor takes *one*
+  `GitFailure` object and copies seven fields out of it, and `constructor(private readonly
+  failure: GitFailure)` would be a different class — one field holding an object, not seven
+  fields implementing the interface. A parameter property says "this argument *is* this
+  field", and nothing else.
+
+## 48. The conditional expression: `condition ? a : b`
+
+*First seen in `src/core/git.ts` (`RealGitRunner.run`). Added by the same pass as §47.*
+
+```ts
+const exitCode = typeof error.code === 'number' ? error.code : null;
+const startFailure = classifyStartFailure(error);
+const detail = exitCode === null && startFailure === null ? error.message : undefined;
+```
+
+`condition ? a : b` is an *expression* — a thing with a value — and its value is `a` when
+the condition holds and `b` when it does not. Only the chosen side is evaluated. It is the
+`if` of values: `if` (§8) chooses which statements *run*; `? :` chooses which value
+something *is*. Shell has no exact equivalent — `[ cond ] && a || b` is the nearest, with
+its known trap when `a` itself fails.
+
+The first line reads "`exitCode` is `error.code` if that is a number, otherwise `null`". M1
+wrote it as a `let` and an `if`:
+
+```ts
+let exitCode: number | null = null;
+if (typeof error.code === 'number') {
+  exitCode = error.code;
+}
+```
+
+Same value either way; but the `let` form says "`exitCode` starts as `null` and may then
+become something else", when what is meant is "`exitCode` is one of two things, decided
+here". With `? :` it is a `const` (§4) that never changes after its line — the compiler holds
+it to that — and its type is worked out from the two sides, `number | null` (§10), without
+being written. The narrowing (§17) still applies: on the `?` side the compiler knows
+`error.code` is a `number`. The third line is the same shape with a two-part condition and
+`undefined` as the "otherwise" (the `detail` field is optional, §11).
+
+When it fits and when it does not. It fits a value that is one of *two* things, decided on
+one line. It does not fit three or more choices (`a ? b : c ? d : e` is legal and
+unreadable — write `if`s or a lookup), a side that *does* something rather than *is*
+something (`ok ? save() : warn()` is two statements wearing an expression's clothes — write
+the `if`), or a condition long enough that the `?` gets lost in it. The `.mjs` tooling
+scripts used it before `src/` did (`scripts/depcheck.mjs`: `match === null ? null : ...`),
+which this primer's introduction allows for.
+
+On the name: TypeScript's documentation calls `? :` the **conditional operator**, and
+everyone else the **ternary** (the language's only three-part operator); "conditional
+expression" here means the whole `condition ? a : b`. It is unrelated to *conditional types*
+(`T extends U ? X : Y`), a type-level construct the style rules (plan §11.1) keep out of this
+codebase.

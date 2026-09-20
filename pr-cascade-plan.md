@@ -1760,6 +1760,7 @@ marks several commits `edit` (verified to work; note the todo list contains `upd
 | D36 | M2 PR 11 | §12 item 3 applied as recommended: status letter as the label prefix (`M  ingress.ts`); the icon slot is left to VS Code's file icon via `resourceUri`; `contextValue` is `stackFile` / `stackFileBinary`; file rows have no command until M3's `openDiff`. §12 item 1 is now visible: a layer's rows are its files, no commit-level rows. | Both are one-place changes if Ric prefers otherwise (`FileNode.toTreeItem`; a node class between `LayerNode` and `FileNode`). |
 | D37 | M2 PRs 9–11 | Sizes against the brief's aims: PR 9 213 added (aim ~150), PR 10 ~200 (aim ~120), PR 11 245 added / 213 net (aim ~200); all inside the plan's ≤ 300 guideline; the excess is doc comments. | Same D23 question. |
 | D38 | M2 PR 10 | `Fixture.cleanup()` (an M1 helper) retries its recursive delete: `rmSync(dir, { recursive, force, maxRetries: 10, retryDelay: 100 })`. | First CI run: all 87 real-git tests passed on both runners, then macOS failed tearing down the 1500-file E18 fixture with ENOTEMPTY — a race between the delete and something still touching the tree (Spotlight or git). Node retries EBUSY/ENOTEMPTY/EPERM with linear backoff. Ubuntu never hit it. |
+| D39 | `refactor/idiomatic-typescript` | Parameter properties in all eight classes (`RealGitRunner`, `LayerNode`, `FileNode`, `RepoNode`, `MessageNode`, `StackTreeProvider`, `FakeGitRunner`, `StackFixture`), `??` in `describeFailure`, conditional expressions in `run()`; primer §47/§48. Zero behaviour change — suites identical (127/87/35). `GitError` keeps its long form (it copies seven fields out of one `GitFailure` argument; not a parameter-property case); `StackFixture`'s second parameter is named `dir`, the `Fixture` interface's name for it. | The §11.1 rule revised 2026-09-20 (PR #15): the code must look like what a TypeScript developer writes, with the primer as the reader's accommodation. One dedicated pass over the M1/M2 code, so everything after it teaches one dialect; from here the rule applies in passing. |
 
 ### 13.3 Test coverage delivered in M1 (all green on `m1/06-vscode-tree`, 2026-09-19)
 
@@ -1866,6 +1867,13 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
   "zero roots". Focus/editor-change refresh should not re-run discovery in a repo-less window.
 - **M1 merged 2026-09-20** (PRs #1–#6, #9, #10, merge commits). M2 started the same day as branches `m2/01…03`.
 - M2 stack built and submitted 2026-09-20 as branches `m2/01-core-changes`, `m2/02-changes-binary-and-git-tests`, `m2/03-vscode-file-nodes` (see D31–D37; GitHub numbers recorded in M3's first PR).
+- **§11.1's "the next milestone that touches a file may modernise it in passing" — DONE for all of M1 and
+  M2 in one pass, 2026-09-20 (`refactor/idiomatic-typescript`, D39), rather than file by file over M3–M4.**
+  Every constructor written under the withdrawn "explain by writing it the long way" rule now uses parameter
+  properties (primer §47), `describeFailure` uses `??` (§30), `run()` uses conditional expressions (§48);
+  the suites are byte-for-byte unchanged and their counts identical (127 unit / 87 git / 35 ext). From here
+  the rule applies as written: a PR that touches a file modernises the lines it touches and adds the primer
+  section.
 - **Tooling follow-up (seen 2026-09-20 while building M2):** the real-git Vitest project occasionally fails one test
   with a 5 s timeout when the machine is under load (a single git spawn stalling 45–90 s, a different test each
   time; reruns pass; CI has never hit it). Consider a longer `testTimeout` for the `git` project, or find the stall,
