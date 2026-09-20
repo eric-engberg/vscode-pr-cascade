@@ -6,7 +6,7 @@
  * gitignored), launches it with this repo as the extension under development, and runs
  * the Mocha tests listed here inside it. Depends on: @vscode/test-cli, the compiled
  * fixture builder out/test/helpers/fixture.js. Depended on by: `npm run test:ext`.
- * Plan: §9.1 layer 3, §9.2, §8 E1b/E2/E7/E10.
+ * Plan: §9.1 layer 3, §9.2, §8 E1b/E2/E7/E9/E10/E11.
  */
 import { defineConfig } from '@vscode/test-cli';
 import * as fs from 'node:fs';
@@ -21,8 +21,9 @@ import { buildStack } from './out/test/helpers/fixture.js';
 // subfolder (E1b) and show it once (E2). Built in a temporary directory: `<scratch>/repo`
 // with `origin.git` beside it.
 const fixture = buildStack();
-// Two changes to the Appendix A stack, both folded into the top layer's own commit
-// (test/ext/tree.test.ts looks at them). First, so the view has a rename to show (E7):
+// Four changes to the Appendix A stack, all folded into the top layer's own commit
+// (test/ext/tree.test.ts and test/ext/diff.test.ts look at them). First, so the view has
+// a rename to show (E7):
 // the top layer also moves `b`, which the middle layer added, to `b2`. Two things about
 // how. The move is folded in with `--amend` (buildStack leaves HEAD on the top layer),
 // because a second commit would change the `3 commits` every other test asserts;
@@ -38,6 +39,18 @@ fixture.git(['mv', 'b', 'b2']);
 // sorts after `c`, so it is the top layer's last row.
 fs.writeFileSync(path.join(fixture.dir, 'logo.png'), 'PNG\0not a real picture, but binary to git\0');
 fixture.git(['add', 'logo.png']);
+// Third, for M3 (test/ext/diff.test.ts): a text file whose name has a space, a `#`, a
+// `ü` and a `?` in it (E11). A URI has to percent-encode every one of those, and this is
+// the one place the whole trip is real — the name goes from git through a vscode.Uri to
+// `git show` and back — so the harness carries it rather than a unit test faking it.
+// `?` is not allowed in a Windows file name, so this harness — and `npm run fixture`,
+// which writes the same file — runs on macOS and Linux only, which is what CI runs
+// (.github/workflows/ci.yml).
+fs.writeFileSync(path.join(fixture.dir, 'weird #1 ü?.txt'), 'weird\n');
+fixture.git(['add', 'weird #1 ü?.txt']);
+// Fourth, a deletion (E9): the top layer removes `f`, the file trunk was made with. Its
+// row is `D  f`, and the diff has content on the left and nothing on the right.
+fixture.git(['rm', '-q', 'f']);
 fixture.git(['commit', '-q', '--amend', '--no-edit']);
 // The CLI process that loads this file outlives the VS Code it launches, so the scratch
 // directory is removed when that process exits — after every test has run. A Ctrl+C

@@ -1,12 +1,12 @@
 /**
  * test/ext/tree.test.ts — the Stack view inside a real VS Code, over the fixture workspace
  * .vscode-test.mjs built: branch names top-first with counts, the current marker, SHAs in
- * tooltips only; the files under each layer (M2: exactly its own, a rename, a binary file,
- * a second ask from the cache, an error row under a layer); the one-row messages (E4, E5, E17).
+ * tooltips only; the files under each layer (its own only, a rename, a binary, a deletion,
+ * the click that runs `prCascade.openDiff`, the cache, an error row); the one-row messages.
  *
  * Layer: test, extension host (plan §9.1 layer 3; Mocha inside VS Code, `npm run test:ext`).
  * Depends on: the running extension (what activate() returns) and the fixture workspace.
- * Depended on by: nothing. Plan: §6, §7.1, §8 E1b/E2/E4/E5/E7/E10/E17/E44, §9.4, §10.1 M2 9.
+ * Depended on by: nothing. Plan: §6, §7.1, §7.2, §8 E1b/E2/E4/E5/E7/E9/E10/E17/E44, §9.4.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -58,16 +58,18 @@ async function filesUnderLayer(branch: string): Promise<vscode.TreeItem[]> {
   return nodes.map((node) => provider.getTreeItem(node));
 }
 
-/** The repository root: the workspace folder named `repo`; the other folder is the empty `nested` subfolder inside it. */
-// see primer §22 (for ... of) and §30 (`??`)
+/**
+ * The repository root: the workspace folder named `repo`; the other folder is the empty
+ * `nested` subfolder inside it.
+ */
+// see primer §25 (arrays: find) and §30 (`??`)
 function repositoryRoot(): string {
   const folders = vscode.workspace.workspaceFolders ?? [];
-  for (const folder of folders) {
-    if (path.basename(folder.uri.fsPath) === 'repo') {
-      return folder.uri.fsPath;
-    }
+  const repo = folders.find((folder) => path.basename(folder.uri.fsPath) === 'repo');
+  if (repo === undefined) {
+    throw new Error('the fixture workspace has no folder named repo');
   }
-  throw new Error('the fixture workspace has no folder named repo');
+  return repo.uri.fsPath;
 }
 
 /**
@@ -215,9 +217,11 @@ describe('the Stack view', () => {
 
   // What VS Code asks for when a layer row is opened: the files that layer changes against
   // the layer below it (plan §7.1 "File nodes"; §10 M2 "done when"). The harness fixture
-  // is the Appendix A stack with two changes to its top layer (.vscode-test.mjs says why
+  // is the Appendix A stack with four changes to its top layer (.vscode-test.mjs says why
   // these): it also moves `b`, which the middle layer added, to `b2` — so there is a
-  // rename to look at (E7) — and adds a small binary file, `logo.png` (E10), beside its `c`.
+  // rename to look at (E7) — adds a small binary file, `logo.png` (E10), beside its `c`,
+  // and, for M3's diff tests, adds a text file named `weird #1 ü?.txt` (E11) and deletes
+  // trunk's `f` (E9).
   describe('the files under a layer', () => {
     it('lists under each layer exactly the files that layer changes against the one below it, never what the layers below it changed (M2 "done when")', async () => {
       // arrange: nothing beyond the fixture
@@ -229,10 +233,10 @@ describe('the Stack view', () => {
 
       // assert: the status letter, two spaces, the file's name (plan §12 item 3). `a` is
       // under the bottom layer only, although every layer above it has the file too; the
-      // top layer's three rows are in git's order (by path), the rename first.
+      // top layer's five rows are in git's order (by path), the rename first.
       assert.deepStrictEqual(bottom.map((item) => item.label), ['A  a']);
       assert.deepStrictEqual(middle.map((item) => item.label), ['A  b']);
-      assert.deepStrictEqual(top.map((item) => item.label), ['R  b2', 'A  c', 'A  logo.png']);
+      assert.deepStrictEqual(top.map((item) => item.label), ['R  b2', 'A  c', 'D  f', 'A  logo.png', 'A  weird #1 ü?.txt']);
     });
 
     it('draws every layer row collapsed, so it can be opened (plan §7.1)', async () => {
@@ -248,17 +252,18 @@ describe('the Stack view', () => {
       }
     });
 
-    it('marks a text file\'s row stackFile and a binary file\'s stackFileBinary — the contextValues M3\'s menus will key on (plan §7.2, E10)', async () => {
-      // arrange: nothing beyond the fixture — the top layer's `b2` and `c` are text, its
-      // `logo.png` has a NUL byte in it, which is what makes git call a file binary (the
-      // flag itself comes from numstat; test/git/changes.git.test.ts covers that, E10)
+    it('marks a text file\'s row stackFile and a binary file\'s stackFileBinary — the contextValues the file-row menus will key on (plan §7.2.1, E10)', async () => {
+      // arrange: nothing beyond the fixture — the top layer's `b2`, `c`, `f` and
+      // `weird #1 ü?.txt` are text, its `logo.png` has a NUL byte in it, which is what
+      // makes git call a file binary (the flag itself comes from numstat;
+      // test/git/changes.git.test.ts covers that, E10)
 
       // act
       const top = await filesUnderLayer('retry-metrics');
 
       // assert: one value per row, in the rows' order
       const contextValues = top.map((item) => item.contextValue);
-      assert.deepStrictEqual(contextValues, ['stackFile', 'stackFile', 'stackFileBinary']);
+      assert.deepStrictEqual(contextValues, ['stackFile', 'stackFile', 'stackFile', 'stackFileBinary', 'stackFile']);
     });
 
     it('names the file by its absolute path in resourceUri, so VS Code draws its file icon and decorations', async () => {
@@ -299,7 +304,7 @@ describe('the Stack view', () => {
       assert.strictEqual(top[0].tooltip, 'b → b2');
     });
 
-    it('gives a file row nothing to run on click yet — the diff is M3 — and nothing underneath', async () => {
+    it('runs prCascade.openDiff with the row\'s own node when clicked (plan §7.2), and has nothing underneath', async () => {
       // arrange: the bottom layer's one file, as a node and as drawn
       const layer = await layerNode('api-refactor');
       const fileNodes = await provider.getChildren(layer);
@@ -308,8 +313,16 @@ describe('the Stack view', () => {
       // act: what VS Code would ask if the row were opened
       const underneath = await provider.getChildren(fileNodes[0]);
 
-      // assert: a leaf with no command; M3's openDiff goes in the `command` slot
-      assert.strictEqual(item.command, undefined);
+      // assert: a leaf whose `command` slot names the diff command and carries the node
+      // itself — the very object the provider holds, not a copy — as its one argument;
+      // what the command does with it is test/ext/diff.test.ts's subject
+      // see primer §8 (undefined and narrowing) and §52 (TreeItem.command)
+      assert.ok(item.command !== undefined, 'a file row without a command');
+      assert.strictEqual(item.command.command, 'prCascade.openDiff');
+      assert.strictEqual(item.command.title, 'Open Changes');
+      assert.ok(item.command.arguments !== undefined, 'a command without arguments');
+      assert.strictEqual(item.command.arguments.length, 1);
+      assert.strictEqual(item.command.arguments[0], fileNodes[0]);
       assert.strictEqual(item.collapsibleState, vscode.TreeItemCollapsibleState.None);
       assert.deepStrictEqual(underneath, []);
     });
@@ -345,7 +358,7 @@ describe('the Stack view', () => {
         );
         assert.deepStrictEqual(
           second.map((item) => item.contextValue),
-          ['stackFile', 'stackFile', 'stackFileBinary'],
+          ['stackFile', 'stackFile', 'stackFile', 'stackFileBinary', 'stackFile'],
         );
       } finally {
         await configuration.update('gitPath', undefined, vscode.ConfigurationTarget.Workspace);

@@ -50,6 +50,11 @@
         "title": "Refresh Stack",
         "category": "PR Cascade",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "prCascade.openDiff",
+        "title": "Open Changes",
+        "category": "PR Cascade"
       }
     ],
     "menus": {
