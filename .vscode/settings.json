@@ -1,0 +1,6 @@
+{
+  "sonarlint.connectedMode.project": {
+    "connectionId": "eric-engberg",
+    "projectKey": "eric-engberg_vscode-pr-cascade"
+  }
+}
