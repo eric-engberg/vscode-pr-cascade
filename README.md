@@ -8,18 +8,23 @@ view linked up automatically.
 
 ## Status
 
-**Pre-alpha, milestone 2 in progress.** Nothing is usable yet. This repo is being built as a
-stack of small, heavily commented PRs meant to be read in order by someone learning
-TypeScript along the way. Start with [`docs/reading-order.md`](docs/reading-order.md); the
-language is explained as it appears in [`docs/typescript-primer.md`](docs/typescript-primer.md).
+**Pre-alpha, milestone 3 in progress.** The first usable piece is in: open a layer, click a
+file, and VS Code's diff editor shows what that layer did to it. Nothing else is usable yet.
+This repo is being built as a stack of small, heavily commented PRs meant to be read in
+order by someone learning TypeScript along the way. Start with
+[`docs/reading-order.md`](docs/reading-order.md); the language is explained as it appears
+in [`docs/typescript-primer.md`](docs/typescript-primer.md).
 
 Milestones (each is one stack of PRs):
 
 1. **Skeleton + layer list** — toolchain, git runner, repo discovery, trunk detection, the
    stack computed from git ancestry, a tree that shows the branch names.
 2. **Files per layer** — the files each layer changes against the one below it, renames
-   as `old → new`. ← *now*
-3. Diff on click (parent vs layer, in VS Code's native diff editor).
+   as `old → new`.
+3. **Diff on click** — a file row opens VS Code's native diff editor, the layer's parent on
+   the left and the layer on the right, through the extension's own `stackdiff:` documents
+   (so it works with the built-in git extension disabled); adds, deletes and renames show
+   what they should; a binary file opens as a file instead. ← *now*
 4. Auto-refresh, state nodes, status bar → v0.1.
 5. git-spice backend: readiness, login, push.
 6. Create PRs for the whole stack, linked as a native GitHub stack.
@@ -63,11 +68,16 @@ folder in a second window, the **Extension Development Host**.
    and `../fixture-repo/repo` open. Its Source Control side bar has a **Stack** view listing
    the three branches, top layer first. Open a layer to see the files it changes against
    the layer below it — only its own, never the ones the lower layers added — as
-   `A  c` (added), `M  …` (modified), `D  …` (deleted), and `R  b2` with `b → b2` beside it
-   for a rename (the fixture's top layer moves `b` so there is one to see; it also adds a
-   small binary `logo.png`, which looks like any other row for now — milestone 3 treats
-   it differently). The icon is VS Code's own for the file type; clicking a file does
-   nothing yet (milestone 3).
+   `A  c` (added), `M  …` (modified), `D  f` (deleted), and `R  b2` with `b → b2` beside it
+   for a rename. The icon is VS Code's own for the file type. **Click a file** and the diff
+   editor opens on it, titled `<file> (<parent> → <layer>)`: the file at the layer below
+   on the left, the file at the layer on the right — so `A  a` under `api-refactor` opens
+   `a (origin/main → api-refactor)` with an empty left pane, `D  f` under `retry-metrics`
+   has content on the left and nothing on the right, and `R  b2` shows `b` on the left.
+   The fixture's top layer also adds `weird #1 ü?.txt` (a name a URI has to encode; it
+   opens like any other) and a small binary `logo.png`: git has no text diff for it, so a
+   click opens the file itself while that layer is checked out, and shows a message on a
+   layer that is not. Nothing here needs the built-in git extension.
 5. Edit code → in the dev-host window run **Developer: Reload Window** to pick up the rebuild.
    The extension's own log is in that window's Output panel under "PR Cascade".
 
@@ -92,8 +102,8 @@ CI (`.github/workflows/ci.yml`) runs `npm test` and `npm run test:ext` on Linux 
 ```
 src/extension.ts     entry point — wires core to VS Code
 src/core/            pure logic + git runner; no VS Code imports (enforced by lint)
-src/vscode/          adapters: config (settings → plain values) and the Stack tree view;
-                     later milestones add the diff content provider and commands
+src/vscode/          adapters: config (settings → plain values), the Stack tree view, the
+                     stackdiff: content provider and the commands (openDiff)
 test/unit, test/git  Vitest (see vitest.config.mts)
 test/helpers/        the fake git runner and the fixture builder (a real throwaway stack)
 test/ext             Mocha inside VS Code (see .vscode-test.mjs)

@@ -253,7 +253,12 @@ Two small things that appear alongside it:
 - `import type { GitRunner } from './model'` (in `core/git.ts` and `test/helpers/fakeGit.ts`)
   — the `type` keyword says "I only need this name for type-checking". Because interfaces
   vanish at compile time, so does the import; there is nothing for esbuild to bundle. A
-  plain `import { GitRunner }` would also work; `import type` states the intent.
+  plain `import { GitRunner }` would also work; `import type` states the intent. When one
+  line needs a value *and* a type from the same module, the keyword goes on the name
+  instead: `import { FileNode, type StackTreeProvider } from '../../src/vscode/tree'`
+  (`test/ext/diff.test.ts`, which calls `new FileNode` and `instanceof FileNode` — a value
+  — and only annotates with `StackTreeProvider`). Same meaning, one import line per module;
+  the whole-line form is for a line that is types only.
 
 An interface can also `extends` another interface. `PrCascadeSettings extends
 DiscoveryOptions` (`src/vscode/config.ts`) has every `DiscoveryOptions` field plus its own
@@ -823,10 +828,21 @@ codebase uses, all of them the same idea as a shell pipeline stage: a list goes 
   every tab, the first two pieces are the two counts, and everything after them — a
   path, which may itself contain tabs — is put back together exactly as it was. `split`
   alone would have been `cut -f3`, and would have lost the rest of such a path.
+- `list.find(fn)` — the *first* element for which `fn` returned true, or `undefined` when
+  none did: `filter` that stops at the first hit and hands back the element rather than a
+  list. `folders.find((folder) => path.basename(folder.uri.fsPath) === 'repo')` in
+  `test/ext/tree.test.ts` and `test/ext/diff.test.ts` (M3) picks the fixture's repository
+  out of the workspace folders; the `undefined` half is why an `if` and a `throw` follow it
+  (§8). `grep -m1`.
+- `list.flatMap(fn)` — `map`, then one level of flattening: when `fn` returns a list for
+  each element, the result is one list of all their elements rather than a list of lists.
+  `vscode.window.tabGroups.all.flatMap((group) => group.tabs)` (`test/ext/diff.test.ts`)
+  turns the editor groups into one list of every open tab — what two nested `for … of`
+  loops and a `push` would build by hand.
 
 Which of these change the array they are called on: `push`, `pop`, `shift` (§38) and `sort`
-(§26) do; `filter`, `map`, `slice`, `join` and `includes` never do — they return something
-new and leave the original as it was, the same rule as for strings in §23.
+(§26) do; `filter`, `map`, `slice`, `join`, `includes`, `find` and `flatMap` never do — they
+return something new and leave the original as it was, the same rule as for strings in §23.
 
 ## 26. sort and comparison functions
 
@@ -1141,7 +1157,9 @@ The provider's second loader (PR 11) is `(root: string, layer: StackLayer) =>
 Promise<ChangedFile[]>`, and `src/extension.ts` hands it `(root, layer) =>
 loadChangedFiles(output, root, layer)`: an arrow whose two parameters carry no types of
 their own, because the compiler takes them from the parameter the arrow is passed to
-(§3), and which closes over `output` exactly as the first loader does.
+(§3), and which closes over `output` exactly as the first loader does. The content
+provider (`src/vscode/content.ts`, PR 15) takes its reader, `(root: string, ref: string,
+relPath: string) => Promise<string>`, by the same route.
 
 ## 34. A union of classes, narrowed with instanceof
 
@@ -1169,6 +1187,19 @@ has (`node.state` exists on `RepoNode` alone) needs narrowing first, and `instan
 Many TypeScript codebases give each class a `kind: 'repo' | 'layer'` field and narrow on
 that instead. `instanceof` was chosen here because it is already known from §18 and needs
 no extra field.
+
+One place `instanceof` cannot be used, and what is used instead (`test/ext/diff.test.ts`,
+`fileNodeUnder`, M3): `instanceof X` asks "was this made by *this very* class object `X`",
+not "by a class named `X`". Inside the extension host the running extension is the esbuild
+bundle, `dist/extension.js`, with its own copy of `FileNode`; the test file imports
+`../../src/vscode/tree`, which is the tsc copy under `out/`. Same source, two class objects
+— so a node the provider hands the test is not `instanceof` the test's `FileNode`, and the
+check is false for every row. The test narrows the union by **shape** instead:
+`if ('file' in fileNode)` — §51's `in`, which on a union of classes keeps exactly the
+members that declare that field; `file` is `FileNode`'s alone, so inside the `if` the
+compiler treats `fileNode` as a `FileNode`. (`instanceof vscode.ThemeIcon` and
+`vscode.TabInputTextDiff` in the same tests are fine: the `vscode` module is one object
+that both the bundle and the test receive from VS Code.)
 
 The union has since grown a member — `FileNode`, in PR 11: `RepoNode | LayerNode |
 FileNode | MessageNode`. Adding it was one line here; what happened elsewhere is the
@@ -1504,9 +1535,10 @@ function nextWorkspaceFoldersChange(): Promise<void> {
 ```
 
 - **`vscode.Uri.file(path)`** — VS Code names everything by URI, not by path: a workspace
-  folder is `file:///private/tmp/...`, and later the two sides of a diff will be
-  `stackdiff:` URIs (plan §7.4). `Uri.file` builds the URI for a local path; `.fsPath`,
-  which `src/extension.ts` already reads off each workspace folder, goes the other way.
+  folder is `file:///private/tmp/...`, and the two sides of a diff are `stackdiff:` URIs
+  (plan §7.4), built from their parts with `Uri.from` (§55). `Uri.file` builds the URI
+  for a local path; `.fsPath`, which `src/extension.ts` already reads off each workspace
+  folder, goes the other way.
   Its first use in shipped code is PR 11's `FileNode.toTreeItem` (`src/vscode/tree.ts`):
   `item.resourceUri = vscode.Uri.file(path.join(root, file.path))`. `resourceUri` is the
   `TreeItem` field that says "this row *is* that file" — VS Code then draws the icon the
@@ -1979,3 +2011,316 @@ This is the same boundary §41 drew for a setting and §45 for a status letter: 
 outside becomes a typed value in one place, checked, and every later line trusts the
 type. It is also what a schema library (`zod`, plan §11.3) automates once a shape is bigger
 than a couple of fields; for two, the ladder is shorter than the schema.
+
+## 52. A tree row's command: `TreeItem.command` and `arguments: [this]`
+
+*First seen in `src/vscode/tree.ts` (`FileNode.toTreeItem`).*
+
+```ts
+item.command = { command: 'prCascade.openDiff', title: 'Open Changes', arguments: [this] };
+```
+
+A `TreeItem` has an optional `command` field (§11), and this is what a **single click**
+on the row does: VS Code runs the command with that id, handing the registered handler
+the `arguments` one by one — so the click becomes the call `openDiff(node)`, where the
+handler is the function `src/extension.ts` registered under the id (`registerCommand`,
+the same call M1 made for `prCascade.refresh`). The value is a `Command`, an interface
+from the API with three fields that matter here: `command` (the id), `title` (the text
+VS Code would show if the command were drawn as a button — for a row it never is, but
+the field is required), and `arguments`, the list to call the handler with.
+
+`[this]` is a one-element array (§25) whose element is `this`, the node itself (§13):
+the object the provider holds and the same one it will hand VS Code again on the next
+repaint. The row passes *itself* rather than three fields because the command needs all
+of them — the file, the layer's two SHAs, the repository root — and one object is what
+an argument list carries best; `test/ext/tree.test.ts` asserts the argument *is* the
+node (`assert.strictEqual`, identity), not a copy.
+
+One thing the compiler cannot check: `arguments` is declared `any[]` by the API (the
+library-side `any` of §31, §41, §42 and §50 again), so nothing ties what the row puts in
+the list to what the handler declares it takes. The two are kept in step by hand —
+`openDiff(node: FileNode | undefined)` in `src/vscode/commands.ts` says what it expects,
+the row provides exactly that, and the test is the check. The `undefined` half is the
+other way a command can be run: from the Command Palette, where there is no row and no
+arguments at all.
+
+This is the click only. A right-click menu on a row is a different mechanism — the
+`contextValue` the row sets (`stackFile`, `stackFileBinary`) matched by `when` clauses
+in `package.json` — and belongs to a later milestone (plan §7.2.1 lays the file-row menu
+out; §10.1 does not schedule it yet).
+
+## 53. `TextDocumentContentProvider`: a document VS Code asks you to fill in
+
+*First seen in `src/vscode/content.ts` (`StackDiffContentProvider`); registered in
+`src/extension.ts`.*
+
+```ts
+export class StackDiffContentProvider implements vscode.TextDocumentContentProvider {
+  constructor(
+    private readonly readFileAtRef: (root: string, ref: string, relPath: string) => Promise<string>,
+  ) {}
+
+  async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
+    const { root, ref, relPath } = decodeStackDiff(uri);
+    return this.readFileAtRef(root, ref, relPath);
+  }
+}
+
+// in activate():
+context.subscriptions.push(
+  vscode.workspace.registerTextDocumentContentProvider(STACK_DIFF_SCHEME, contentProvider),
+);
+```
+
+VS Code names every document by a URI (§42). For a `file:` URI it reads the disk itself;
+for any other scheme it knows nothing, and looks for a **content provider** registered
+for that scheme: an object with one method, `provideTextDocumentContent(uri)`, that
+returns the text. `registerTextDocumentContentProvider(scheme, provider)` is the
+registration — one provider per scheme, and the call returns a `Disposable` (§32) that
+unregisters it, pushed onto `context.subscriptions` like everything else `activate`
+sets up. From then on, any `stackdiff:` URI VS Code is asked to open — by the diff
+editor, by `openTextDocument` in a test — reaches this method. The document it makes
+from the answer is read-only, and VS Code keeps the text for as long as the document is
+open, so the method runs once per side of a diff, not once per repaint.
+
+Three things about the class:
+
+- **`implements vscode.TextDocumentContentProvider`** (§13) is a promise to the compiler
+  that the class has the interface's shape, checked at compile time: a misspelt method
+  name is an error here, not a silent provider that VS Code never calls. The interface
+  declares the method as `provideTextDocumentContent(uri: Uri, token: CancellationToken):
+  ProviderResult<string>`. `ProviderResult<T>` is the API's word for "a `T`, or nothing,
+  or a promise of either" — `T | undefined | null | Thenable<T | undefined | null>` — and a
+  method returning the narrower `Promise<string>` satisfies it: `implements` asks that
+  the class's method be *usable* as the interface's, not spelled identically. The
+  `token` parameter is left off for the same reason: a function that takes fewer
+  parameters than it is called with simply ignores the extra ones, so TypeScript lets a
+  two-parameter method be implemented by a one-parameter one (the reverse — declaring
+  a parameter the caller will never pass — is the error). The method is `async` (§6) so
+  a throw inside it — `decodeStackDiff` refusing the URI — becomes a rejected Promise,
+  which VS Code shows as the error in place of the document.
+- **It is handed a function, not a git runner** — `readFileAtRef`, a parameter property
+  (§47) whose type is a function type (§33), exactly as the tree provider is handed its
+  two loaders. `src/extension.ts` owns the runner and the settings and passes in a
+  closure over them; `test/ext/diff.test.ts` passes in an arrow that records what it was
+  asked and answers a fixed string. The class knows only that a file at a commit can be
+  read.
+- **`decodeStackDiff(uri)` takes the `vscode.Uri` as it is** — §9's structural typing at
+  work: the Uri has the three fields `UriComponents` names, decoded (§55), and the rest
+  of it is not looked at.
+
+The interface has one optional field, `onDidChange?: Event<Uri>` (§32), for a provider
+whose documents can change while open. This one never defines it: a `stackdiff:` URI
+names a file at a commit SHA, and that never changes (`src/core/uri.ts` says why the
+ref is a SHA).
+
+## 54. Destructuring: taking fields out of an object by name
+
+*First seen in `src/vscode/content.ts` (`provideTextDocumentContent`); then in
+`src/vscode/commands.ts` (`openDiff`).*
+
+```ts
+const { root, ref, relPath } = decodeStackDiff(uri);
+
+const { root, layer, file } = node;
+const fileName = path.basename(file.path);
+```
+
+The first line is three `const` declarations in one: `const root = location.root`,
+`const ref = location.ref`, `const relPath = location.relPath`, without ever naming
+the `location`. The braces on the *left* of `=` are **destructuring** — the mirror image
+of §16's shorthand keys, where `{ root, ref }` on the right *builds* an object from two
+variables of those names; here the same syntax *takes* two variables out of an object by
+those names. The names must be the object's field names; each new `const` gets the
+field's type from the compiler, so `relPath` is a `string` and nothing has to be written.
+(To take a field out under a different name: `const { path: relPath } = …` — the field
+`path`, called `relPath` from here on. Not used in this codebase yet.) Shell's nearest
+relative is `read root ref relPath <<< "$line"`, except that the pieces are picked by name
+rather than by position.
+
+When it fits: a function that is about to use *several* fields of one object, each more
+than once — `openDiff` reads `root`, `layer` and `file` all through its body, and without
+the destructuring its `left` line would be `encodeStackDiff({ root: node.root, ref:
+node.layer.parentSha, relPath: node.file.oldPath ?? node.file.path })`: `node.` four times
+on one line (twice in the `??` alone) to no purpose. When it does not: one field used once
+(`node.root` reads fine as it is), or a
+place where the object's name is itself the information — `layer.parentSha` next to
+`layer.sha` says whose SHAs they are; `parentSha` next to `sha` would not, and `openDiff`
+keeps `layer.` in front of both for that reason. The style rule (plan §11.1) is
+"destructuring where it names things", and that is the whole test.
+
+It works on any object — an interface value like the `StackDiffLocation` above, a class
+instance like the `FileNode` — and on function parameters (`function draw({ root, file }:
+FileNode)`), and there is an array form (`const [first, second] = list`), neither of which
+this codebase uses yet.
+
+## 55. `vscode.Uri.from`, and where percent-encoding happens
+
+*First seen in `src/vscode/commands.ts` (`openDiff`).*
+
+```ts
+const left = vscode.Uri.from(encodeStackDiff({ root, ref: layer.parentSha, relPath: file.oldPath ?? file.path }));
+const right = vscode.Uri.from(encodeStackDiff({ root, ref: layer.sha, relPath: file.path }));
+```
+
+§42's `Uri.file(path)` builds a `file:` URI from a path. `Uri.from(components)` builds a
+URI of any scheme from its *parts* — an object with `scheme` and, optionally, `authority`,
+`path`, `query`, `fragment`. `encodeStackDiff` (`src/core/uri.ts`) returns exactly such an
+object, and `from` accepts it because it has those fields (§9: shapes, not names). Plan
+§7.4's rule, "build with `Uri.from`, not string concatenation", is about what happens to
+a `#` or a `?` in a file name, and this is the place to know how a `vscode.Uri` handles
+them:
+
+- **The parts are held decoded.** `uri.path` is `/weird #1 ü?.txt`, `uri.query` is the
+  JSON as written — `#`, `?`, spaces and `ü` as themselves. That is what `from` was
+  given and what `decodeStackDiff` reads back, and why `src/core/uri.ts` never
+  percent-encodes anything: encoding is not a property of the parts.
+- **The text form is encoded.** `uri.toString()` gives
+  `stackdiff:/weird%20%231%20%C3%BC%3F.txt?%7B%22root%22…`: every character that would
+  mean something else in a URI — a `#` would start the fragment, a `?` the query, a space
+  is not allowed at all — is written as `%` and two hex digits, and `ü` as the two bytes
+  of its UTF-8 form. `Uri.parse(text)` reads that text and decodes the parts again. VS
+  Code itself passes URIs around as objects and only ever encodes to show or store them.
+- **Gluing strings would break at the `#`.** `'stackdiff:/' + relPath + '?' + query`
+  handed to `Uri.parse` is read as a URI, and a URI parser stops the path at the first
+  `#` — the rest of the name becomes the fragment, and `git show` is asked for a file
+  that does not exist. `from` never parses; it takes each part as given. That is the
+  whole of E11 on the VS Code side, and `test/ext/diff.test.ts` walks a real name through
+  it and back to git.
+
+A `Uri` is immutable: `from`, `file` and `parse` make one, and `uri.with({ path: … })`
+makes a changed copy rather than changing it; nothing here needs `with`.
+
+## 56. Running commands: `executeCommand`, the built-in `vscode.diff` / `vscode.open`, and `showInformationMessage`
+
+*First seen in `src/vscode/commands.ts` (`openDiff`); tests had used `executeCommand`
+since `test/ext/activate.test.ts`.*
+
+```ts
+await vscode.commands.executeCommand('vscode.diff', left, right, title);
+await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(path.join(root, file.path)));
+
+vscode.window.showInformationMessage('Select a file in the Stack view to open its changes.');
+```
+
+A **command** is VS Code's one universal verb: a string id with a function behind it.
+`registerCommand(id, handler)` (`src/extension.ts`, since M1) gives an id to one of ours;
+`executeCommand(id, ...arguments)` runs *any* id — ours, or one of the many VS Code
+itself registers — with the arguments given, and resolves with whatever the handler
+returned. The result is a `Thenable`, VS Code's own promise-like type (§7): `await`
+works on it as on a Promise. When the handler is one of ours and returns a Promise, as
+`openDiff` does, `executeCommand` resolves when that Promise does — which is what lets
+`test/ext/diff.test.ts` run the command and then look at the editor.
+
+`vscode.diff` and `vscode.open` are two of the **built-in commands** VS Code documents
+for extensions to run (the API reference has a page of them). `vscode.diff(left, right,
+title)` opens the diff editor on two URIs — the same command the built-in git extension
+runs for its own "Open Changes" — and there is no other door to that editor: an
+extension does not build a diff view, it asks for one. `vscode.open(uri)` opens a file
+the way a double-click in the Explorer does, in whatever editor VS Code has for that
+kind of file. Both resolve once the editor is showing, and `openDiff` awaits them for
+that reason.
+
+`vscode.window.showInformationMessage(text)` shows a **toast** — the notification in the
+corner — and returns a Thenable that resolves when the toast is dismissed (with the
+button pressed, when the call lists buttons; none are listed here). The two calls in
+`openDiff` are deliberately *not* awaited: the command is done once the message is up,
+and awaiting would hold the command's Promise open until the user closed the toast —
+which, from a test, is never. The comment on the first one says so; a call whose result
+is dropped on purpose should say why, since a missing `await` otherwise reads as a
+mistake. Its siblings are `showWarningMessage` and `showErrorMessage`, the same call in
+a different colour.
+
+## 57. Reading the editor from a test: `tabGroups`, tab inputs, `openTextDocument`, `afterEach`
+
+*First seen in `test/ext/diff.test.ts`.*
+
+```ts
+const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs);
+
+const input = tabs[0].input;
+assert.ok(input instanceof vscode.TabInputTextDiff, 'the tab is not a diff editor');
+assert.strictEqual(input.original.scheme, 'stackdiff');
+
+await vscode.window.tabGroups.close(tabs);
+
+const document = await vscode.workspace.openTextDocument(uri);
+return document.getText();
+
+afterEach(async () => {
+  await closeAllTabs();
+});
+```
+
+- **`vscode.window.tabGroups.all`** is the editor area as the user sees it: the groups
+  (editors side by side), each with its `tabs` — `flatMap` (§25) makes the one flat list
+  of every tab. A `Tab` has a `label` — the text on the tab, which for a diff opened with
+  a title is that title — and an `input`, what the tab shows. The API has a class per
+  kind: `TabInputText` (one document; field `uri`), `TabInputTextDiff` (a diff; `original`
+  and `modified`), `TabInputCustom` (an editor an extension provides, such as the image
+  preview; `uri` and `viewType`), and a few more. `input` is declared as that list of
+  classes followed by `| unknown` (hover it in the editor and the seven names show) — and
+  a union that contains `unknown` *is* `unknown` to the compiler (§18): the API's way of
+  saying the list may grow. So `instanceof` (§34) on the API's class is the only way to
+  find out which kind a tab holds and gain its fields — the same check
+  `test/ext/tree.test.ts` makes with `instanceof vscode.ThemeIcon` on a row's icon, here on
+  a tab's input. `tabGroups.close(tabs)` closes them and resolves when done;
+  `tabGroups.onDidChangeTabs` is the event (§32) that fires when the set changes, which
+  `nextTabsChange` waits on with §42's pattern, because VS Code tells the extension host
+  about a new tab in a message of its own, separate from the command's result.
+- **`vscode.workspace.openTextDocument(uri)`** loads the document behind a URI *without*
+  showing it — no tab appears — and resolves with a `TextDocument`, whose `getText()` is
+  the whole text. For a `stackdiff:` URI the loading runs the registered content provider
+  (§53), so this is how a test reads what `git show` printed for one side of a diff. It
+  returns a Thenable, hence the `async` arrow around it where `assert.rejects` wants a
+  Promise (the wrapping `test/ext/activate.test.ts` first did for `doesNotReject`).
+- **Mocha's `afterEach`** runs after *every* `it` in the block, nested blocks included,
+  pass or fail — where `after` (§42) runs once at the end. Each test here opens at most
+  one editor and the next asserts on "the one open tab", so the tabs are closed after
+  each; `beforeEach` is the twin that runs before every test.
+
+## 58. `setTimeout` and `clearTimeout`: a wait with a deadline
+
+*First seen in `test/ext/diff.test.ts`.*
+
+```ts
+function settleTabs(): Promise<void> {
+  return new Promise((resolve) => {
+    const subscription = vscode.window.tabGroups.onDidChangeTabs(() => {
+      clearTimeout(timer);
+      subscription.dispose();
+      resolve();
+    });
+    const timer = setTimeout(() => {
+      subscription.dispose();
+      resolve();
+    }, 250);
+  });
+}
+```
+
+`setTimeout(fn, milliseconds)` asks the runtime to call `fn` once, after at least that
+many milliseconds, and returns at once with a handle for the pending call;
+`clearTimeout(handle)` cancels the call if it has not happened yet. Nothing waits: the
+function that called `setTimeout` carries on, and `fn` runs later, from the event loop,
+the way an event listener (§32) runs when its event fires. That is the whole timer API —
+`setInterval` / `clearInterval` are the repeating twins. In Node the handle is a `Timeout`
+object, in a browser a number; `tsconfig.json` loads only Node's types, so `timer` has one
+type here.
+
+Two waits, raced. §42 waited for an event with `new Promise`, and that wait has no end —
+right for a test that expects a tab, since Mocha's timeout catches one that never comes,
+and wrong for a test that expects *none*, which would wait forever. `settleTabs` sets the
+two side by side and lets whichever happens first end the wait: the listener, or the
+timer's callback. Each cancels the other (`clearTimeout`, `dispose`) before resolving, so
+nothing is left to fire into a later test. A second `resolve` would be ignored anyway — a
+Promise settles once (§15) — but a leftover listener or timer is still a leak, and
+cancelling is the habit.
+
+One thing about the order of the two `const`s: the listener names `timer`, which is
+declared on the line *after* it. That is allowed because the listener's body does not run
+where it is written but later, when the event fires, and by then `timer` exists — the
+compiler rejects only a use before declaration that would run at once. `nextTabsChange`
+leaned on the same thing already: its listener names `subscription`, the very `const`
+being assigned. Read such a closure as "when this fires, use whatever these names hold
+then".

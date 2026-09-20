@@ -4,9 +4,9 @@
  * and under each layer one row per file that layer changes against the layer below it.
  *
  * Layer: vscode adapter (plan §4.1). Depends on: the `vscode` module, core/model.ts (types
- * only), Node's `node:path`. Depended on by: src/extension.ts (registers the provider for
- * the view declared in package.json and hands it the two loader functions) and
- * test/ext/tree.test.ts. Plan: §6, §7.1, §8 E7/E10/E17/E44, §12 item 3.
+ * only), Node's `node:path`. Depended on by: src/extension.ts (registers the provider and
+ * hands it the two loaders), vscode/commands.ts (the FileNode a file row hands its command)
+ * and test/ext/tree.test.ts. Plan: §6, §7.1, §7.2 (the click), §8 E7/E10/E17/E44, §12 item 3.
  */
 
 // see primer §1 (import / export), §2 (the vscode module) and §9 (`import type`)
@@ -77,13 +77,21 @@ export class LayerNode {
  * extension gives a file that is modified or untracked in the working tree — exactly as
  * in the Explorer. Two spaces after the letter, so the names line up whatever the letter.
  *
- * There is no command on the row yet: clicking it does nothing until M3 adds `openDiff`
- * (plan §7.2), which will show the file at the parent against the file at the layer.
+ * A click on the row runs `prCascade.openDiff` (vscode/commands.ts) with the node itself
+ * as the argument: the file at the layer's parent against the file at the layer, in the
+ * diff editor (plan §7.2). That is why the node carries the `layer` and not only the
+ * file — the two SHAs the command diffs, and the two names in the editor's title, are
+ * the layer's.
  */
 export class FileNode {
   constructor(
     /** The repository root: `file.path` is relative to it, and a URI wants the whole path. */
     readonly root: string,
+    /**
+     * The layer the file is listed under: its `parentSha` / `sha` are the two sides of
+     * the diff, its `parent` / `name` the diff editor's title.
+     */
+    readonly layer: StackLayer,
     readonly file: ChangedFile,
   ) {}
 
@@ -121,15 +129,21 @@ export class FileNode {
     // the layer, which for a rename is the new name.
     // see primer §42 (vscode.Uri.file)
     item.resourceUri = vscode.Uri.file(path.join(this.root, this.file.path));
-    // `stackFile`, or `stackFileBinary` for a file git considers binary (E10). M3's
-    // menus key on the difference: a binary file cannot be shown in the diff editor, so
-    // its row will offer "Open File" where a text file's offers "Open Changes" (plan
-    // §7.2).
-    let contextValue = 'stackFile';
-    if (this.file.binary) {
-      contextValue = 'stackFileBinary';
-    }
-    item.contextValue = contextValue;
+    // `stackFile`, or `stackFileBinary` for a file git considers binary (E10). The click
+    // below is the same for both — openDiff itself shows a binary file as a file rather
+    // than a diff — but the right-click menu a later milestone adds (plan §7.2.1 lays it
+    // out: "Open File", "Open File at Parent"; §10.1 does not schedule it yet) will key
+    // on the difference.
+    // see primer §48 (the conditional expression)
+    item.contextValue = this.file.binary ? 'stackFileBinary' : 'stackFile';
+    // What a single click does: VS Code runs the command named here with the arguments
+    // listed, and the argument is this very node — the file, the layer and the root in
+    // one object — so the command needs nothing else to find both sides of the diff.
+    // The title is what VS Code would show if the command were ever drawn as a button;
+    // for a row it is never seen. This is the tree-item convention every "click opens
+    // something" view uses (the Explorer's rows run `vscode.open` the same way).
+    // see primer §52 (TreeItem.command and `arguments: [this]`)
+    item.command = { command: 'prCascade.openDiff', title: 'Open Changes', arguments: [this] };
     return item;
   }
 }
@@ -348,7 +362,7 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
       this.filesByCommitPair.set(key, files);
     }
     // see primer §25 (arrays: map)
-    return files.map((file) => new FileNode(node.root, file));
+    return files.map((file) => new FileNode(node.root, node.layer, file));
   }
 }
 
