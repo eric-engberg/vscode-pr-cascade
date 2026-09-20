@@ -1,0 +1,20 @@
+{
+  // tsconfig.ext.json — compiles the extension-host tests (test/ext) to plain JavaScript.
+  //
+  // Layer: tooling. VS Code's test runner (.vscode-test.mjs) can only load .js files, so
+  // `npm run test:ext` runs `tsc -p tsconfig.ext.json` (after `npm run build`), which writes
+  // out/test/ext/*.test.js (and out/src/... for anything those tests import). test/helpers
+  // is compiled too, whether or not a test imports it, because .vscode-test.mjs itself
+  // needs out/test/helpers/fixture.js to build the workspace the tests open. Everything
+  // else is inherited from tsconfig.json. out/ is gitignored. Plan: §9.1 layer 3.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "out",
+    // Keep the src/ and test/ folder structure under out/ so import paths still line up.
+    "rootDir": ".",
+    // Source maps let VS Code's debugger show the original .ts lines when a test fails.
+    "sourceMap": true
+  },
+  "include": ["test/ext", "test/helpers"]
+}

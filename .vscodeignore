@@ -1,0 +1,28 @@
+# .vscodeignore — what `vsce package` leaves OUT of the .vsix.
+# The .vsix ships dist/extension.js, package.json, README and LICENSE only (plan §11.3; a
+# CHANGELOG joins them in M4, plan §10.1 item 15). Sources, tests, tooling and node_modules
+# stay behind.
+.vscode/**
+.vscode-test/**
+.vscode-test.mjs
+.github/**
+src/**
+test/**
+docs/**
+scripts/**
+out/**
+coverage/**
+node_modules/**
+**/*.map
+# `npm run analyze` leaves its raw metafile next to the bundle; it is a report, not code.
+dist/meta.json
+**/*.ts
+esbuild.mjs
+eslint.config.mjs
+vitest.config.mts
+tsconfig*.json
+.gitignore
+pr-cascade-plan.md
+**/*.vsix
+# Claude Code skill definitions (.claude/skills/**): tooling for the agent, not for users.
+.claude/**

@@ -1,0 +1,43 @@
+{
+  // tsconfig.json — how the TypeScript compiler reads this project.
+  //
+  // Layer: tooling. Used by `npm run typecheck` (tsc --noEmit): it type-checks src/, test/
+  // and scripts/ (only the .ts files there; the .mjs ones are plain JavaScript and are
+  // ESLint's) and emits nothing. Building the shippable file is esbuild's job (esbuild.mjs),
+  // which reads only the options it needs from here. tsconfig.ext.json extends this one
+  // to compile the extension-host tests to out/. Plan: §11 skeleton, §3 "Language".
+  "compilerOptions": {
+    // The JavaScript level tsc assumes. ES2022 has everything we use; esbuild lowers the
+    // bundle to what the VS Code runtime supports (see esbuild.mjs "target").
+    "target": "ES2022",
+    // The built-in type declarations tsc loads: the ES2022 standard library and nothing
+    // else — no browser DOM, because the extension runs inside VS Code's Node, not a page.
+    "lib": ["ES2022"],
+    // VS Code loads extensions as CommonJS modules (require/module.exports). esbuild does
+    // the actual translation of our `import`/`export` (esbuild.mjs `format: 'cjs'`); this
+    // setting makes tsc check our code under the same module rules.
+    "module": "commonjs",
+    // Turn on every strictness check. This is the cheapest bug-catcher we have for
+    // AI-written code (plan §3): null and undefined must be handled, and a value whose type
+    // the compiler cannot work out (an implicit `any`) is an error. Writing `: any` on
+    // purpose is banned separately, by the linter (eslint.config.mjs, rule no-explicit-any).
+    "strict": true,
+    // A variable or parameter that is declared and never used is an error, not a warning:
+    // it is almost always a leftover from a half-finished edit.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    // Type-check only; never write .js files next to the .ts sources.
+    "noEmit": true,
+    // Do not re-check the type definitions inside node_modules on every run.
+    "skipLibCheck": true,
+    // An import must spell a file name with the same casing as the file on disk. macOS
+    // forgives `./Model` for model.ts; Linux (CI) does not, so tsc refuses it everywhere.
+    "forceConsistentCasingInFileNames": true,
+    // Which global type declarations are visible everywhere: only Node's (process,
+    // Buffer, ...). No test runner is listed: every test file imports describe/it from its
+    // own runner ('mocha' in test/ext, 'vitest' elsewhere), so a file that forgets the
+    // import fails to type-check instead of failing at run time.
+    "types": ["node"]
+  },
+  "include": ["src", "test", "scripts"]
+}

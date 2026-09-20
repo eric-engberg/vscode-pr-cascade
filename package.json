@@ -1,0 +1,133 @@
+{
+  "name": "vscode-pr-cascade",
+  "displayName": "PR Cascade",
+  "description": "Stacked pull requests in VS Code — see the stack, click a layer for its diff, create and restack PRs on GitHub and GitLab",
+  "version": "0.0.1",
+  "publisher": "local",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eric-engberg/vscode-pr-cascade"
+  },
+  "engines": {
+    "vscode": "^1.85.0",
+    "node": ">=22"
+  },
+  "categories": [
+    "SCM Providers"
+  ],
+  "keywords": [
+    "stacked pull requests",
+    "stacked PRs",
+    "PR stack",
+    "stack",
+    "stacked diffs",
+    "GitHub stacks",
+    "GitLab stacked merge requests",
+    "git-spice",
+    "gh stack",
+    "restack",
+    "pull request",
+    "merge request"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "views": {
+      "scm": [
+        {
+          "id": "prCascade",
+          "name": "Stack",
+          "icon": "$(layers)"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "prCascade.refresh",
+        "title": "Refresh Stack",
+        "category": "PR Cascade",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "prCascade.refresh",
+          "when": "view == prCascade",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "PR Cascade",
+      "properties": {
+        "prCascade.trunk": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "The ref the stack is measured against, e.g. `main` or `origin/main`. Leave empty to auto-detect: the remote's default branch (`origin/HEAD`), then `origin/main`, `origin/master`, `main`, `master`. A value that does not exist in the repository shows \"No trunk found\" rather than falling back."
+        },
+        "prCascade.gitPath": {
+          "type": "string",
+          "default": "git",
+          "markdownDescription": "The git executable to run. `git` means whatever is first on PATH; set a full path when git lives somewhere unusual."
+        },
+        "prCascade.remote": {
+          "type": "string",
+          "default": "origin",
+          "markdownDescription": "The remote whose default branch is consulted first when auto-detecting the trunk. Change it if you work on a fork and keep the original repository as `upstream`."
+        },
+        "prCascade.repositoryScanMaxDepth": {
+          "type": "number",
+          "default": 1,
+          "minimum": -1,
+          "markdownDescription": "How many levels below each workspace folder to look for repositories. `0` looks only at the folders themselves; `1` (the default) also looks in their immediate subfolders — the layout where a parent folder is open and the repositories live under it; `-1` sets no limit, which on a large folder starts one git process per directory, all at once. Same meaning as `git.repositoryScanMaxDepth`. Anything but a whole number of -1 or more is treated as the default."
+        },
+        "prCascade.repositoryScanIgnoredFolders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "node_modules"
+          ],
+          "markdownDescription": "Folder names skipped while looking for repositories below a workspace folder, at any level. Same meaning as `git.repositoryScanIgnoredFolders`. A value that is not a list is treated as the default; an entry in the list that is not a name is dropped."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test:unit": "vitest run test/unit",
+    "test:git": "vitest run test/git",
+    "test:ext": "npm run build && rm -rf out && tsc -p tsconfig.ext.json && vscode-test",
+    "test": "npm run typecheck && npm run lint && npm run test:unit && npm run test:git",
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "analyze": "node esbuild.mjs --analyze",
+    "vscode:prepublish": "npm run build",
+    "package": "vsce package",
+    "depcheck": "node scripts/depcheck.mjs",
+    "fixture": "esbuild scripts/fixture.ts --bundle --platform=node --format=cjs --log-level=warning --outfile=out/scripts/fixture.js && node out/scripts/fixture.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.0.0",
+    "@types/vscode": "1.85.0",
+    "@vitest/coverage-v8": "^5.0.1",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.11.0",
+    "globals": "^16.0.0",
+    "mocha": "^11.0.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^5.0.1"
+  }
+}
