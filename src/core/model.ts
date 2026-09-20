@@ -4,10 +4,10 @@
  * Layer: core (no VS Code imports; plan §4.1). This file holds no logic, only descriptions
  * of shapes, so every other core file can import them without importing each other: the
  * GitRunner interface every git-reading module is written against, and the data model the
- * tree renders — StackLayer, RepoState, and the ChangedFile that M2 fills in. Depends on:
+ * tree renders — StackLayer, RepoState, and the ChangedFile under each layer. Depends on:
  * nothing. Depended on by: every core module — core/git.ts implements GitRunner;
- * core/discovery.ts, core/trunk.ts and core/stack.ts take one; core/stack.ts builds the
- * RepoState. Plan: §4.3.
+ * core/discovery.ts, core/trunk.ts, core/stack.ts and core/changes.ts take one;
+ * core/stack.ts builds the RepoState and core/changes.ts the ChangedFiles. Plan: §4.3.
  */
 
 /**
@@ -55,10 +55,11 @@ export interface GitRunner {
 /**
  * One branch of the stack under HEAD, as the tree shows it: a row with a name, how far it
  * is from trunk, and which row sits below it. core/stack.ts builds these; the tree view
- * (PR 6) renders one node per layer, and M2's file list asks git what `parent..name`
- * changes. The fields that depend on the neighbours — `parent`, `parentSha` — are what
- * make the layers a *stack* rather than a bag of branches: every layer's diff is measured
- * against the layer below it, never against trunk, which is what "stacked" means.
+ * (PR 6) renders one node per layer, and core/changes.ts asks git what changed between
+ * `parentSha` and `sha` (a tree diff of the two tips). The fields that depend on the
+ * neighbours — `parent`, `parentSha` — are what make the layers a *stack* rather than a
+ * bag of branches: every layer's diff is measured against the layer below it, never
+ * against trunk, which is what "stacked" means.
  */
 // see primer §9 (interface) and §24 (boolean)
 export interface StackLayer {
@@ -68,7 +69,10 @@ export interface StackLayer {
   sha: string;
   /** The layer below: the previous layer's branch name, or the trunk ref for the bottom layer. */
   parent: string;
-  /** The commit `parent` points at; `parentSha..sha` is exactly what this layer adds. */
+  /**
+   * The commit `parent` points at. The commits `parentSha..sha` (as `rev-list --count`
+   * counts them) are what this layer adds; core/changes.ts diffs the two trees.
+   */
   parentSha: string;
   /**
    * How many commits are on the branch and not on trunk (`git rev-list --count
@@ -86,16 +90,18 @@ export interface StackLayer {
  * (`git diff --name-status`): Added, Modified, Deleted, Renamed, Copied, Type changed
  * (a file became a symlink, or the reverse). A union of exact strings rather than free
  * text so a typo such as `'X'` is a compile error, and so the tree (M2) can branch on
- * them with a plain `===`. Defined now, with the rest of the data model from plan §4.3,
- * so the shape the tree is built around is in one place; core/changes.ts (M2) fills it in.
+ * them with a plain `===`. Defined with the rest of the data model from plan §4.3, so
+ * the shape the tree is built around is in one place; core/changes.ts is where git's
+ * text becomes one of these, and where any other letter is refused.
  */
 // see primer §10 (union types: exact strings as members)
 export type FileStatus = 'A' | 'M' | 'D' | 'R' | 'C' | 'T';
 
 /**
- * One file a layer changes relative to its parent — a row under the layer's node once M2
- * lands. Part of the plan §4.3 data model, declared here with the rest of it; nothing
- * builds one until core/changes.ts (M2).
+ * One file a layer changes relative to its parent — a row under the layer's node (PR 11).
+ * Part of the plan §4.3 data model, declared here with the rest of it; core/changes.ts
+ * builds them from `git diff --name-status -M -z` output, and PR 10 fills in `binary`
+ * from a second command.
  */
 // see primer §11 (optional `?` fields)
 export interface ChangedFile {

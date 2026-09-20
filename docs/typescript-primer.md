@@ -761,10 +761,19 @@ codebase uses, all of them the same idea as a shell pipeline stage: a list goes 
   `options.scanIgnoredFolders.includes(entry.name)` in `core/discovery.ts` (PR 7) asks "is
   this name on the ignore list?" — `grep -qxF` over a list. For a large list a `Set` (§21)
   and `has` would be faster; for two or three names an array reads more plainly.
+- `text.split(separator)` again, with something other than a newline:
+  `output.split(FIELD_SEPARATOR)` — the constant is `'\0'` — in `core/changes.ts` (PR 9)
+  cuts `git diff -z` output at every NUL byte (§44). Any
+  string works as the separator — it is `cut -d`, not a fixed `IFS`. And as with the
+  newline, a separator that ends the text leaves an empty last piece, which is what the
+  next method is there for.
+- `list.pop()` — removes the last element and returns it: `push` in reverse.
+  `core/changes.ts` uses it to drop that empty last piece; the returned value is not
+  wanted, so the whole line is `fields.pop();`.
 
-Which of these change the array they are called on: `push`, `shift` (§38) and `sort` (§26)
-do; `filter`, `map`, `slice`, `join` and `includes` never do — they return something new and
-leave the original as it was, the same rule as for strings in §23.
+Which of these change the array they are called on: `push`, `pop`, `shift` (§38) and `sort`
+(§26) do; `filter`, `map`, `slice`, `join` and `includes` never do — they return something
+new and leave the original as it was, the same rule as for strings in §23.
 
 ## 26. sort and comparison functions
 
@@ -1208,6 +1217,15 @@ stale.
 `depth: current.depth + 1` builds each child's entry (an object literal, §16) one level
 deeper than its parent's.
 
+A second shape of `while`, in `core/changes.ts` (`parseNameStatus`, PR 9): the list exists
+up front, but its entries are two fields long or three (a rename carries two paths), so
+`for ... of` cannot walk it one *entry* at a time. An index starts at 0; the body reads the
+fields at `index` and `index + 1` (and `index + 2`), then moves the index past them by hand
+— `index = index + 2`, or `+ 3` — and the loop runs while `index < fields.length`. It is
+§29's counted loop with a step decided inside the body, which the `for (...; ...; index++)`
+header cannot express. JavaScript also has the shorthand `index += 2`; it is not used here,
+so the step reads as the arithmetic it is.
+
 ## 39. Node's Promise-returning file-system calls: readdir and Dirent
 
 *First seen in `src/core/discovery.ts` (`listCandidates`); `fs.realpath` in the same file
@@ -1449,3 +1467,78 @@ const declared: Record<keyof DiscoveryOptions, unknown> = {
   'x' is missing in type ...`) and a misspelled one (`... does not exist in type ... Did
   you mean ...?`). It is the same idea as `implements` in §13: a link the compiler checks,
   instead of a copy kept up by hand.
+
+## 44. Escape sequences in string literals: `\0`
+
+*First seen in `src/core/changes.ts` (`FIELD_SEPARATOR`); throughout
+`test/unit/changes.test.ts`.*
+
+```ts
+const FIELD_SEPARATOR = '\0';
+const fields = output.split(FIELD_SEPARATOR);
+
+const output = 'R100\0src/old.ts\0src/new.ts\0';   // in the tests
+```
+
+Inside quotes a backslash starts an **escape**: a way to write a character that cannot be
+typed as itself. §23 met `'\n'`, one newline. The others this codebase uses: `'\t'`, a
+tab; `'\''`, a quote inside single quotes; and `'\0'`, the **NUL byte** — character code
+zero, the byte C uses to end a string, and so the one byte a file name can never contain.
+That last fact is why `git diff -z` (plan §5) separates its fields with it, and why
+`parseNameStatus` can cut on it and trust every piece to be a whole path. (A backslash
+meant as itself is doubled, `'\\'`; no string in this codebase needs one yet.)
+The spellings are bash's `$'\n'`, `$'\t'`, `$'\0'` — with one difference: bash cannot
+*hold* a NUL in a variable (which is why shell scripts reach for `xargs -0` and
+`tr '\0' '\n'`), while a JavaScript string holds it like any other character:
+`'a\0b'.length` is 3.
+
+Two things to know. The tests write git's output as literals, so `'A\0added.txt\0'` in the
+source *is* the twelve bytes git printed — `A`, a NUL, the nine of `added.txt`, a NUL —
+the format is specified by example. And a `\0` directly followed by a digit, `'\01'`, is
+read as an old octal escape,
+which strict mode forbids and the compiler rejects; none of the paths in the tests start
+with a digit, and if one must, `'\u0000'` (the same byte by its Unicode number, always
+unambiguous) or a `+` between two strings avoids it. Last, the same `\0` inside a *regular
+expression* (§20) is a lint error (`no-control-regex`, recorded in plan §13.4); the
+codebase splits on the byte and never matches it.
+
+## 45. Narrowing a `string` to an exact-string union with `===`
+
+*First seen in `src/core/changes.ts` (`toFileStatus`).*
+
+```ts
+function toFileStatus(statusField: string): FileStatus {
+  const letter = statusField.charAt(0);
+  if (letter === 'A' || letter === 'M' || letter === 'D' || letter === 'T' || letter === 'R' || letter === 'C') {
+    return letter;
+  }
+  throw new Error(`git diff --name-status printed an entry with the unknown status "${letter}" ...`);
+}
+```
+
+§10 defined `FileStatus` as six exact strings, and every earlier narrowing — §8 against
+`undefined`, §17 with `typeof`, §18 with `instanceof` — proved which *kind* of value
+something was. A comparison with `===` against a literal narrows too, to that one *value*:
+inside `if (letter === 'A')` the compiler knows `letter` is exactly `'A'`, and with the six
+comparisons joined by `||` it knows, inside the block, that `letter` is one of the six —
+which is what `FileStatus` is. So `return letter` compiles there, where
+`return statusField.charAt(0)` at the top of the function would not: `charAt` gives a
+`string`, a `string` might be `'X'`, and the compiler refuses to call it a `FileStatus`
+until the code has checked.
+
+This is the boundary between the outside world and the typed inside. Text from git crosses
+it exactly once, checked, and from then on every `status === 'R'` in the codebase is a
+comparison against a closed list the compiler knows: misspell it as `'r'` and the compiler
+reports it (`This comparison appears to be unintentional because the types ... have no
+overlap`), because `'r'` is not in the union. `if (status === 'R' || status === 'C')` in
+`parseNameStatus` is the same narrowing again, on a value that is already a union, down to
+the two members that carry an `oldPath`.
+
+The `throw` after the `if` is not decoration. Without it the function could reach its end
+without returning, and the compiler says so (`Function lacks ending return statement`).
+`throw new Error(message)` builds an error carrying a message and throws it — §18 re-threw
+one it had caught; the fake runner (§19) builds its own the same way — and whoever called,
+up the chain, gets it: `parseNameStatus`, then `changedFiles`, then the tree (PR 11), which
+shows the message under the layer. Because a `throw` is how an `async` function's Promise
+rejects (§7), the test for it is a plain `expect(() => parseNameStatus(output)).toThrow(...)`
+on the synchronous function and `rejects` on the asynchronous one.

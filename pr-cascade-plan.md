@@ -1835,3 +1835,4 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
   cache discovered roots; re-run on `onDidChangeWorkspaceFolders`, manual refresh, and that watcher; gate the
   status bar and the focus/editor listeners on the latest discovery result; never treat an E17 rejection as
   "zero roots". Focus/editor-change refresh should not re-run discovery in a repo-less window.
+- **M1 merged 2026-09-20** (PRs #1–#6, #9, #10, merge commits). M2 started the same day as branches `m2/01…03`.

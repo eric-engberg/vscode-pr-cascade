@@ -8,7 +8,7 @@ view linked up automatically.
 
 ## Status
 
-**Pre-alpha, milestone 1 in progress.** Nothing is usable yet. This repo is being built as a
+**Pre-alpha, milestone 2 in progress.** Nothing is usable yet. This repo is being built as a
 stack of small, heavily commented PRs meant to be read in order by someone learning
 TypeScript along the way. Start with [`docs/reading-order.md`](docs/reading-order.md); the
 language is explained as it appears in [`docs/typescript-primer.md`](docs/typescript-primer.md).
@@ -16,8 +16,9 @@ language is explained as it appears in [`docs/typescript-primer.md`](docs/typesc
 Milestones (each is one stack of PRs):
 
 1. **Skeleton + layer list** — toolchain, git runner, repo discovery, trunk detection, the
-   stack computed from git ancestry, a tree that shows the branch names. ← *now*
-2. Files per layer.
+   stack computed from git ancestry, a tree that shows the branch names.
+2. **Files per layer** — the files each layer changes against the one below it, renames
+   as `old → new`. ← *now*
 3. Diff on click (parent vs layer, in VS Code's native diff editor).
 4. Auto-refresh, state nodes, status bar → v0.1.
 5. git-spice backend: readiness, login, push.
