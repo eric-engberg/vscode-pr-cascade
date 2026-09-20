@@ -1,18 +1,17 @@
 /**
- * test/unit/changes.test.ts — parseNameStatus and changedFiles as a specification: the
- * `git diff --name-status -M -z` format, entry by entry, and the one command changedFiles
- * runs, checked against FakeGitRunner.
+ * test/unit/changes.test.ts — parseNameStatus, parseNumstat and changedFiles as a
+ * specification: the `git diff --name-status -M -z` and `git diff --numstat -M -z`
+ * formats entry by entry, and the two commands changedFiles runs and how it pairs their
+ * answers — all on canned output, some of it copied byte for byte from git 2.50.
  *
- * Layer: test, unit (plan §9.1 layer 1; Vitest, no git, no VS Code). Depends on:
- * src/core/changes.ts, test/helpers/fakeGit.ts. What real git prints for a real rename,
- * a binary file or a 1500-file layer is PR 10's test/git/changes.git.test.ts; here the
- * output is canned, including one output copied byte for byte from git 2.50. Plan:
- * §10.1 M2 item 7, §5 "Files in a layer", §8 E7/E8/E9/E11/E17, §9.4.
+ * Layer: test, unit (plan §9.1 layer 1; Vitest, no git, no VS Code; FakeGitRunner).
+ * Depends on: src/core/changes.ts, test/helpers/fakeGit.ts. Plan: §10.1 M2 items 7–8,
+ * §5 both rows, §8 E7–E11/E17, §9.4.
  */
 
 // see primer §1 (import / export)
 import { describe, expect, it } from 'vitest';
-import { changedFiles, parseNameStatus } from '../../src/core/changes';
+import { changedFiles, parseNameStatus, parseNumstat } from '../../src/core/changes';
 import { FakeGitRunner } from '../helpers/fakeGit';
 
 // The repository the changedFiles tests ask about, and the two SHAs a LayerNode would
@@ -23,11 +22,13 @@ const ROOT = '/work/app';
 const PARENT_SHA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const SHA = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
-// The one command changedFiles runs: as the fake keys it (args joined by spaces), and as
-// the argument list it must pass to the runner.
+// The two commands changedFiles runs: as the fake keys them (args joined by spaces),
+// and as the argument lists it must pass to the runner.
 // see primer §12 (template strings)
-const DIFF_KEY = `diff --name-status -M -z ${PARENT_SHA} ${SHA} --`;
-const DIFF_ARGS = ['diff', '--name-status', '-M', '-z', PARENT_SHA, SHA, '--'];
+const NAME_STATUS_KEY = `diff --name-status -M -z ${PARENT_SHA} ${SHA} --`;
+const NAME_STATUS_ARGS = ['diff', '--name-status', '-M', '-z', PARENT_SHA, SHA, '--'];
+const NUMSTAT_KEY = `diff --numstat -M -z ${PARENT_SHA} ${SHA} --`;
+const NUMSTAT_ARGS = ['diff', '--numstat', '-M', '-z', PARENT_SHA, SHA, '--'];
 
 /**
  * What git 2.50.1 printed for `git diff --name-status -M -z <base> <top>` on a
@@ -52,6 +53,42 @@ const REAL_OUTPUT =
   'R052\0renamed-old.txt\0renamed-new.txt\0' +
   'T\0typechange.txt\0' +
   'A\0ünïcode/fïle.txt\0';
+
+/**
+ * What git 2.50.1 printed for the two commands on one more repository, built to hold
+ * every shape numstat has (2026-09-20, hermetic temp repo). Between `base` and `top`:
+ * `added.txt` added; `blob-old.bin`, a binary, renamed unchanged to `blob-new.bin`;
+ * `gone.txt` deleted; `image.png`, a binary, modified; `keep.txt` replaced by a
+ * symlink; `old-name.txt` renamed unchanged to `new-name.txt`; `new.png`, a binary,
+ * added; `text.txt` modified (two lines added, one removed). "Binary" here means the
+ * file's bytes include a NUL, which is what git looks for.
+ *
+ * Read the numstat one against the name-status one line by line: a plain entry is
+ * `<added>\t<deleted>\t<path>\0` and a binary one has `-` for both counts; a rename is
+ * the counts, an *empty* path, and then the old and new paths as two more NUL-ended
+ * pieces — `0\t0\t\0old-name.txt\0new-name.txt\0` — the shape the parser has to tell
+ * apart from a plain entry by that empty path. (Each entry is its own literal on its
+ * own line because a `\0` directly followed by a digit would be read as an octal
+ * escape, primer §44, and every numstat entry starts with one.)
+ */
+const PROBE_NAME_STATUS =
+  'A\0added.txt\0' +
+  'R100\0blob-old.bin\0blob-new.bin\0' +
+  'D\0gone.txt\0' +
+  'M\0image.png\0' +
+  'T\0keep.txt\0' +
+  'R100\0old-name.txt\0new-name.txt\0' +
+  'A\0new.png\0' +
+  'M\0text.txt\0';
+const PROBE_NUMSTAT =
+  '1\t0\tadded.txt\0' +
+  '-\t-\t\0blob-old.bin\0blob-new.bin\0' +
+  '0\t1\tgone.txt\0' +
+  '-\t-\timage.png\0' +
+  '1\t1\tkeep.txt\0' +
+  '0\t0\t\0old-name.txt\0new-name.txt\0' +
+  '-\t-\tnew.png\0' +
+  '2\t1\ttext.txt\0';
 
 // see primer §5 (arrow functions)
 describe('parseNameStatus', () => {
@@ -137,7 +174,7 @@ describe('parseNameStatus', () => {
       expect(files).toStrictEqual([{ status: 'C', path: 'copy.md', oldPath: 'template.md', binary: false }]);
     });
 
-    it('reports every entry as not binary — name-status cannot tell; PR 10 adds numstat, which can', () => {
+    it('reports every entry as not binary — name-status cannot tell; changedFiles fills that in from numstat', () => {
       // arrange: a PNG is added; name-status has no way to say it is binary
       const output = 'A\0logo.png\0M\0a.txt\0';
 
@@ -273,34 +310,270 @@ describe('parseNameStatus', () => {
   });
 });
 
+describe('parseNumstat', () => {
+  describe('one entry per file', () => {
+    it('reads a text file: lines added, lines deleted, then the path — not binary', () => {
+      // arrange: three lines added and one removed in src/app.ts
+      const output = '3\t1\tsrc/app.ts\0';
+
+      // act
+      const entries = parseNumstat(output);
+
+      // assert: the counts are not kept; only what they say about the file is
+      expect(entries).toStrictEqual([{ path: 'src/app.ts', binary: false }]);
+    });
+
+    it('reads a binary file: `-` for both counts (E10)', () => {
+      // arrange: git found a NUL byte in logo.png and refused to count lines
+      const output = '-\t-\tlogo.png\0';
+
+      // act
+      const entries = parseNumstat(output);
+
+      // assert
+      expect(entries).toStrictEqual([{ path: 'logo.png', binary: true }]);
+    });
+
+    it('reads a rename as the counts, an empty path, then the old and new paths — and keeps the new one (E7)', () => {
+      // arrange: PROBE_NUMSTAT's sixth entry, byte for byte — what git 2.50.1 printed
+      // after `git mv old-name.txt new-name.txt`: no lines changed, so `0\t0\t`, then a
+      // NUL at once where the path would be, then the two paths
+      const output = '0\t0\t\0old-name.txt\0new-name.txt\0';
+
+      // act
+      const entries = parseNumstat(output);
+
+      // assert: `path` is where the file is at the layer, the same string
+      // parseNameStatus puts in ChangedFile.path for this rename
+      expect(entries).toStrictEqual([{ path: 'new-name.txt', binary: false }]);
+    });
+
+    it('reads a rename with an edit the same way', () => {
+      // arrange: what git printed after `git mv text.txt moved.txt` plus one added line
+      // — the rename shape, with a real count in front
+      const output = '1\t0\t\0text.txt\0moved.txt\0';
+
+      // act
+      const entries = parseNumstat(output);
+
+      // assert
+      expect(entries).toStrictEqual([{ path: 'moved.txt', binary: false }]);
+    });
+
+    it('reads a binary rename: `-` counts in the rename shape (E7, E10)', () => {
+      // arrange: PROBE_NUMSTAT's second entry — a moved binary
+      const output = '-\t-\t\0blob-old.bin\0blob-new.bin\0';
+
+      // act
+      const entries = parseNumstat(output);
+
+      // assert
+      expect(entries).toStrictEqual([{ path: 'blob-new.bin', binary: true }]);
+    });
+  });
+
+  describe('a whole output', () => {
+    it('reads every entry of a real git 2.50 output, in the order git printed them', () => {
+      // arrange: PROBE_NUMSTAT, copied from git (see its comment)
+
+      // act
+      const entries = parseNumstat(PROBE_NUMSTAT);
+
+      // assert: six one-piece entries and two three-piece renames — eight entries, three
+      // of them binary
+      expect(entries).toStrictEqual([
+        { path: 'added.txt', binary: false },
+        { path: 'blob-new.bin', binary: true },
+        { path: 'gone.txt', binary: false },
+        { path: 'image.png', binary: true },
+        { path: 'keep.txt', binary: false },
+        { path: 'new-name.txt', binary: false },
+        { path: 'new.png', binary: true },
+        { path: 'text.txt', binary: false },
+      ]);
+    });
+
+    it('returns an empty list for empty output', () => {
+      // arrange: nothing changed, so git printed nothing at all
+      const output = '';
+
+      // act
+      const entries = parseNumstat(output);
+
+      // assert
+      expect(entries).toEqual([]);
+    });
+
+    it('treats the NUL after the last entry as its end, not the start of an empty one', () => {
+      // arrange
+      const output = '1\t1\tonly.txt\0';
+
+      // act
+      const entries = parseNumstat(output);
+
+      // assert
+      expect(entries.length).toBe(1);
+    });
+  });
+
+  describe('paths are taken byte for byte (E11)', () => {
+    it('keeps a tab in a path: only the first two tabs of an entry separate columns', () => {
+      // arrange: a file called `with<tab>tab.txt` — three tabs in the entry, two of
+      // them columns, one of them the path's own
+      const output = '1\t0\twith\ttab.txt\0';
+
+      // act
+      const entries = parseNumstat(output);
+
+      // assert
+      expect(entries).toStrictEqual([{ path: 'with\ttab.txt', binary: false }]);
+    });
+
+    it('keeps a newline in a path: -z means git never quotes it', () => {
+      // arrange
+      const output = '1\t0\tnew\nline.txt\0';
+
+      // act
+      const entries = parseNumstat(output);
+
+      // assert
+      expect(entries[0].path).toBe('new\nline.txt');
+    });
+  });
+
+  describe('what it refuses', () => {
+    it('throws when an entry has fewer than two tabs — that is not numstat output', () => {
+      // arrange: one tab, so there is no second count and no path column
+      const output = '1\tonly-one-tab.txt\0';
+
+      // act
+      const attempt = () => parseNumstat(output);
+
+      // assert
+      expect(attempt).toThrow(/without its two counts/);
+    });
+
+    it('throws naming the counts when they are neither digits nor "-", rather than calling the file text', () => {
+      // arrange
+      const output = 'x\t0\tfile.txt\0';
+
+      // act
+      const attempt = () => parseNumstat(output);
+
+      // assert
+      expect(attempt).toThrow(/neither digits nor "-": "x" and "0"/);
+    });
+
+    it('throws when a rename ends before its new path', () => {
+      // arrange: the rename shape with only the old path after it
+      const output = '0\t0\t\0old.txt\0';
+
+      // act
+      const attempt = () => parseNumstat(output);
+
+      // assert
+      expect(attempt).toThrow(/ended before the new path/);
+    });
+  });
+});
+
 // see primer §6 (async / await)
 describe('changedFiles', () => {
-  it('asks git for exactly `diff --name-status -M -z <parentSha> <sha> --`, in the root', async () => {
+  /** A fake that answers both commands: the two outputs a real git would print for one layer. */
+  // see primer §19 (Map)
+  function fakeGitAnswering(nameStatusOutput: string, numstatOutput: string): FakeGitRunner {
+    return new FakeGitRunner(
+      new Map([
+        [NAME_STATUS_KEY, nameStatusOutput],
+        [NUMSTAT_KEY, numstatOutput],
+      ]),
+    );
+  }
+
+  it('asks git for name-status and then numstat — both -M -z over the same two SHAs and a closing --, in the root — and nothing else', async () => {
     // arrange
-    // see primer §19 (Map)
-    const git = new FakeGitRunner(new Map([[DIFF_KEY, 'A\0b\0']]));
+    const git = fakeGitAnswering('A\0b\0', '1\t0\tb\0');
 
     // act
     await changedFiles(git, ROOT, PARENT_SHA, SHA);
 
-    // assert: one command, the two SHAs in parent-then-layer order (a tree diff, not a
-    // merge-base one), rename detection on, NUL separators on, `--` closing the list of
-    // revisions so no file can be mistaken for one, and nothing else
-    expect(git.calls).toEqual([{ args: DIFF_ARGS, cwd: ROOT }]);
+    // assert: two commands, the two SHAs in parent-then-layer order on both (a tree
+    // diff, not a merge-base one), rename detection and NUL separators on both, and
+    // `--` closing the list of revisions on both so no file can be mistaken for one
+    expect(git.calls).toEqual([
+      { args: NAME_STATUS_ARGS, cwd: ROOT },
+      { args: NUMSTAT_ARGS, cwd: ROOT },
+    ]);
   });
 
-  it('returns the parsed entries', async () => {
-    // arrange: the fixture builder's second layer adds the one file `b`
-    const git = new FakeGitRunner(new Map([[DIFF_KEY, 'A\0b\0']]));
+  it('returns the name-status entries with `binary` filled in from numstat — the two real outputs of one repository, paired', async () => {
+    // arrange: PROBE_NAME_STATUS and PROBE_NUMSTAT, from the same two commits
+    const git = fakeGitAnswering(PROBE_NAME_STATUS, PROBE_NUMSTAT);
+
+    // act
+    const files = await changedFiles(git, ROOT, PARENT_SHA, SHA);
+
+    // assert: every status letter and both rename paths from the first command; the
+    // three binaries — a moved one, an edited one, a new one — from the second
+    expect(files).toStrictEqual([
+      { status: 'A', path: 'added.txt', binary: false },
+      { status: 'R', path: 'blob-new.bin', oldPath: 'blob-old.bin', binary: true },
+      { status: 'D', path: 'gone.txt', binary: false },
+      { status: 'M', path: 'image.png', binary: true },
+      { status: 'T', path: 'keep.txt', binary: false },
+      { status: 'R', path: 'new-name.txt', oldPath: 'old-name.txt', binary: false },
+      { status: 'A', path: 'new.png', binary: true },
+      { status: 'M', path: 'text.txt', binary: false },
+    ]);
+  });
+
+  it('marks a file binary exactly when numstat printed `-` for it (E10)', async () => {
+    // arrange: a PNG added and a text file edited in the same layer
+    const git = fakeGitAnswering('A\0logo.png\0M\0a.txt\0', '-\t-\tlogo.png\0' + '1\t1\ta.txt\0');
 
     // act
     const files = await changedFiles(git, ROOT, PARENT_SHA, SHA);
 
     // assert
-    expect(files).toStrictEqual([{ status: 'A', path: 'b', binary: false }]);
+    const binaryFlags = files.map((file) => file.binary);
+    expect(binaryFlags).toEqual([true, false]);
   });
 
-  it('rejects with the runner\'s own error when git fails — a `run`, never a `tryRun` (E17)', async () => {
+  it('pairs a rename by its new path, the one both commands print last', async () => {
+    // arrange: a binary moved; name-status names both paths, numstat the same two
+    const git = fakeGitAnswering('R100\0old.bin\0new.bin\0', '-\t-\t\0old.bin\0new.bin\0');
+
+    // act
+    const files = await changedFiles(git, ROOT, PARENT_SHA, SHA);
+
+    // assert
+    expect(files).toStrictEqual([{ status: 'R', path: 'new.bin', oldPath: 'old.bin', binary: true }]);
+  });
+
+  it('leaves a file text when numstat does not mention it', async () => {
+    // arrange: a numstat with nothing in it — not something git does, but the rule
+    // when the two lists differ: no `-` means not binary
+    const git = fakeGitAnswering('A\0a\0', '');
+
+    // act
+    const files = await changedFiles(git, ROOT, PARENT_SHA, SHA);
+
+    // assert
+    expect(files).toStrictEqual([{ status: 'A', path: 'a', binary: false }]);
+  });
+
+  it('ignores a path only numstat mentions — name-status decides which files exist', async () => {
+    // arrange: numstat knows a binary name-status never listed
+    const git = fakeGitAnswering('A\0a\0', '-\t-\textra.png\0' + '1\t0\ta\0');
+
+    // act
+    const files = await changedFiles(git, ROOT, PARENT_SHA, SHA);
+
+    // assert: one entry, and `extra.png` is not it
+    expect(files).toStrictEqual([{ status: 'A', path: 'a', binary: false }]);
+  });
+
+  it('rejects with the runner\'s own error when name-status fails — a `run`, never a `tryRun` (E17)', async () => {
     // arrange: git exits non-zero (the repository vanished, a SHA that no longer
     // resolves after a gc, git itself missing); an empty list would hide it
     const failure = new Error('fatal: bad object bbbbbbbb');
@@ -308,12 +581,30 @@ describe('changedFiles', () => {
     // compiler infers Map<string, Error>, and a map that only ever holds errors is an
     // acceptable Map<string, string | Error> for the fake to read from (primer §19).
     // git.test.ts spells the types out because its one literal mixes the two kinds.
-    const git = new FakeGitRunner(new Map([[DIFF_KEY, failure]]));
+    const git = new FakeGitRunner(new Map([[NAME_STATUS_KEY, failure]]));
 
     // act
     const result = changedFiles(git, ROOT, PARENT_SHA, SHA);
 
     // assert: the very same error the runner threw
+    await expect(result).rejects.toBe(failure);
+  });
+
+  it('rejects with the runner\'s own error when numstat fails, even though name-status succeeded (E17)', async () => {
+    // arrange: the first command answers, the second does not. This Map mixes a string
+    // and an Error, so its types are spelled out (primer §19).
+    const failure = new Error('fatal: bad object bbbbbbbb');
+    const git = new FakeGitRunner(
+      new Map<string, string | Error>([
+        [NAME_STATUS_KEY, 'A\0a\0'],
+        [NUMSTAT_KEY, failure],
+      ]),
+    );
+
+    // act
+    const result = changedFiles(git, ROOT, PARENT_SHA, SHA);
+
+    // assert: no half answer with every file called text
     await expect(result).rejects.toBe(failure);
   });
 });

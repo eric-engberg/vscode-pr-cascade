@@ -591,6 +591,15 @@ prints `git version 2.50.1 (Apple Git-155)`) or where a prefix is the whole poin
 message must *start* with the path). Everywhere else they compare whole strings with
 `toBe`, which fails with a clearer diff.
 
+A pattern is a value with methods of its own, and `src/` uses one — the only regular
+expression in `src/` so far: `LINE_COUNT.test(field)` in `core/changes.ts` (`isBinary`,
+PR 10) asks whether `field` matches `/^\d+$/` and answers with a plain boolean (§24). It
+is the same match `toMatch` makes in a test, called directly. `$` is `^`'s twin: it
+anchors the match to the *end* of the string, so `^\d+$` means "digits, and nothing but
+digits, from start to end" — `'12'` matches, `'12x'` and `''` do not. The pattern is a
+module-level `const` (§4) rather than written inline at the call, so it is built once
+and has a name that says what it recognises.
+
 ## 21. Set
 
 *First seen in `src/core/discovery.ts`.*
@@ -681,6 +690,16 @@ Strings carry their own methods, called with a dot like a method on any object:
   space, and `trim()` would eat that along with the newline. When exactly one known
   character has to go, `endsWith` plus `slice` say so precisely.
 
+- `padStart(width, fill)` — a copy padded on the left with `fill` until it is `width`
+  characters long: `String(7).padStart(4, '0')` is `'0007'`, `printf '%04d'`.
+  `test/git/changes.git.test.ts` (PR 10) numbers 1500 files that way so that git's
+  order — by path, byte by byte, the same `<` order as §26 — is the order they were
+  made in (`file-0002` before `file-0010`, where `file-2` would sort after `file-10`).
+  `String(7)` is §27's `Number` in reverse: number to text.
+- `repeat(n)` — the string `n` times over: `'0'.repeat(40)` is forty zeros, a
+  40-character SHA no object has (`printf '0%.0s' {1..40}`). `test/git/git.git.test.ts`
+  builds its 2 MB argument with it, and `test/git/changes.git.test.ts` (PR 10) its bad SHA.
+
 None of them change the string they are called on — a string, once made, never changes;
 each method returns a new one. That is why the code writes `printedRoot =
 printedRoot.slice(0, -1)` rather than expecting the variable to change in place.
@@ -770,6 +789,13 @@ codebase uses, all of them the same idea as a shell pipeline stage: a list goes 
 - `list.pop()` — removes the last element and returns it: `push` in reverse.
   `core/changes.ts` uses it to drop that empty last piece; the returned value is not
   wanted, so the whole line is `fields.pop();`.
+- `columns.slice(2).join('\t')` — `slice` on an *array* (§23 said arrays have it too):
+  the elements from position 2 to the end, as a new array; `join` (§9) then glues them
+  back into one string with a tab between each. Together they are the shell's
+  `cut -f3-`: in `parseNumstat` (`core/changes.ts`, PR 10) a numstat entry is cut at
+  every tab, the first two pieces are the two counts, and everything after them — a
+  path, which may itself contain tabs — is put back together exactly as it was. `split`
+  alone would have been `cut -f3`, and would have lost the rest of such a path.
 
 Which of these change the array they are called on: `push`, `pop`, `shift` (§38) and `sort`
 (§26) do; `filter`, `map`, `slice`, `join` and `includes` never do — they return something
@@ -885,7 +911,11 @@ are set — `encoding` (text rather than raw bytes) and `stdio` (close stdin so 
 can wait for input) are the two that matter. A few more of the same kind appear in the
 fixture and its test: `fs.rmSync(dir, { recursive: true, force: true })` is `rm -rf`;
 `fs.statSync(p).isFile()` is `test -f`; `path.resolve(base, p)` makes a relative path
-absolute (`realpath -m`), and `path.dirname(p)` is `dirname`.
+absolute (`realpath -m`), and `path.dirname(p)` is `dirname`. Three more in
+`test/git/changes.git.test.ts` (PR 10): `fs.mkdirSync(p, { recursive: true })` is
+`mkdir -p` (the fixture builder uses it too), `fs.copyFileSync(a, b)` is `cp a b`, and
+`fs.symlinkSync(target, p)` is `ln -s target p` — the arguments in that order, target
+first, exactly as `ln` takes them.
 
 ## 29. Counted for loops
 
@@ -1501,6 +1531,10 @@ with a digit, and if one must, `'\u0000'` (the same byte by its Unicode number, 
 unambiguous) or a `+` between two strings avoids it. Last, the same `\0` inside a *regular
 expression* (§20) is a lint error (`no-control-regex`, recorded in plan §13.4); the
 codebase splits on the byte and never matches it.
+
+The same escape works the other way round, too: `test/git/changes.git.test.ts` (PR 10)
+writes `'PNG\0not a real picture\0'` *to a file*, and the `\0`s land on disk as real NUL
+bytes — which is exactly what makes git call that file binary (E10).
 
 ## 45. Narrowing a `string` to an exact-string union with `===`
 

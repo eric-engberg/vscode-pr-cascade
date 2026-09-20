@@ -100,8 +100,8 @@ export type FileStatus = 'A' | 'M' | 'D' | 'R' | 'C' | 'T';
 /**
  * One file a layer changes relative to its parent — a row under the layer's node (PR 11).
  * Part of the plan §4.3 data model, declared here with the rest of it; core/changes.ts
- * builds them from `git diff --name-status -M -z` output, and PR 10 fills in `binary`
- * from a second command.
+ * builds them from `git diff --name-status -M -z` output and fills in `binary` from
+ * `git diff --numstat -M -z`, the one of the two commands that can tell (E10).
  */
 // see primer §11 (optional `?` fields)
 export interface ChangedFile {
