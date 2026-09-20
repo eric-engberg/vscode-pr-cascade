@@ -1,36 +1,45 @@
 /**
  * vscode/tree.ts — the Stack view: turns the RepoStates the core computed into the rows
- * VS Code draws in the Source Control side bar, one row per layer, branch names only.
+ * VS Code draws in the Source Control side bar — one row per layer, branch names only,
+ * and under each layer one row per file that layer changes against the layer below it.
  *
  * Layer: vscode adapter (plan §4.1). Depends on: the `vscode` module, core/model.ts (types
  * only), Node's `node:path`. Depended on by: src/extension.ts (registers the provider for
- * the view declared in package.json) and test/ext/tree.test.ts. Plan: §4.2, §6, §7.1,
- * §8 E17/E44.
+ * the view declared in package.json and hands it the two loader functions) and
+ * test/ext/tree.test.ts. Plan: §6, §7.1, §8 E7/E10/E17/E44, §12 item 3.
  */
 
 // see primer §1 (import / export), §2 (the vscode module) and §9 (`import type`)
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import type { RepoState, StackLayer } from '../core/model';
+import type { ChangedFile, RepoState, StackLayer } from '../core/model';
 
 /**
  * One layer of the stack — the row `retry-metrics   3 commits · current`. The label is
  * the branch name and nothing else (plan §7.1: "labels are always branch names, never
- * SHAs"; E44); the SHAs live in the tooltip. In M1 a layer has no children; M2 puts the
- * layer's changed files under it.
+ * SHAs"; E44); the SHAs live in the tooltip. The row opens: under it the provider lists
+ * the files the layer changes, one FileNode each. That is why the node carries `root` —
+ * a FileNode names its file by an absolute path, and a layer on its own does not know
+ * which repository it belongs to.
  */
 // see primer §13 (class) and §14 (readonly)
 export class LayerNode {
+  /** The repository the layer is in, as discovery found it (RepoState.root). */
+  readonly root: string;
   readonly layer: StackLayer;
 
-  constructor(layer: StackLayer) {
+  constructor(root: string, layer: StackLayer) {
+    this.root = root;
     this.layer = layer;
   }
 
   /** How VS Code should draw this row. Called by the provider's getTreeItem. */
   // see primer §35 (enum values from the VS Code API: TreeItemCollapsibleState)
   toTreeItem(): vscode.TreeItem {
-    const item = new vscode.TreeItem(this.layer.name, vscode.TreeItemCollapsibleState.None);
+    // `Collapsed`: the row has children and starts folded. VS Code asks the provider for
+    // them only when the user opens the row, so a stack of ten layers costs one diff per
+    // layer *looked at*, not ten diffs up front.
+    const item = new vscode.TreeItem(this.layer.name, vscode.TreeItemCollapsibleState.Collapsed);
     // The dimmer text after the label: how far the layer is from trunk, and whether HEAD
     // is here. The icon and the contextValue change with it: `$(target)` for the branch
     // the user is on, `$(git-branch)` for the rest (plan §7.1), and `stackBranchCurrent`
@@ -56,6 +65,76 @@ export class LayerNode {
     item.tooltip =
       `${this.layer.name} @ ${shortSha(this.layer.sha)}\n` +
       `base: ${this.layer.parent} @ ${shortSha(this.layer.parentSha)}`;
+    return item;
+  }
+}
+
+/**
+ * One file a layer changes, as a row under the layer: `M  ingress.ts`, with the file's
+ * directory as the dimmer description (plan §7.1 "File nodes"). The status letter is
+ * part of the label rather than an icon (plan §12 item 3, decided: prefix) so the icon
+ * slot stays free for VS Code's own file icon: the row names its file through
+ * `resourceUri`, and VS Code then draws the icon the user's icon theme has for that kind
+ * of file and applies its file decorations — the colour and letter the built-in git
+ * extension gives a file that is modified or untracked in the working tree — exactly as
+ * in the Explorer. Two spaces after the letter, so the names line up whatever the letter.
+ *
+ * There is no command on the row yet: clicking it does nothing until M3 adds `openDiff`
+ * (plan §7.2), which will show the file at the parent against the file at the layer.
+ */
+export class FileNode {
+  /** The repository root: `file.path` is relative to it, and a URI wants the whole path. */
+  readonly root: string;
+  readonly file: ChangedFile;
+
+  constructor(root: string, file: ChangedFile) {
+    this.root = root;
+    this.file = file;
+  }
+
+  /** How VS Code should draw this row. Called by the provider's getTreeItem. */
+  toTreeItem(): vscode.TreeItem {
+    // git prints paths with `/` on every platform, and Node's `path` reads `/` on every
+    // platform, so no conversion is needed before taking the file's name and directory.
+    // see primer §28 (basename, dirname)
+    const fileName = path.basename(this.file.path);
+    const label = `${this.file.status}  ${fileName}`;
+    const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
+    // The description is the directory the file is in — and empty for a file at the
+    // repository root, where `dirname` answers `.` (as the shell's does), which on a row
+    // would only be noise. The tooltip is the whole path, since a description can be cut
+    // short when the side bar is narrow.
+    let description = path.dirname(this.file.path);
+    if (description === '.') {
+      description = '';
+    }
+    let tooltip = this.file.path;
+    // A rename or copy is the one kind of row where the description is not the
+    // directory: the move *is* the change, so the row shows where the file came from,
+    // both paths in full — `src/old.ts → src/new.ts` (plan §7.1; E7). `oldPath` is set
+    // exactly on renames and copies (core/model.ts), so its presence is the test.
+    // see primer §11 (optional `?` fields) and §12 (template strings)
+    if (this.file.oldPath !== undefined) {
+      description = `${this.file.oldPath} → ${this.file.path}`;
+      tooltip = description;
+    }
+    item.description = description;
+    item.tooltip = tooltip;
+    // The file as VS Code names things — a URI, `file:///work/app/src/ingress.ts`.
+    // Setting it is all it takes for VS Code to treat the row as that file (icon,
+    // decorations); this code knows nothing about icon themes. The path is the one at
+    // the layer, which for a rename is the new name.
+    // see primer §42 (vscode.Uri.file)
+    item.resourceUri = vscode.Uri.file(path.join(this.root, this.file.path));
+    // `stackFile`, or `stackFileBinary` for a file git considers binary (E10). M3's
+    // menus key on the difference: a binary file cannot be shown in the diff editor, so
+    // its row will offer "Open File" where a text file's offers "Open Changes" (plan
+    // §7.2).
+    let contextValue = 'stackFile';
+    if (this.file.binary) {
+      contextValue = 'stackFileBinary';
+    }
+    item.contextValue = contextValue;
     return item;
   }
 }
@@ -90,8 +169,9 @@ export class RepoNode {
  * A row that is a sentence rather than a layer: "No git repository in this workspace"
  * (plan §6, zero repositories), and the states in which a repository has no stack to
  * draw — no trunk found (E4), HEAD on trunk (E5) — or git could not be run at all (E17:
- * "one clear error node, not a crash loop"). M4 (plan §10.1 item 13) owns the full set of
- * state nodes and may reshape these; here they exist so the view is never silently empty.
+ * "one clear error node, not a crash loop"), at the top of the tree or under a layer
+ * whose files could not be listed. M4 (plan §10.1 item 13) owns the full set of state
+ * nodes and may reshape these; here they exist so the view is never silently empty.
  */
 export class MessageNode {
   readonly message: string;
@@ -117,11 +197,12 @@ export class MessageNode {
 
 /**
  * Anything that can be a row in the view. The provider is written against this union so
- * one tree can mix the three kinds; each kind knows how to draw itself (`toTreeItem`),
+ * one tree can mix the four kinds; each kind knows how to draw itself (`toTreeItem`),
  * and `instanceof` tells them apart where it matters (getChildren).
  */
-// see primer §34 (a union of classes, narrowed with instanceof)
-export type StackNode = RepoNode | LayerNode | MessageNode;
+// see primer §34 (a union of classes, narrowed with instanceof — and what happens when
+// a member is added)
+export type StackNode = RepoNode | LayerNode | FileNode | MessageNode;
 
 /**
  * The bridge between the core's RepoStates and VS Code's tree widget. VS Code never
@@ -129,12 +210,13 @@ export type StackNode = RepoNode | LayerNode | MessageNode;
  * row's children?", "how is this row drawn?" — and draws the answers. That is the
  * TreeDataProvider contract, and implementing it is the whole job of this class.
  *
- * Why the provider is given a *function* that loads the states rather than the states
- * themselves: the states go stale with every commit, and re-asking git is the only way to
- * know what changed (plan §3 "Refresh"). So `refresh()` does not recompute anything — it
- * tells VS Code "the tree changed", VS Code asks for the top level again, and
- * `getChildren` calls the loader, which runs the whole pipeline (discovery → trunk →
- * stack) afresh. src/extension.ts owns that pipeline; this class only knows it exists.
+ * Why the provider is given *functions* that load the states and the files rather than
+ * the data itself: the states go stale with every commit, and re-asking git is the only
+ * way to know what changed (plan §3 "Refresh"). So `refresh()` does not recompute
+ * anything — it tells VS Code "the tree changed", VS Code asks for the top level again,
+ * and `getChildren` calls the loader, which runs the whole pipeline (discovery → trunk →
+ * stack) afresh; a layer's files are loaded the same way, when its row is opened.
+ * src/extension.ts owns both pipelines; this class only knows they exist.
  */
 // see primer §31 (generics on classes: TreeDataProvider<StackNode>), §32 (EventEmitter and
 // Event) and §33 (function types)
@@ -151,19 +233,54 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
   /** Runs the whole pipeline and answers with one RepoState per repository, in workspace order. */
   private readonly loadStates: () => Promise<RepoState[]>;
 
-  constructor(loadStates: () => Promise<RepoState[]>) {
+  /** Lists the files one layer changes against the layer below it, in the repository at `root`. */
+  private readonly loadFiles: (root: string, layer: StackLayer) => Promise<ChangedFile[]>;
+
+  /** The "PR Cascade" entry of the Output panel: a failure that became a row is also written there, in full. */
+  private readonly output: vscode.OutputChannel;
+
+  /**
+   * The file lists already fetched, by the pair of commits each was computed between —
+   * the key is `<parentSha>:<sha>`, two values joined into one string (primer §46).
+   *
+   * Why a cache: plan §10 M2 asks for one per layer, keyed on the two SHAs. Who consults
+   * it is narrower than it may look. VS Code itself remembers a row's children until the
+   * next refresh, so a layer closed and reopened is *not* asked for again; and refresh()
+   * empties this map before VS Code re-asks. What the map answers, then, is a second
+   * getChildren for the same pair of commits between two refreshes — which today only a
+   * test issues. It pays off once refreshes stop emptying it, or a partial refresh
+   * (`fire(node)`: one row re-asked while the others keep their entries) is used.
+   *
+   * Why the key is the two SHAs and not the branch name: the same pair of commits always
+   * has the same diff, so an entry can never be wrong; a branch that moved has a new SHA,
+   * hence a new key, and its old entry is simply never asked for again. That is also why
+   * the map is emptied in refresh() rather than never — not because entries go stale, but
+   * so a window kept open for a week does not hold every list it ever showed.
+   */
+  private readonly filesByCommitPair = new Map<string, ChangedFile[]>();
+
+  constructor(
+    loadStates: () => Promise<RepoState[]>,
+    loadFiles: (root: string, layer: StackLayer) => Promise<ChangedFile[]>,
+    output: vscode.OutputChannel,
+  ) {
     this.loadStates = loadStates;
+    this.loadFiles = loadFiles;
+    this.output = output;
     this.onDidChangeTreeData = this.changeEmitter.event;
   }
 
   /** Redraw from scratch. What the toolbar button (`prCascade.refresh`) and every later automatic trigger (M4) call. */
   refresh(): void {
+    // Emptied before the event fires, so the re-asks that follow start from an empty
+    // map. Why it is emptied at all — memory, not staleness — is on the field above.
+    this.filesByCommitPair.clear();
     this.changeEmitter.fire(undefined);
   }
 
   // The rest of the class is the TreeDataProvider contract, in the order VS Code calls it.
 
-  /** VS Code asks this once per repaint of the root (`node` absent) and once per expanded row. */
+  /** VS Code asks this once per repaint of the root (`node` absent) and once per opened row. */
   // see primer §6 (async / await) and §11 (an optional `?` parameter)
   async getChildren(node?: StackNode): Promise<StackNode[]> {
     if (node === undefined) {
@@ -172,7 +289,10 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
     if (node instanceof RepoNode) {
       return nodesForRepo(node.state);
     }
-    // A layer (until M2 adds its files) or a message: nothing underneath.
+    if (node instanceof LayerNode) {
+      return this.filesForLayer(node);
+    }
+    // A file or a message: nothing underneath.
     return [];
   }
 
@@ -204,6 +324,7 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
         // GitError (core/git.ts) already phrases E17 as "git not found at <path>".
         message = error.message;
       }
+      this.output.appendLine(message);
       return [new MessageNode(message, 'error')];
     }
     if (states.length === 0) {
@@ -214,6 +335,38 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
     }
     // see primer §25 (arrays: map)
     return states.map((state) => new RepoNode(state));
+  }
+
+  /**
+   * The rows under one layer: a FileNode per changed file, in git's order — from the
+   * cache when this pair of commits has been listed before, from git otherwise. A
+   * failure — git gone (E17), a repository deleted under an open window — becomes one
+   * error row *under the layer*, with git's own words, plus a line in the Output panel;
+   * the rest of the tree stays as it is, because hiding three good layers over one that
+   * could not be listed would help nobody. A failed list is not cached, so opening the
+   * layer again asks git again. A layer that changes nothing — the second of two
+   * branches on one commit (E6) — gets an empty list, which VS Code draws as a row with
+   * nothing under it.
+   */
+  // see primer §46 (a cache: a Map with a composite key) and §18 (try / catch and unknown)
+  private async filesForLayer(node: LayerNode): Promise<StackNode[]> {
+    const key = `${node.layer.parentSha}:${node.layer.sha}`;
+    let files = this.filesByCommitPair.get(key);
+    if (files === undefined) {
+      try {
+        files = await this.loadFiles(node.root, node.layer);
+      } catch (error) {
+        let message = 'PR Cascade could not list the files of this layer';
+        if (error instanceof Error) {
+          message = error.message;
+        }
+        this.output.appendLine(`${node.layer.name}: ${message}`);
+        return [new MessageNode(message, 'error')];
+      }
+      this.filesByCommitPair.set(key, files);
+    }
+    // see primer §25 (arrays: map)
+    return files.map((file) => new FileNode(node.root, file));
   }
 }
 
@@ -236,7 +389,7 @@ function nodesForRepo(state: RepoState): StackNode[] {
   }
   const nodes: StackNode[] = [];
   for (let index = state.layers.length - 1; index >= 0; index--) {
-    nodes.push(new LayerNode(state.layers[index]));
+    nodes.push(new LayerNode(state.root, state.layers[index]));
   }
   return nodes;
 }

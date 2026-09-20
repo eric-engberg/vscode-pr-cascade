@@ -289,7 +289,12 @@ class StackFixture implements Fixture {
 
   cleanup(): void {
     // `force` makes a missing directory a no-op, so calling cleanup twice is harmless.
-    fs.rmSync(this.scratchDir, { recursive: true, force: true });
+    // `maxRetries` / `retryDelay`: on macOS a recursive delete can fail with ENOTEMPTY when
+    // something is still touching the tree as it goes — Spotlight indexing the files just
+    // written, or a git process finishing up — and the E18 layer of 1500 files hit exactly
+    // that on GitHub's macOS runner (every test passed; the teardown did not). Node retries
+    // EBUSY / ENOTEMPTY / EPERM with a growing pause, ten times up to a second here.
+    fs.rmSync(this.scratchDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 
   /** The branch HEAD is on. Throws when HEAD is detached: the helpers that call this need a branch to come back to. */

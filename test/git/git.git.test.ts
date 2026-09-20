@@ -237,8 +237,7 @@ describe('RealGitRunner', () => {
     it('rejects with a GitError, never Node\'s raw error, when Node refuses to start git on the spot', async () => {
       // arrange: a single 2 MB argument is longer than any system allows (E2BIG, "argument
       // list too long"). Node reports that by throwing from execFile itself instead of
-      // calling back — the path the runner has to catch by hand. `'x'.repeat(n)` builds a
-      // string of n copies.
+      // calling back — the path the runner has to catch by hand. (`repeat`: primer §23.)
       const tooLong = 'x'.repeat(2 * 1024 * 1024);
       const git = new RealGitRunner();
 

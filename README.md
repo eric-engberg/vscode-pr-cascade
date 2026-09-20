@@ -8,7 +8,7 @@ view linked up automatically.
 
 ## Status
 
-**Pre-alpha, milestone 1 in progress.** Nothing is usable yet. This repo is being built as a
+**Pre-alpha, milestone 2 in progress.** Nothing is usable yet. This repo is being built as a
 stack of small, heavily commented PRs meant to be read in order by someone learning
 TypeScript along the way. Start with [`docs/reading-order.md`](docs/reading-order.md); the
 language is explained as it appears in [`docs/typescript-primer.md`](docs/typescript-primer.md).
@@ -16,8 +16,9 @@ language is explained as it appears in [`docs/typescript-primer.md`](docs/typesc
 Milestones (each is one stack of PRs):
 
 1. **Skeleton + layer list** — toolchain, git runner, repo discovery, trunk detection, the
-   stack computed from git ancestry, a tree that shows the branch names. ← *now*
-2. Files per layer.
+   stack computed from git ancestry, a tree that shows the branch names.
+2. **Files per layer** — the files each layer changes against the one below it, renames
+   as `old → new`. ← *now*
 3. Diff on click (parent vs layer, in VS Code's native diff editor).
 4. Auto-refresh, state nodes, status bar → v0.1.
 5. git-spice backend: readiness, login, push.
@@ -60,7 +61,13 @@ folder in a second window, the **Extension Development Host**.
 3. Terminal 1: `npm run watch` — esbuild rebuilds `dist/extension.js` on every save.
 4. Press **F5** ("Run Extension"). A second VS Code window opens with the extension loaded
    and `../fixture-repo/repo` open. Its Source Control side bar has a **Stack** view listing
-   the three branches, top layer first.
+   the three branches, top layer first. Open a layer to see the files it changes against
+   the layer below it — only its own, never the ones the lower layers added — as
+   `A  c` (added), `M  …` (modified), `D  …` (deleted), and `R  b2` with `b → b2` beside it
+   for a rename (the fixture's top layer moves `b` so there is one to see; it also adds a
+   small binary `logo.png`, which looks like any other row for now — milestone 3 treats
+   it differently). The icon is VS Code's own for the file type; clicking a file does
+   nothing yet (milestone 3).
 5. Edit code → in the dev-host window run **Developer: Reload Window** to pick up the rebuild.
    The extension's own log is in that window's Output panel under "PR Cascade".
 

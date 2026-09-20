@@ -591,6 +591,15 @@ prints `git version 2.50.1 (Apple Git-155)`) or where a prefix is the whole poin
 message must *start* with the path). Everywhere else they compare whole strings with
 `toBe`, which fails with a clearer diff.
 
+A pattern is a value with methods of its own, and `src/` uses one — the only regular
+expression in `src/` so far: `LINE_COUNT.test(field)` in `core/changes.ts` (`isBinary`,
+PR 10) asks whether `field` matches `/^\d+$/` and answers with a plain boolean (§24). It
+is the same match `toMatch` makes in a test, called directly. `$` is `^`'s twin: it
+anchors the match to the *end* of the string, so `^\d+$` means "digits, and nothing but
+digits, from start to end" — `'12'` matches, `'12x'` and `''` do not. The pattern is a
+module-level `const` (§4) rather than written inline at the call, so it is built once
+and has a name that says what it recognises.
+
 ## 21. Set
 
 *First seen in `src/core/discovery.ts`.*
@@ -681,6 +690,16 @@ Strings carry their own methods, called with a dot like a method on any object:
   space, and `trim()` would eat that along with the newline. When exactly one known
   character has to go, `endsWith` plus `slice` say so precisely.
 
+- `padStart(width, fill)` — a copy padded on the left with `fill` until it is `width`
+  characters long: `String(7).padStart(4, '0')` is `'0007'`, `printf '%04d'`.
+  `test/git/changes.git.test.ts` (PR 10) numbers 1500 files that way so that git's
+  order — by path, byte by byte, the same `<` order as §26 — is the order they were
+  made in (`file-0002` before `file-0010`, where `file-2` would sort after `file-10`).
+  `String(7)` is §27's `Number` in reverse: number to text.
+- `repeat(n)` — the string `n` times over: `'0'.repeat(40)` is forty zeros, a
+  40-character SHA no object has (`printf '0%.0s' {1..40}`). `test/git/git.git.test.ts`
+  builds its 2 MB argument with it, and `test/git/changes.git.test.ts` (PR 10) its bad SHA.
+
 None of them change the string they are called on — a string, once made, never changes;
 each method returns a new one. That is why the code writes `printedRoot =
 printedRoot.slice(0, -1)` rather than expecting the variable to change in place.
@@ -761,10 +780,26 @@ codebase uses, all of them the same idea as a shell pipeline stage: a list goes 
   `options.scanIgnoredFolders.includes(entry.name)` in `core/discovery.ts` (PR 7) asks "is
   this name on the ignore list?" — `grep -qxF` over a list. For a large list a `Set` (§21)
   and `has` would be faster; for two or three names an array reads more plainly.
+- `text.split(separator)` again, with something other than a newline:
+  `output.split(FIELD_SEPARATOR)` — the constant is `'\0'` — in `core/changes.ts` (PR 9)
+  cuts `git diff -z` output at every NUL byte (§44). Any
+  string works as the separator — it is `cut -d`, not a fixed `IFS`. And as with the
+  newline, a separator that ends the text leaves an empty last piece, which is what the
+  next method is there for.
+- `list.pop()` — removes the last element and returns it: `push` in reverse.
+  `core/changes.ts` uses it to drop that empty last piece; the returned value is not
+  wanted, so the whole line is `fields.pop();`.
+- `columns.slice(2).join('\t')` — `slice` on an *array* (§23 said arrays have it too):
+  the elements from position 2 to the end, as a new array; `join` (§9) then glues them
+  back into one string with a tab between each. Together they are the shell's
+  `cut -f3-`: in `parseNumstat` (`core/changes.ts`, PR 10) a numstat entry is cut at
+  every tab, the first two pieces are the two counts, and everything after them — a
+  path, which may itself contain tabs — is put back together exactly as it was. `split`
+  alone would have been `cut -f3`, and would have lost the rest of such a path.
 
-Which of these change the array they are called on: `push`, `shift` (§38) and `sort` (§26)
-do; `filter`, `map`, `slice`, `join` and `includes` never do — they return something new and
-leave the original as it was, the same rule as for strings in §23.
+Which of these change the array they are called on: `push`, `pop`, `shift` (§38) and `sort`
+(§26) do; `filter`, `map`, `slice`, `join` and `includes` never do — they return something
+new and leave the original as it was, the same rule as for strings in §23.
 
 ## 26. sort and comparison functions
 
@@ -876,7 +911,13 @@ are set — `encoding` (text rather than raw bytes) and `stdio` (close stdin so 
 can wait for input) are the two that matter. A few more of the same kind appear in the
 fixture and its test: `fs.rmSync(dir, { recursive: true, force: true })` is `rm -rf`;
 `fs.statSync(p).isFile()` is `test -f`; `path.resolve(base, p)` makes a relative path
-absolute (`realpath -m`), and `path.dirname(p)` is `dirname`.
+absolute (`realpath -m`), `path.dirname(p)` is `dirname`, and `path.basename(p)` is
+`basename` — the last piece of a path, which `src/vscode/tree.ts` uses for a row's label
+(`RepoNode` since PR 6, `FileNode` since PR 11). Three more in
+`test/git/changes.git.test.ts` (PR 10): `fs.mkdirSync(p, { recursive: true })` is
+`mkdir -p` (the fixture builder uses it too), `fs.copyFileSync(a, b)` is `cp a b`, and
+`fs.symlinkSync(target, p)` is `ln -s target p` — the arguments in that order, target
+first, exactly as `ln` takes them.
 
 ## 29. Counted for loops
 
@@ -1052,6 +1093,12 @@ provider.refresh(); }` inside `activate` is the same thing with `provider`. A sh
 function that reads a variable set in the script around it is the closest analogy, except
 that here the variable survives the script's end.
 
+The provider's second loader (PR 11) is `(root: string, layer: StackLayer) =>
+Promise<ChangedFile[]>`, and `src/extension.ts` hands it `(root, layer) =>
+loadChangedFiles(output, root, layer)`: an arrow whose two parameters carry no types of
+their own, because the compiler takes them from the parameter the arrow is passed to
+(§3), and which closes over `output` exactly as the first loader does.
+
 ## 34. A union of classes, narrowed with instanceof
 
 *First seen in `src/vscode/tree.ts` (`StackNode`).*
@@ -1079,6 +1126,21 @@ Many TypeScript codebases give each class a `kind: 'repo' | 'layer'` field and n
 that instead. `instanceof` was chosen here because it is already known from §18 and needs
 no extra field.
 
+The union has since grown a member — `FileNode`, in PR 11: `RepoNode | LayerNode |
+FileNode | MessageNode`. Adding it was one line here; what happened elsewhere is the
+lesson. `getTreeItem` needed nothing, because the new class has a `toTreeItem` like the
+others. `getChildren` needed a new `instanceof LayerNode` branch to list a layer's files —
+and had that branch been forgotten, the compiler would *not* have said so, because the
+chain of `if`s ends in a `return []` that answers for every kind not named above it, the
+new one included. A fall-through like that is convenient and quiet, which is why the
+comment on it names the kinds it is meant to cover ("a file or a message"). The compiler
+cannot check an `instanceof` chain for completeness: dropping the `return []` only makes
+it refuse the function outright (TS2366, "Function lacks ending return statement…"),
+whether or not every kind is handled, because it never treats such a chain as having
+covered the whole union. A completeness check is what the other pattern above — a `kind`
+field and a `switch` over it — would buy; that construct belongs to the PR that first
+needs it. With `instanceof`, the comment on the fall-through is the check.
+
 ## 35. Enum values from the VS Code API
 
 *First seen in `src/vscode/tree.ts` (`vscode.TreeItemCollapsibleState.None`).*
@@ -1095,7 +1157,9 @@ shown open) — and a value of that type must be one of them, written
 number that is not one of the members' values — though a bare `1` slips through, which is
 one reason to always write the name. It is the same job the exact-string unions of §10 do
 (`FileStatus`, `StartFailure`), which is why this codebase uses the API's enums where the
-API demands them and defines none of its own (plan §11.1).
+API demands them and defines none of its own (plan §11.1). All three members are in use
+since PR 11: a `LayerNode` is `Collapsed` — it has children, its files, and starts
+folded — a `FileNode` and a `MessageNode` are `None`, a `RepoNode` is `Expanded`.
 
 ## 36. export const: a shared constant object
 
@@ -1207,6 +1271,15 @@ stale.
 
 `depth: current.depth + 1` builds each child's entry (an object literal, §16) one level
 deeper than its parent's.
+
+A second shape of `while`, in `core/changes.ts` (`parseNameStatus`, PR 9): the list exists
+up front, but its entries are two fields long or three (a rename carries two paths), so
+`for ... of` cannot walk it one *entry* at a time. An index starts at 0; the body reads the
+fields at `index` and `index + 1` (and `index + 2`), then moves the index past them by hand
+— `index = index + 2`, or `+ 3` — and the loop runs while `index < fields.length`. It is
+§29's counted loop with a step decided inside the body, which the `for (...; ...; index++)`
+header cannot express. JavaScript also has the shorthand `index += 2`; it is not used here,
+so the step reads as the arithmetic it is.
 
 ## 39. Node's Promise-returning file-system calls: readdir and Dirent
 
@@ -1385,6 +1458,12 @@ function nextWorkspaceFoldersChange(): Promise<void> {
   folder is `file:///private/tmp/...`, and later the two sides of a diff will be
   `stackdiff:` URIs (plan §7.4). `Uri.file` builds the URI for a local path; `.fsPath`,
   which `src/extension.ts` already reads off each workspace folder, goes the other way.
+  Its first use in shipped code is PR 11's `FileNode.toTreeItem` (`src/vscode/tree.ts`):
+  `item.resourceUri = vscode.Uri.file(path.join(root, file.path))`. `resourceUri` is the
+  `TreeItem` field that says "this row *is* that file" — VS Code then draws the icon the
+  user's icon theme has for the file type and applies its file decorations, and the code
+  needs to know nothing about either. `test/ext/tree.test.ts` reads the `.fsPath` back
+  off the drawn row and compares it with the path it expects.
 - **`updateWorkspaceFolders(start, deleteCount, ...toAdd)`** — one call that removes
   `deleteCount` folders at position `start` and inserts the ones given, so it adds
   (`(folders.length, 0, { uri })`), removes (`(index, 1)`) or replaces. It returns `true`
@@ -1449,3 +1528,140 @@ const declared: Record<keyof DiscoveryOptions, unknown> = {
   'x' is missing in type ...`) and a misspelled one (`... does not exist in type ... Did
   you mean ...?`). It is the same idea as `implements` in §13: a link the compiler checks,
   instead of a copy kept up by hand.
+
+## 44. Escape sequences in string literals: `\0`
+
+*First seen in `src/core/changes.ts` (`FIELD_SEPARATOR`); throughout
+`test/unit/changes.test.ts`.*
+
+```ts
+const FIELD_SEPARATOR = '\0';
+const fields = output.split(FIELD_SEPARATOR);
+
+const output = 'R100\0src/old.ts\0src/new.ts\0';   // in the tests
+```
+
+Inside quotes a backslash starts an **escape**: a way to write a character that cannot be
+typed as itself. §23 met `'\n'`, one newline. The others this codebase uses: `'\t'`, a
+tab; `'\''`, a quote inside single quotes; and `'\0'`, the **NUL byte** — character code
+zero, the byte C uses to end a string, and so the one byte a file name can never contain.
+That last fact is why `git diff -z` (plan §5) separates its fields with it, and why
+`parseNameStatus` can cut on it and trust every piece to be a whole path. (A backslash
+meant as itself is doubled, `'\\'`; no string in this codebase needs one yet.)
+The spellings are bash's `$'\n'`, `$'\t'`, `$'\0'` — with one difference: bash cannot
+*hold* a NUL in a variable (which is why shell scripts reach for `xargs -0` and
+`tr '\0' '\n'`), while a JavaScript string holds it like any other character:
+`'a\0b'.length` is 3.
+
+Two things to know. The tests write git's output as literals, so `'A\0added.txt\0'` in the
+source *is* the twelve bytes git printed — `A`, a NUL, the nine of `added.txt`, a NUL —
+the format is specified by example. And a `\0` directly followed by a digit, `'\01'`, is
+read as an old octal escape,
+which strict mode forbids and the compiler rejects; none of the paths in the tests start
+with a digit, and if one must, `'\u0000'` (the same byte by its Unicode number, always
+unambiguous) or a `+` between two strings avoids it. Last, the same `\0` inside a *regular
+expression* (§20) is a lint error (`no-control-regex`, recorded in plan §13.4); the
+codebase splits on the byte and never matches it.
+
+The same escape works the other way round, too: `test/git/changes.git.test.ts` (PR 10)
+writes `'PNG\0not a real picture\0'` *to a file*, and the `\0`s land on disk as real NUL
+bytes — which is exactly what makes git call that file binary (E10).
+
+## 45. Narrowing a `string` to an exact-string union with `===`
+
+*First seen in `src/core/changes.ts` (`toFileStatus`).*
+
+```ts
+function toFileStatus(statusField: string): FileStatus {
+  const letter = statusField.charAt(0);
+  if (letter === 'A' || letter === 'M' || letter === 'D' || letter === 'T' || letter === 'R' || letter === 'C') {
+    return letter;
+  }
+  throw new Error(`git diff --name-status printed an entry with the unknown status "${letter}" ...`);
+}
+```
+
+§10 defined `FileStatus` as six exact strings, and every earlier narrowing — §8 against
+`undefined`, §17 with `typeof`, §18 with `instanceof` — proved which *kind* of value
+something was. A comparison with `===` against a literal narrows too, to that one *value*:
+inside `if (letter === 'A')` the compiler knows `letter` is exactly `'A'`, and with the six
+comparisons joined by `||` it knows, inside the block, that `letter` is one of the six —
+which is what `FileStatus` is. So `return letter` compiles there, where
+`return statusField.charAt(0)` at the top of the function would not: `charAt` gives a
+`string`, a `string` might be `'X'`, and the compiler refuses to call it a `FileStatus`
+until the code has checked.
+
+This is the boundary between the outside world and the typed inside. Text from git crosses
+it exactly once, checked, and from then on every `status === 'R'` in the codebase is a
+comparison against a closed list the compiler knows: misspell it as `'r'` and the compiler
+reports it (`This comparison appears to be unintentional because the types ... have no
+overlap`), because `'r'` is not in the union. `if (status === 'R' || status === 'C')` in
+`parseNameStatus` is the same narrowing again, on a value that is already a union, down to
+the two members that carry an `oldPath`.
+
+The `throw` after the `if` is not decoration. Without it the function could reach its end
+without returning, and the compiler says so (`Function lacks ending return statement`).
+`throw new Error(message)` builds an error carrying a message and throws it — §18 re-threw
+one it had caught; the fake runner (§19) builds its own the same way — and whoever called,
+up the chain, gets it: `parseNameStatus`, then `changedFiles`, then the tree (PR 11), which
+shows the message under the layer. Because a `throw` is how an `async` function's Promise
+rejects (§7), the test for it is a plain `expect(() => parseNameStatus(output)).toThrow(...)`
+on the synchronous function and `rejects` on the asynchronous one.
+
+## 46. A cache: a Map keyed by two values joined into one string, and `clear`
+
+*First seen in `src/vscode/tree.ts` (`StackTreeProvider.filesByCommitPair`, `filesForLayer`,
+`refresh`).*
+
+```ts
+private readonly filesByCommitPair = new Map<string, ChangedFile[]>();
+
+const key = `${node.layer.parentSha}:${node.layer.sha}`;
+let files = this.filesByCommitPair.get(key);
+if (files === undefined) {
+  try {
+    files = await this.loadFiles(node.root, node.layer);
+  } catch (error) {
+    ...
+    return [new MessageNode(message, 'error')];
+  }
+  this.filesByCommitPair.set(key, files);
+}
+return files.map((file) => new FileNode(node.root, file));
+
+refresh(): void {
+  this.filesByCommitPair.clear();
+  this.changeEmitter.fire(undefined);
+}
+```
+
+No new syntax — §19's `Map`, §12's template string, §8's narrowing — but a pattern worth
+naming: a **cache**, "ask once, remember the answer". Four things in it.
+
+- **The key.** A `Map` has one key per entry, and the answer here depends on two things,
+  the parent's SHA and the layer's. The plain way to make one key from two values is to
+  join them into one string with a separator between: `${parentSha}:${sha}`. Without a
+  separator `ab` + `c` and `a` + `bc` would both become `abc`; with one, the same collision
+  needs the separator inside a value — `a:b` + `c` and `a` + `b:c` both become `a:b:c` — so
+  it must be a character the values cannot contain. A SHA is hexadecimal digits only (forty
+  of them; sixty-four in a SHA-256 repository) and never a colon, so here it is safe; with
+  paths or free text it would not be, and the comment on the field should always say why
+  the separator is fine.
+- **The lookup and the fill.** `get` answers `undefined` for a key it has not seen (§19);
+  the `if` computes the answer and `set`s it for next time. Note the `let files` (§4): its
+  type is `ChangedFile[] | undefined`, from `get`, and after the `if` the compiler treats
+  it as a `ChangedFile[]` — on the path through the `if` it was assigned one (or the
+  function returned), on the path around it it was never `undefined`. §8's narrowing,
+  applied by an assignment rather than a check; nothing has to be written for it.
+- **What is not cached.** The `set` comes after the `try` / `catch` (§18), so a failure
+  leaves the map untouched and the next open of the layer asks git again. A cached error
+  would be an error the user could never get rid of.
+- **`clear()`** empties the map. §19's list of `Map` methods did not need it; a cache does.
+  Why it is called at all is the interesting part, and the comment on the field says it:
+  the key names two exact commits, and the same two commits always have the same diff, so
+  an entry can never be *wrong* — a branch that moved has a new SHA, hence a new key. The
+  map is emptied on refresh for the other reason a cache is emptied: memory. Without it a
+  window kept open for a week would hold every list it ever showed. A cache whose keys
+  name the content they were computed from ("content-addressed", as git's own object
+  store is) is the easy kind to get right; the hard kind is one keyed by a *name* whose
+  meaning changes, and that kind this codebase avoids.
