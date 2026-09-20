@@ -1878,3 +1878,4 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
   with a 5 s timeout when the machine is under load (a single git spawn stalling 45–90 s, a different test each
   time; reruns pass; CI has never hit it). Consider a longer `testTimeout` for the `git` project, or find the stall,
   before M4 adds more real-git suites.
+- **M3 started 2026-09-20** as branches `m3/01-core-uri`, `m3/02-vscode-diff` (plan §10.1 items 10–11); #16 (idiomatic cleanup) merged the same day. (M2's GitHub numbers, promised above: PRs #11–#13, merged 2026-09-20; the §11.1 rule change was #15.)

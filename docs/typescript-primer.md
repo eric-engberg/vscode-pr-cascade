@@ -229,6 +229,18 @@ An interface can describe data fields as well as methods (`GitFailure` in `core/
 all fields: `exitCode: number | null;`), and a plain object literal with those fields
 satisfies it — no `new`, no class needed: `new GitError({ gitPath: 'git', args: [...], ... })`.
 
+TypeScript compares *shapes*, not names — **structural typing**. A value fits an interface
+when it has the listed fields with the right types; fields it has *beyond* those are simply
+not looked at. So `decodeStackDiff(components: UriComponents)` in `src/core/uri.ts` (three
+fields: `scheme`, `path`, `query`) accepts a real `vscode.Uri`, which has those three and
+`authority`, `fragment` and `fsPath` besides — nothing anywhere declares that a `Uri` *is* a
+`UriComponents`; it has the fields, and that is the whole test. The one exception is an
+object literal written *inline* at the call, `decodeStackDiff({ scheme: …, authority: …, … })`:
+there the compiler treats an extra field as a probable typo and refuses it ("Object literal
+may only specify known properties" — the **excess-property check**). Put the same literal in a
+`const` first and pass the variable, and it is accepted; that is why `test/unit/uri.test.ts`
+builds its `uriShaped` value that way before handing it over.
+
 Two small things that appear alongside it:
 
 - `string[]` — "an array of strings". Any type followed by `[]` is an array of that type.
@@ -751,8 +763,9 @@ codebase writes the comparison out whenever the value is not already a boolean.
 
 For "not", `trunk.ts` writes `if (targetExists === false)`, matching its `=== null`
 checks. JavaScript's shorthand is a prefix `!` (`!targetExists`, read "not
-targetExists"); it means the same and appears in later PRs where a spelled-out comparison
-would only add noise.
+targetExists"); it means the same and is used where a spelled-out comparison would only
+add noise — first in `core/uri.ts` (PR 14): `!components.path.startsWith('/')`, "the
+path does not start with a slash", and `!('root' in parsed)` (§51).
 
 ## 25. Arrays: split, filter, map, push, length, and a typed empty array
 
@@ -1232,6 +1245,11 @@ loaded, and visible to other files by name. `MAX_OUTPUT_BYTES` in `core/git.ts` 
 Why export it at all: PR 8's `src/vscode/config.ts` uses the same values as the
 fallbacks when it reads the settings, so the defaults live in one file and the Settings
 UI, the code and the tests cannot disagree.
+
+`export const STACK_DIFF_SCHEME = 'stackdiff'` in `core/uri.ts` (PR 14) is the same shape
+with a string: one name, shared, so the code that builds a URI and the code that registers
+the content provider for it cannot spell the scheme differently. A string has nothing to
+mutate, so only the first paragraph above applies to it.
 
 ## 37. Promise.all
 
@@ -1822,3 +1840,142 @@ everyone else the **ternary** (the language's only three-part operator); "condit
 expression" here means the whole `condition ? a : b`. It is unrelated to *conditional types*
 (`T extends U ? X : Y`), a type-level construct the style rules (plan §11.1) keep out of this
 codebase.
+
+## 49. `Pick<T, K>`: some of another type's fields
+
+*First seen in `src/core/uri.ts` (`StackDiffQuery`).*
+
+```ts
+export interface StackDiffLocation {
+  root: string;
+  ref: string;
+  relPath: string;
+}
+
+type StackDiffQuery = Pick<StackDiffLocation, 'root' | 'ref'>;
+```
+
+`Pick<T, K>` is a built-in generic type (§31), like `Record<K, V>` (§43): "the object type
+with only the fields of `T` that `K` names" — here `{ root: string; ref: string }`. `K` is a
+union of field names (§10), and the compiler checks each one really is a field of `T`:
+`Pick<StackDiffLocation, 'rot'>` is an error pointing at the typo. Like every type, it
+produces nothing at run time.
+
+Why not write the two-field interface out by hand: the query *is part of* the location —
+the two fields the path cannot carry — and `Pick` says exactly that. Rename `root` in
+`StackDiffLocation` and the compiler points at the `'root'` here; change its type and the
+query's type changes with it. §43's `Record<keyof DiscoveryOptions, unknown>` was the same
+instinct ("that type's fields, not a copy of the list"); `Pick` keeps the fields' own
+types as well as their names. It is the first of TypeScript's **utility types** in `src/`.
+The others most often met are `Partial<T>` (every field optional), `Omit<T, K>` (all but
+the named fields) and `ReturnType<F>` (what a function returns), and the rule for all of
+them (plan §11.1) is: use one where it states a relationship between two types, as here;
+write the interface out where it would only save typing.
+
+It is declared with `type`, not `interface`: §10 said `type` can name *any* type, and
+`Pick<…>` is an expression that produces a type, not a list of fields written out.
+
+## 50. `JSON.stringify` and `JSON.parse`
+
+*First seen in `src/core/uri.ts` (`encodeStackDiff`, `parseJsonQuery`).*
+
+```ts
+const queryFields: StackDiffQuery = { root: location.root, ref: location.ref };
+return {
+  scheme: STACK_DIFF_SCHEME,
+  path: '/' + location.relPath,
+  query: JSON.stringify(queryFields),
+};
+```
+
+```ts
+function parseJsonQuery(query: string): unknown {
+  try {
+    return JSON.parse(query);
+  } catch {
+    throw new Error(`a ${STACK_DIFF_SCHEME} URI's query must be JSON, got "${query}"`);
+  }
+}
+```
+
+JSON is the text format `package.json`, `settings.json` and every `--json` flag use:
+`{"root":"/work/app","ref":"bbbb…"}`. `JSON.stringify(value)` turns a value into that
+text; `JSON.parse(text)` turns the text back into a value. Both live on the global `JSON`
+object in every JavaScript runtime — nothing to import, like `Number` (§27) and
+`Array.from` (§19). Two things make it the right encoding for a URI's query: a JSON string
+can hold *any* text — `"`, `\` and a newline are written as an escape (`\"`, `\\`, `\n`),
+everything else (spaces, `&`, `%`, `#`, unicode) as itself — and the rule is the same on
+both sides, so `parse(stringify(x))` gives `x` back for any string, number, boolean,
+`null`, array, or plain object of those. (Not for everything: a `Map`, a class instance or
+an `undefined` field does not survive the trip. This codebase only ever sends plain
+objects of strings through it.)
+
+`JSON.stringify` never throws on what this codebase gives it — plain objects of strings (it
+does throw on an object that refers to itself, or on a `BigInt`). `JSON.parse` is unsafe in
+two ways, and both show in `parseJsonQuery`:
+
+- **It throws.** Text that is not JSON — `root=/r&ref=abc` — is a `SyntaxError`, thrown, so
+  the call sits in a `try` (§18) whose `catch` throws a message naming the text instead.
+  The original message says where in the text it stopped reading, not what the text was
+  for.
+- **It returns `any`.** The standard library declares `JSON.parse(text): any`, because it
+  cannot know what the text holds — the fourth `any` this codebase meets on the library's
+  side (§31, §41, §42), and the most dangerous: `JSON.parse(query).root` compiles whatever
+  the text was, and at run time is `undefined` for `42` and a crash for `null`. The repair
+  is §41's, applied at a function's boundary instead of a variable's: `parseJsonQuery`
+  declares its return type `unknown` (§18), so the `any` is thrown away as it leaves the
+  function — an `any` may be *returned* where `unknown` is promised, and whoever calls
+  `parseJsonQuery` then holds a value the compiler refuses to read a field off until the
+  code has shown there is one, which is §51. (`const parsed: unknown = JSON.parse(query)`
+  is the same repair for a value that stays inside the function.)
+
+`JSON.stringify(relPath)` also appears in `test/unit/uri.test.ts`, inside a test's *name*:
+it is the shortest way to print a string with its newline visible as `\n`, so the test
+list shows `"new\nline.txt"` on one line.
+
+## 51. Checking the shape of a parsed value: `typeof x === 'object'`, `null`, and `in`
+
+*First seen in `src/core/uri.ts` (`decodeStackDiff`).*
+
+```ts
+const parsed = parseJsonQuery(components.query);   // unknown
+if (typeof parsed !== 'object' || parsed === null) {
+  throw new Error(`… must be a JSON object, got ${components.query}`);
+}
+if (!('root' in parsed) || typeof parsed.root !== 'string') {
+  throw new Error(`… must carry a string "root", got ${components.query}`);
+}
+if (!('ref' in parsed) || typeof parsed.ref !== 'string') {
+  throw new Error(`… must carry a string "ref", got ${components.query}`);
+}
+return { root: parsed.root, ref: parsed.ref, relPath };
+```
+
+Three narrowings (§8) in a row, each throwing on the way it can fail, and after all three
+the last line compiles: `parsed.root` and `parsed.ref` are strings. The ladder:
+
+- **`typeof parsed !== 'object' || parsed === null`.** §17's `typeof` again — but
+  `typeof null` is `'object'` too, a mistake in the first JavaScript that can never be
+  fixed without breaking the web, so `null` needs a check of its own. After this `if` the
+  compiler's type for `parsed` is `object`: "some object; which fields, unknown". (Not
+  `Object`, a different and older thing, and not `{}`, which means any non-null value;
+  `object` is the one to write.)
+- **`'root' in parsed`.** The `in` operator (§22 met it in `for … in`) asks at run time
+  whether an object has a field of that name. Since TypeScript 4.9 it also narrows:
+  once it has held — here, once `!(…)` has not thrown — the compiler adds the field to
+  `parsed`'s type as `unknown`, so `parsed.root` may now be *read*, though not yet used
+  as a string.
+- **`typeof parsed.root !== 'string'`.** §17 on the field. The compiler narrows a
+  *field* the way it narrows a variable, as long as nothing assigns to `parsed` between
+  the check and the use — a `let` would narrow just the same; an assignment is what
+  resets it. `parseJsonQuery` is a separate function for other reasons: the not-JSON case
+  gets its own message naming the text, and the `try` stays one line.
+
+`||` stops at the first side that is true (§18), so `typeof parsed.root` is only evaluated
+once `'root' in parsed` has held. `!('root' in parsed)` is the `!` §24 promised for later
+PRs: "not (root in parsed)", where `('root' in parsed) === false` would only add noise.
+
+This is the same boundary §41 drew for a setting and §45 for a status letter: text from
+outside becomes a typed value in one place, checked, and every later line trusts the
+type. It is also what a schema library (`zod`, plan §11.3) automates once a shape is bigger
+than a couple of fields; for two, the ladder is shorter than the schema.
