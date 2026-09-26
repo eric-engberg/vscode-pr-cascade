@@ -99,7 +99,7 @@ backend, both native views. Verified facts about git-spice that drove it:
 | GitHub | `git`, `gs`, `gh` ≥ 2.90 + `gh extension install github/gh-stack` | `gs` for stacking; `gh` for the native stack link, the `gh`-token auth method, and status extras (draft/checks) |
 | GitLab | `git`, `gs` | `gs` for stacking; GitLab draws the stack itself |
 
-**Discovery and rendering need no tool at all.** The tree's membership is git ancestry (§5), the same
+**Discovery and rendering need no tool at all** beyond git and VS Code's own Git extension (§7.14). The tree's membership is git ancestry (§5), the same
 on both forges and in a repo with no remote; M1–M4 have no backend. Tools only add enrichment (PR/MR
 numbers, "needs restack") and actions (create, restack, sync, merge).
 
@@ -121,9 +121,12 @@ Shelling out to `git`, `gs` and `gh` sidesteps auth entirely — that is the who
 - Shows the stack of local branches **containing HEAD**, ordered bottom (nearest trunk) → top.
 - Expanding a branch lists the files it changed **relative to its parent layer** (not to trunk).
 - Clicking a file opens VS Code's native diff editor: parent-layer version vs this-layer version.
-- Refresh button + automatic refresh on window focus.
+- Refresh button + automatic refresh whenever the built-in Git extension notices a change — for git run
+  outside VS Code that is when the window regains focus (§7.14).
 - Works when the repo is a nested subfolder of a workspace folder.
-- Works regardless of whether the built-in git extension is enabled.
+- Builds on the built-in Git extension (`vscode.git`, part of VS Code and on by default) for the list of
+  repositories and the change signal; with it disabled the view says so and does nothing else (decided
+  2026-09-20, recorded 2026-09-26, §7.14). Until M3 the extension worked without it; that promise is dropped.
 
 ### v0.2+ (milestones 5–9)
 - "Push stack" (`gs stack submit --no-publish`: every layer, force-with-lease semantics).
@@ -147,7 +150,8 @@ Shelling out to `git`, `gs` and `gh` sidesteps auth entirely — that is the who
 - Creating branches or commits (VS Code and git already do this).
 - Conflict resolution UI.
 - Any direct forge API calls. **Never** store or request a token. Everything goes through `gs`, plus `gh` for the GitHub stack link and status extras.
-- Replacing the built-in git extension. This is a *supplementary* view.
+- Replacing the built-in Git extension. This is a *supplementary* view, and from M4 it takes its
+  repositories and its change signal from that extension (§7.14).
 
 ---
 
@@ -157,16 +161,17 @@ Shelling out to `git`, `gs` and `gh` sidesteps auth entirely — that is the who
 |---|---|---|
 | Language | **TypeScript**, strict mode | An earlier draft said plain JS "no build step" for a throwaway. This is now a proper project with tests; type checking is the cheapest bug-catcher for AI-written code. |
 | Bundler | **esbuild** → `dist/extension.js` | Fast, standard for extensions, one config line. `tsc --noEmit` for typecheck. |
-| Git access | `child_process.execFile('git', [args])` — **array args, never a shell string** | Branch names contain `/` and could contain anything; no quoting bugs. |
+| Git access | `child_process.execFile(gitPath, [args])` — **array args, never a shell string**. From M4 `gitPath` is the executable the built-in Git extension found (`api.git.path`, which honours the user's `git.path`) unless `prCascade.gitPath` is set (§7.14) | Branch names contain `/` and could contain anything; no quoting bugs. One binary for both extensions, so they agree on what a repository is. |
 | Forge access | **git-spice (`gs`) via `execFile` with `--no-prompt`**; a **terminal only for `gs auth login`** and for operations that can stop on conflicts (restack, sync, onto, merge). `gh` is used for `gh stack link` and for GitHub-only status extras (draft/checks) when present. | One stacking tool for both forges, offline-capable locally, documented JSON read model. |
-| Diff rendering | Own `TextDocumentContentProvider` on scheme `stackdiff:` backed by `git show <ref>:<path>` | No dependency on the built-in git extension's API, so it works with `git.enabled: false`. |
+| Diff rendering | Own `TextDocumentContentProvider` on scheme `stackdiff:` backed by `git show <ref>:<path>` | Chosen when the extension was to work without the built-in Git extension. That promise was dropped 2026-09-26 (§7.14), but `stackdiff:` stays: M3 shipped it, and the Git extension's `api.toGitUri` would only replace working code. |
 | View location | **v0.1:** the native tree in `contributes.views.scm`. **From M6:** two webview views — `prCascade.smartlog` (`type: "webview"`, contributed to `explorer`) and `prCascade.graph` (`type: "webview"`, in the extension's own `prCascade` activity-bar container) — §7.1 | Ric's daily view is the Explorer; the compact rail condenses to a narrow pane, the graph needs room of its own. Users can drag any view into any container and VS Code remembers it, so the defaults only decide first impressions. Decided 2026-09-20 from the view-lab mockups (`docs/view-lab.html`). |
 | View technology | **Webview views** (`WebviewViewProvider`) rendering a **pure view model** (`core/viewmodel.ts`); native `webview/context` menus; no UI toolkit | A lane graph with curves, a fixed glyph tail and an in-view file panel cannot be drawn with `TreeItem`. The costs are listed in §7.1.3 and accepted. §7.9's "no webview" principle is about *text editing* and still stands. |
-| Repo discovery | `git rev-parse --show-toplevel` **from each workspace folder**, deduped | Walks *up*, so nested repos and ancestor folders both resolve correctly. |
+| Repo discovery | **The built-in Git extension's repositories** — `getAPI(1).repositories` plus `onDidOpenRepository` / `onDidCloseRepository`, sorted by workspace-folder order then path (§6, §7.14). No scan of our own from M4. | Whatever the user's `git.*` settings open is what the Source Control view shows, and the stack view should show the same repositories. M1–M3's own scan (D26, up and down) is deleted in M4 item 12a. |
 | Forge and host | **Derived per repo from the remote URL** (`git remote get-url <remote>`, `core/forge.ts`); host passed to `gh` as `GH_HOST`; forge kind gates GitHub-only steps | Same code path for github.com and GitHub Enterprise hosts. Never hardcode a host, never assume github.com. |
 | Auth | **None in the extension.** `gs auth login` (interactive, per forge) is the only mechanism; the extension detects state with `gs auth status` and opens the login terminal on demand. On GitHub hosts it recommends the **GitHub CLI** method (reuses `gh`'s OAuth token — no PAT) or OAuth device flow. | Tokens are stored by git-spice in the OS keychain; the extension never sees one. |
 | Stack membership | Branches that are ancestors of HEAD and not merged into trunk | Linear by construction; matches the user's workflow. Multi-stack is v0.2. |
-| Refresh | Focus + editor-change events, debounced; manual button; refresh after own commands | `.git` is in `files.watcherExclude` by default so `FileSystemWatcher` is unreliable. |
+| Refresh | Each repository's `state.onDidChange` from the built-in Git extension, debounced by us; manual button; an explicit refresh after every command of our own (§7.14.2) | The Git extension already watches the working tree, the first level of `.git` and HEAD's upstream ref, runs `git status` once the window is focused (1 s debounce, 5 s cool-down) and fires the event after every run. Its watcher does not see a ref moving on its own (`refs/heads/*`, `refs/spice/*` — `gs branch track`, `git branch -f`), which is why our own commands refresh explicitly (E83). Replaces the focus/editor listeners and the `.git/HEAD` watcher idea (§13.4, 2026-09-26). |
+| Built-in Git extension | **Required, acquired at runtime** — `extensions.getExtension('vscode.git')` → `activate()` → `getAPI(1)`; no `extensionDependencies` entry — for three things: the repository list, the change signal, the git executable. **Kept as our own git spawns:** stack membership and order, layer diffs, file content, trunk, the current branch and detached HEAD, rebase-in-progress (§5, §7.14) | Ric's rule: prefer VS Code's own APIs over re-implementing them. Verified 2026-09-26 against VS Code 1.85 (our `engines` floor) and 1.138 (§13.4): the API has no usable branch list (`state.refs` is deprecated and empty), `state.rebaseCommit` spells out `<root>/.git/` and is undefined in a linked worktree, `state.HEAD.name` becomes a *tag's* name when a tag points at a detached HEAD, and `onDidCommit` / `onDidCheckout` do not exist at 1.85. A dependency declared in package.json (`extensionDependencies`) would make PR Cascade vanish entirely when a user disables Git, while the message row for `git.enabled: false` is needed anyway (E82). |
 | Stack-operation backend | **`StackBackend` interface; one implementation: `git-spice`** (§4.4, §7.13) | Multi-forge, offline-capable, documented JSON, `--title/--body` submit, built-in nav comments, squash-safe sync, non-interactive surgery. The interface stays so a second backend is additive if ever needed. |
 | Read model | **`gs log short --json` (fast, local) and `gs log short --json --cr-status` (network, per refresh)** — never read `refs/spice/data` | Documented schema; the ref is declared internal and unstable. Tree membership still comes from git ancestry (§5) so untracked branches render too. |
 | `gh stack` | **Not a backend; a required post-submit step on GitHub.** `gh stack link <bottom>…<top>` creates/updates GitHub's Stack object for PRs git-spice created (§7.13.4). Nothing else from it is invoked. | Native stack view without a second backend implementation; the command is documented for exactly this use. |
@@ -196,7 +201,7 @@ from `src/core` (the view model) — types only, so the browser bundle carries n
 
 ```
 src/core/git.ts          GitRunner interface + RealGitRunner (execFile). Env: LC_ALL=C, GIT_OPTIONAL_LOCKS=0.
-src/core/discovery.ts    workspace folders → unique repo roots.
+src/core/discovery.ts    M1–M3 only: workspace folders → repo roots. Deleted in M4 (item 12a); the roots come from vscode/gitApi.ts.
 src/core/trunk.ts        trunk detection (config → origin/HEAD → candidates).
 src/core/stack.ts        computeStack(): layers, order, parents, current branch, rebase-in-progress.
 src/core/changes.ts      changedFiles(parent, branch): name-status -z parsing, rename, binary detection.
@@ -224,6 +229,12 @@ src/webview/graph/       M6: the detailed graph renderer (§7.1.2).
 src/vscode/views/base.ts M6: WebviewViewProvider base — HTML shell + CSP nonce, posts the model, routes messages to commands.
 src/vscode/views/smartlog.ts, graph.ts   M6: the two providers (thin subclasses).
 src/vscode/tree.ts       StackTreeProvider (TreeDataProvider<Node>), node classes. v0.1 only; deleted in M6 (item 23j).
+src/vscode/gitApi.ts     M4: the built-in Git extension's API (§7.14) — takes what extension.ts got from getExtension('vscode.git'),
+                         activate()s it, getAPI(1), waits for 'initialized', repositories → sorted roots, state.onDidChange →
+                         refresh, gitExecutable(), the E82 rows. The one file in src/ that imports git.d.ts (test/ext/helpers/gitApi.ts
+                         is the other).
+src/vscode/git.d.ts      the Git extension's public API types, copied verbatim from VS Code `release/1.85`
+                         `extensions/git/src/api/git.d.ts` (MIT, Microsoft header kept). The floor's file on purpose (§7.14.1).
 src/vscode/content.ts    StackDiffContentProvider.
 src/vscode/commands.ts   refresh / openDiff / createPR / pushStack / checkout.
 src/vscode/terminal.ts   run a command in a named terminal, reuse if exists.
@@ -305,7 +316,7 @@ else via `execFile` with `--no-prompt`. The contract scenarios (§9.6) are writt
 
 | Purpose | Command | Notes |
 |---|---|---|
-| Repo root from any folder | `git rev-parse --show-toplevel` | Walks up. Fails (non-zero) outside a repo. |
+| Repo root from any folder | `git rev-parse --show-toplevel` | Walks up. Fails (non-zero) outside a repo. **M1–M3 only** — from M4 the built-in Git extension supplies the roots (§7.14). |
 | Trunk auto-detect | `git symbolic-ref --quiet --short refs/remotes/origin/HEAD` → else first that verifies of `origin/main`, `origin/master`, `main`, `master` | `git rev-parse --verify --quiet <ref>` is the existence check. |
 | Current branch | `git symbolic-ref --quiet --short HEAD` | Non-zero when detached → `head = null`. |
 | Stack members | `git for-each-ref --format=%(refname:short) refs/heads --merged HEAD --no-merged <trunk>` | Ancestors of HEAD not in trunk. Includes the current branch. |
@@ -314,7 +325,7 @@ else via `execFile` with `--no-prompt`. The contract scenarios (§9.6) are writt
 | Files in a layer | `git diff --name-status -M -z <parent> <branch>` | **Use `-z`.** Entries are `STATUS\0path\0` or `R<n>\0old\0new\0`. Tree diff, not two-dot. |
 | Binary detection | `git diff --numstat -z <parent> <branch>` | Lines with `-\t-\t` are binary. |
 | File content at ref | `git show <ref>:<path>` | Non-zero when file absent at that ref (adds/deletes) → treat as empty string. |
-| Rebase in progress | `git rev-parse --git-path rebase-merge` and `--git-path rebase-apply`, check dir exists | `--git-path` is worktree-correct; don't hardcode `.git/`. |
+| Rebase in progress | `git rev-parse --git-path rebase-merge` and `--git-path rebase-apply`, check dir exists | `--git-path` is worktree-correct; don't hardcode `.git/`. Stays ours in M4: the built-in Git extension's `state.rebaseCommit` does hardcode `<root>/.git/` and is undefined in a linked worktree (§7.14, E19). |
 | Push stack | `git push --force-with-lease origin <layer1> <layer2> ...` | Never `--force`. |
 | Restack after trunk moved | from top layer: `git rebase --update-refs <trunk>` | |
 | Restack after bottom squash-merged | from top layer: `git rebase --update-refs --onto <trunk> <merged-branch>` | `--onto` excludes the merged commits so squash produces no phantom conflicts. Needs the merged branch's local ref to still exist. |
@@ -326,21 +337,42 @@ extension itself runs only the read-only rows plus `git checkout`, `git status -
 rely on them.
 
 Environment for every git call: `LC_ALL=C` (stable parsing), `GIT_OPTIONAL_LOCKS=0` (don't fight the
-built-in git extension over the index lock), `maxBuffer` ≥ 32 MB.
+built-in git extension over the index lock), `maxBuffer` ≥ 32 MB. From M4 the executable is the built-in Git
+extension's `api.git.path` unless `prCascade.gitPath` is set (§7.14.1).
 
 ---
 
 ## 6. Repo discovery (§3 decision, spelled out)
 
+**From M4 (item 12a) the built-in Git extension does the discovering** — decided 2026-09-20, recorded
+2026-09-26; what was verified about its behaviour is in §7.14.2 and §13.4. M1–M3 ran a scan of their own
+(D26, walking up from each folder and down to `prCascade.repositoryScanMaxDepth`); that code and its two
+settings are deleted.
+
 ```
-for each vscode.workspace.workspaceFolders[i]:
-    root = tryRun(['rev-parse','--show-toplevel'], folder.fsPath)
-    if root: add to Set (normalize: realpath, trailing slash stripped)
+api   = the Git extension's API (§7.14.1), once api.state === 'initialized'
+roots = api.repositories.map(r => r.rootUri.fsPath)
+        sorted by key = lowest index in workspace.workspaceFolders of a folder equal to, under or above the root
+                  (none → after every keyed root), then by path in character-code order (as core/stack.ts sorts names)
 one root  → tree top level = layers
 many      → tree top level = RepoNode per root (label = basename(root)), children = layers
 zero      → single informational node "No git repository in this workspace"
+api.onDidOpenRepository / api.onDidCloseRepository / workspace.onDidChangeWorkspaceFolders → refresh
 ```
-Re-run discovery on `onDidChangeWorkspaceFolders` and on manual refresh.
+Which repositories exist is the user's `git.*` configuration, exactly as in the Source Control view:
+workspace folders always; repositories *below* them when `git.autoRepositoryDetection` is `true` (default)
+or `subFolders`, to `git.repositoryScanMaxDepth` (default 1 — the §1 parent-folder layout) and skipping
+`git.repositoryScanIgnoredFolders` (E1); a workspace folder *inside* a repository whose root is not itself a
+workspace folder is parked behind the Git extension's own Yes / Always / Never notification
+(`git.openRepositoryInParentFolders`, default `prompt`) and is not a repository for us until it is answered
+(E1b); a checked-out submodule is a repository of its own (`git.detectSubmodules`, default on) with its own row;
+a repository closed from Source Control stays closed across reloads. A root with no folder is possible — the Git
+extension keeps a removed folder's repository open while an editor in it is visible, and at 1.138 an empty window
+opens the repository of a visible editor — so the rule places it last rather than leaving the comparator to
+decide; and the folder listener stays because folder order is the sort key and a folder change need not open or
+close a repository (§7.14.2). Identity is `rootUri.fsPath` — the API hands out a new `Repository` wrapper on
+every access — and the array's order is not stable (the Git extension re-sorts it internally), hence the sort
+above. Manual refresh re-reads `api.repositories`; nothing is cached.
 
 ---
 
@@ -372,8 +404,9 @@ checked against; the page is what it should look like.
 - Layers rendered **top-first** (matches `git log` orientation); tooltip shows `base: <parent>`.
 - **Status bar item** (`prCascade.statusBar`, default on): `$(layers) <current branch> · 2 of 3`
   when HEAD is on a stack layer; `$(layers) not on a stack` otherwise; hidden when the repo is not
-  found. Click → reveals/focuses the Stack view. Updates on the same refresh cycle as the tree. This is
-  the "what branch am I on" answer independent of whether the built-in git extension is enabled.
+  found. Click → reveals/focuses the Stack view. Updates on the same refresh cycle as the tree. The branch
+  name is our own `symbolic-ref` answer (§5), not the Git extension's `state.HEAD` (§7.14: that field turns
+  into a tag's name when a tag points at a detached HEAD).
 - Current branch gets `$(target)` icon and "· current" in the description; others `$(git-branch)`.
 - File nodes: label = basename, description = dirname, `resourceUri` set (so file icons + decorations
   work), status letter as a prefix in the label or via `iconPath` — pick one, keep it consistent.
@@ -612,7 +645,7 @@ it is registered and does the obvious thing with a fake runner/env.
 | Setting | Type | Default | Meaning |
 |---|---|---|---|
 | `prCascade.trunk` | string | `""` | Trunk ref; empty = auto-detect (§5). |
-| `prCascade.gitPath` | string | `"git"` | Executable path override. |
+| `prCascade.gitPath` | string | `""` | Executable path override. Empty (the default from M4) = the executable the built-in Git extension found — `api.git.path`, which honours the user's `git.path` — so both extensions run the same git. A non-empty value wins. M1–M3 default was `"git"`. |
 | `prCascade.ghPath` | string | `"gh"` | Executable path override. |
 | `prCascade.remote` | string | `"origin"` | Remote passed to gs (`--remote`) and used for host/forge detection. |
 | `prCascade.prDescriptionMode` | `"edit"` \| `"auto"` | `"edit"` | §7.7: open the plan document, or create straight from generated drafts. |
@@ -626,8 +659,12 @@ it is registered and does the obvious thing with a fake runner/env.
 | `prCascade.navComment` | `"auto"` \| `"always"` \| `"never"` | `"auto"` | git-spice navigation comment on each CR. `auto` = off on GitHub and GitLab (both have native views), on elsewhere. Passed as `--nav-comment`. |
 | `prCascade.statusBar` | boolean | `true` | Show the `<branch> · n of N` status bar item. |
 | `prCascade.gitProtocol` | `"https"` \| `"ssh"` | `"https"` | Passed to `gh auth login --git-protocol` in the login flow. |
-| `prCascade.repositoryScanMaxDepth` | number | `1` | How many levels below each workspace folder to look for repositories: `0` only the folders themselves, `1` their immediate subfolders (the §1 parent-folder layout), `-1` no limit (bounded only by the OS process limit). Same meaning as `git.repositoryScanMaxDepth`. Added 2026-09-19 (M1 PR 8). |
-| `prCascade.repositoryScanIgnoredFolders` | string[] | `["node_modules"]` | Folder names skipped while scanning. Same meaning as `git.repositoryScanIgnoredFolders`; compared exactly (case-sensitive), unlike the built-in extension's `pathEquals`. Added 2026-09-19 (M1 PR 8). |
+
+Removed in M4 (item 12a; decided 2026-09-20, recorded 2026-09-26): `prCascade.repositoryScanMaxDepth`
+(number, default `1`) and `prCascade.repositoryScanIgnoredFolders` (string[], default `["node_modules"]`),
+both added by M1 PR 8 as mirrors of the built-in Git extension's settings. From M4 the Git extension's own
+`git.autoRepositoryDetection`, `git.repositoryScanMaxDepth` and `git.repositoryScanIgnoredFolders` decide
+which repositories exist (§6, §7.14.2), so there is nothing left for the mirrors to configure.
 
 ### 7.4 `stackdiff:` URIs
 
@@ -1034,13 +1071,182 @@ refuses to run without it on GitHub (native view is required, so a half-done sta
   },
   "configuration": { "title": "PR Cascade", "properties": { "...": "see §7.3" } }
 },
-"activationEvents": ["onStartupFinished"]
+"activationEvents": ["onStartupFinished"],
+"capabilities": { "untrustedWorkspaces": { "supported": false }, "virtualWorkspaces": false }
 ```
 The `scm` tree entry is v0.1 (M1–M4) and is removed in M6; the two webview entries and the container
 arrive with M6 (§7.1). A container icon must be an image file (VS Code's `viewsExtensionPoint.ts`, checked
 2026-09-20, accepts no `$(codicon)` there); view icons may use `$(codicon)`. `webview/context` menu
 entries mirror the `view/item/context` ones with `webviewId == 'prCascade.smartlog' || webviewId ==
 'prCascade.graph'` and `webviewSection == 'layer'` in their `when`, plus the row's own keys (§7.1.1).
+`capabilities` arrives with M4 item 14 (§13.4, "Activation and the empty window" — a rider, not part of §7.14). There is deliberately **no
+`extensionDependencies` entry** for the built-in Git extension: it is acquired at runtime (§7.14.1), so a
+user who disables it sees a message row instead of no PR Cascade at all.
+
+### 7.14 The built-in Git extension — what we take from it, what we keep spawning (M4 onwards)
+
+Decided 2026-09-20, recorded 2026-09-26; the verification is in §13.4. Ric's rule: **prefer VS Code's own
+APIs over re-implementing what they already do.** VS Code ships a Git extension (`vscode.git`) that already
+finds the repositories in a window, watches them and runs `git status`, and it exposes that through a small
+API (`extensions/git/src/api/git.d.ts` in the VS Code repository). We use it for three things and nothing else:
+
+| We take | From | Instead of |
+|---|---|---|
+| The repositories in the window, and when one opens or closes | `api.repositories`, `api.onDidOpenRepository`, `api.onDidCloseRepository` | our own scan (`core/discovery.ts`, deleted) and the two `prCascade.repositoryScan*` settings |
+| "A `git status` just ran in this repository" | `repository.state.onDidChange` | window-focus and active-editor listeners, and a `.git/HEAD` watcher, of our own |
+| Which `git` to run | `api.git.path` — the binary it found, honouring the user's `git.path` | the `"git"` default of `prCascade.gitPath` (now `""` = theirs; a non-empty value still overrides) |
+
+Everything else stays a git spawn of ours (§5), because the API cannot express it: which branches form the
+stack and in what order (`for-each-ref --merged / --no-merged`, `rev-list --count`), a layer's files and their
+content, the trunk, the current branch and whether HEAD is detached, and whether a rebase is in progress. The
+last two deserve a sentence each, because the API *looks* as if it had them. `state.HEAD` is not a safe
+"which branch, and is it detached?" answer: the Git extension puts a **tag's** name there (type `Tag`) when a
+tag points at a detached HEAD, gives an unborn branch (no commits yet, right after `git init`) a name with no
+commit, and mid-rebase has no name — or a tag's, if one points at the commit git stopped on — so
+`symbolic-ref --quiet HEAD` (D17) stays. `state.rebaseCommit` is built from `<root>/.git/REBASE_HEAD`
+with `.git` spelled out rather than from `rev-parse --git-dir`, so in a linked worktree (E19) it is always
+undefined (reproduced on git 2.50.1, both rebase backends); and even in the main worktree it is undefined at an
+interactive `break`, after a failed `exec` and during `git am`, because git writes no `REBASE_HEAD` there while
+the `rebase-merge` / `rebase-apply` directory exists — so our `--git-path rebase-merge` / `rebase-apply` check
+(§5) stays, everywhere, not only in worktrees. It was present at every pause point probed; `rebaseCommit`
+never gives a false positive, so a defined value may decorate the banner with the stuck commit's message, later.
+
+#### 7.14.1 Getting the API (`src/vscode/gitApi.ts`)
+
+```
+ext = vscode.extensions.getExtension<GitExtension>('vscode.git')     // extension.ts does this line; gitApi.ts the rest
+  undefined → the user disabled the Git extension → the §7.14.3 row 1; vscode.extensions.onDidChange → run this block again
+              (VS Code enables an extension in place, no reload; the event fires for any extension change, so still
+               undefined → keep the row)
+exports = await ext.activate()      // its activation event is '*' — VS Code starts it with every window — so this
+                                    // normally resolves at once
+  rejects → the §7.14.3 row 2 (the Git extension rethrows anything but "git not found"); nothing else runs
+  exports.enabled === false → one E82 row: the setting git.enabled, read window-level (§7.14.3), false → row 3,
+                                          otherwise → row 4
+  exports.onDidChangeEnablement(true) → from a setTimeout(…, 0), not inside the handler, take the API and refresh
+                                          (recovers row 3 only)
+api = exports.getAPI(1)             // throws 'Git model not found' in exactly the exports.enabled === false cases;
+                                    // a throw with enabled === true after the one-tick retry → row 2, never a retry loop
+api.state !== 'initialized' → wait for one onDidChangeState('initialized')   (its initial scan has settled)
+```
+The first line is the one `extension.ts` owns: it calls `getExtension` and hands the result — a
+`vscode.Extension<GitExtension>` or `undefined` — to `gitApi.ts`, which does the rest and reports either the
+API (roots, git path, events) or one E82 row, and reports again after `onDidChangeEnablement(true)` or
+`extensions.onDidChange`. That hand-over is the test seam, as `extension.ts` handing the tree its loaders is:
+`ext/gitApi.test.ts` imports `src/vscode/gitApi` directly (as `scanSettings.test.ts` imports `core/discovery`)
+and passes `undefined` (row 1), an object whose `activate()` rejects (row 2), and objects whose `activate()`
+resolves to a fake `GitExtension` (rows 3–4 and the recoveries); nothing else can reach rows 1–2, because the
+Git extension is a built-in and present in every `test:ext` run (§13.4 (j)). Two more seams for the same reason:
+the adapter reads the window-level `git.enabled` through an injected reader — default
+`() => vscode.workspace.getConfiguration('git', null).get<boolean>('enabled', true)`, the call the Git extension
+itself makes — so tests hand it `() => false` / `() => true` and never write the setting (writing it at runtime
+would make the real Git extension dispose every open repository and reopen them asynchronously, racing every
+later test); and `gitApi.ts` exports a pure `gitExecutable(setting: string, apiPath: string): string` — `''` →
+`apiPath`, anything else → `setting` — which the three pipelines in `extension.ts` use, so `config.ts` stops
+turning an empty `prCascade.gitPath` into `'git'` and hands the raw string through. Why the `setTimeout`: at 1.138
+the Git extension fires `onDidChangeEnablement` one statement before `getAPI` can succeed, so a call made inside
+the handler throws `Git model not found`.
+Types come from `git.d.ts`, copied verbatim from VS Code `release/1.85` into `src/vscode/git.d.ts` (MIT; the
+Microsoft header stays). 1.85 is our `engines` floor and its file is the smaller one: `Repository.onDidCommit`
+/ `onDidCheckout`, `Repository.kind`, `state.worktrees` and `api.getRepositoryRoot` exist only in later
+versions, and vendoring the floor's file makes the compiler refuse them. Import it with `import type` only:
+a `.d.ts` has no runtime module, so `RefType.Tag` in code passes `tsc` (which inlines the `const enum`) and
+breaks `npm run build` (esbuild cannot resolve it) — compare `ref.type` against a literal or a local constant
+declared `satisfies typeof RefType`, the pattern VS Code itself moved to. **No `extensionDependencies` entry**
+(§7.11): with one, a user who disables the Git extension loses PR Cascade silently (VS Code computes it
+"disabled by dependency" and never loads it; only the Extensions view shows a warning), and the E82 row for
+`git.enabled: false` is needed in either design — so acquiring the API at runtime costs one `undefined` check
+and gains a message. `onDidChangeEnablement` fires at most once, on a false→true flip; the reverse flip is not
+reported (the repositories simply close, §7.14.3 row 3); the disabled-extension case recovers through
+`vscode.extensions.onDidChange` (row 1); only "git not found" never recovers without a reload — the row says so.
+In a remote window (SSH, WSL, Codespaces) both extensions run in the remote host — each has a `main` and no
+`extensionKind`, which makes both `workspace` extensions — so the lookup is the same there; PR Cascade has to be
+installed on the remote, as any extension that spawns processes does.
+
+#### 7.14.2 Repositories and the change signal
+
+- **Roots** = `api.repositories.map(r => r.rootUri.fsPath)`, sorted by the workspace folder each belongs
+  to, then by path (§6). The API re-sorts its array in place on every internal lookup (longest root first), so
+  its order means nothing; every access returns a new wrapper object — two reads of the same repository are two
+  different objects, so `===` between them is false; compare `rootUri.fsPath`; and `initialized` says the initial
+  scan has settled, not that any repository's first `git status` has run — M4 reads neither `state.HEAD` nor the
+  change lists, so that does not matter yet. M5's digest (below) does read `state.HEAD`, as a change-detection
+  input only — never as the branch name, which stays our `symbolic-ref` answer (§7.1.0) — and must accept
+  `undefined` (no status has completed yet for that repository; `git.d.ts` types it `Branch | undefined`) as one
+  more digest value, so a first status that lands later changes the digest once — one extra `gs log`, accepted.
+- **Which repositories exist is the user's `git.*` configuration** (§6 lists the settings), exactly as in the
+  Source Control view. Three consequences accepted: a workspace folder *inside* a repository whose root is not
+  a workspace folder waits for the Git extension's own Yes / Always / Never notification (E1b); a submodule is
+  a repository of its own with its own row; and a linked worktree opened as a workspace folder is a repository
+  of its own too — the right answer for a view of *the stack under HEAD*, since every worktree has its own HEAD
+  (E19; the Git extension dedupes by root only, never by the shared `.git`, and neither do we; how M6's
+  all-stacks views treat two worktrees of one repository is decided with the multi-repository layout then).
+  `onDidOpenRepository` / `onDidCloseRepository` are added beside our `onDidChangeWorkspaceFolders → refresh`
+  listener, which stays (one line): folder order drives the sort, and a folder change need not open or close a
+  repository — a reorder fires no Git-extension event, a folder added inside an open repository opens nothing,
+  and a removed folder keeps its repository while an editor in it is visible or another folder is at or above
+  the root.
+- **`state.onDidChange` means "a `git status` run just completed"**, not "something changed". It fires after
+  every completed run — one where nothing moved, the Git extension's own operations (stage, fetch, commit …),
+  the initial status of each repository — and not for a run that a newer one cancelled. For git run outside
+  VS Code the chain is: its watcher (the working tree; the **first level** of `.git`: `HEAD`, `index`,
+  `ORIG_HEAD`, `packed-refs`, …; and HEAD's upstream ref `refs/remotes/<remote>/<name>` while HEAD has one — a
+  transient watcher rebuilt after every status) → 1 s trailing debounce → wait until no Git-extension operation is running
+  **and the window is focused** → `git status` → the event → 5 s cool-down. That is E20 for free: alt-tab
+  back, the status runs, the event fires, we refresh. Three things it does not give us: (1) a ref that moved
+  without the working tree, the index or `HEAD` changing is below `.git`'s first level and not watched —
+  probed 2026-09-26 (the table is in §13.4 (k)): `gs branch track` / `untrack` / `downstack track`, `gs repo init`,
+  `git branch -f`, `git update-ref`, `git tag`, and `git push` of any branch but HEAD's upstream write only under
+  `refs/`, `logs/` and `objects/`; a push of the current branch to its upstream rewrites the one watched ref file
+  and *is* seen (so our own submit adds one event on top of the explicit refresh, absorbed like the rebase case
+  below), as is every git-spice command that checks out, rebases, commits, creates, deletes, renames, folds or
+  syncs (`HEAD`, `index`, `ORIG_HEAD`, `config` or `FETCH_HEAD`) — so **every command of ours refreshes
+  explicitly afterwards**, and for a silent one typed in a terminal the manual button is the recovery (E83);
+  (2) with `git.autorefresh: false`, or a repository over `git.statusLimit` (10 000 entries), the watcher
+  path is off entirely — the same for Source Control itself; the README says so. Not on that list:
+  `files.watcherExclude` — its default covers only `.git/objects` and `.git/subtree-cache`, and even a user's
+  `**/.git/**` entry does not blind the Git extension, because VS Code turns excludes into a dedicated
+  watcher for exactly such requests; (3) an event that lands while a Git-extension operation is running is
+  dropped, not queued. (Newer VS Code can read the commands typed in its integrated terminal — its *shell
+  integration* — and runs a status after a plain `git <subcommand>` exits 0; `gs …` never matches that, and 1.85
+  has no such path.) Our own `gs` commands that rebase or check out
+  (`gs upstack restack`, …) do touch `HEAD`, `index` and `ORIG_HEAD`, so they produce one event on top of our
+  explicit refresh — a duplicate the debounce (and, from M5, the digest below) absorbs.
+- **We debounce** (`core/debounce.ts`, hand-rolled, §11.3): the events come per repository, and in bursts from
+  the Git extension's own operations. **M4: debounce only** — our refresh is a handful of short read-only
+  spawns. **M5 (item 20, `enrich`) adds a digest pre-filter**, because `gs log short --json` costs ~1.1 s per
+  call on this Mac regardless of repository size (measured 2026-09-26, git-spice 0.31.2) and would otherwise
+  run after every stage click and autofetch tick: `state.HEAD?.{name, commit, upstream?.commit}` (free;
+  `undefined` before the repository's first status is one more value; HEAD stays in the digest because a plain
+  checkout moves HEAD without moving any `refs/heads/*` object name) plus one
+  `git for-each-ref --format='%(refname) %(objectname)' refs/heads refs/remotes refs/spice` (~60 ms) — the
+  object names only, never the contents of `refs/spice/data` (§3 "Read model") — and `gs log` runs only when
+  the digest changed. `refs/remotes` is in it because trunk is a remote-tracking ref and a fetch moves it
+  without touching anything else; `refs/spice` because `gs branch track` moves nothing else. The input side has
+  nothing cheaper (`state.refs` is deprecated and always `[]`). Verified the same day: `gs log short --json`
+  spawns only read-only git children and writes nothing under `.git`, so an event-driven refresh cannot
+  re-trigger the Git extension's status — M5 pins that with a test (offline for `gs log short --json`; the
+  `--cr-status` forge path only in the opt-in e2e suite, §13.4 (k)).
+- **`await repository.status()`** runs a status at once, without the focus wait, and the event has normally
+  fired by the time it resolves (a call superseded by a newer status fires nothing — never wait on the event
+  after `status()`, never count on one event per call). Tests use it as their synchronisation point after an
+  external git command (§9.1). The manual Refresh button may fire it too, unawaited, so the Source Control view
+  catches up in the same click; the button's own recompute goes through the same debounce, so the two collapse
+  into one load, and it never waits for the event (E83's silent set never changes what `git status` shows).
+
+#### 7.14.3 The E82 rows
+
+| State | How we see it | Row | Recovery |
+|---|---|---|---|
+| 1. Git extension disabled by the user | `getExtension('vscode.git')` is `undefined` | "PR Cascade needs the built-in Git extension — enable it in the Extensions view" | none needed from VS Code: it enables an extension in place (no reload, 1.85 and 1.138) — `vscode.extensions.onDidChange` fires once the Git extension is back in the registry, `getExtension` returns it, and the adapter re-runs the §7.14.1 handshake (the event fires for any extension change; still `undefined` → keep the row). Disabling a *running* extension is the one case VS Code does make the user reload for, which is how this state is reached at all. |
+| 2. The Git extension failed to start | `await ext.activate()` rejects (it rethrows anything but "git not found") | "The Git extension failed to start — reload the window" | reload (1.138 logs the cause in its output channel before rethrowing; 1.85 does not) |
+| 3. `git.enabled: false` when the window opened | `exports.enabled === false` and the injected reader of `getConfiguration('git', null).get('enabled')` says false — the window-level value, the one the Git extension itself decides on at start-up (`null` = read with no folder in mind); a folder-level `false` is a different state: `exports.enabled` stays true and that folder simply has no repository | "Git is disabled in this workspace (git.enabled)" | `onDidChangeEnablement(true)` → `getAPI` one tick later → refresh. Turned off *while running*: `exports.enabled` stays true and no event fires — the Git extension closes the repositories (`onDidCloseRepository` → the §6 zero-repo row, not this one); turned back on, it re-opens only repositories whose root is a workspace folder (`onDidOpenRepository` → refresh); a repository *below* a folder (the §1 layout) returns on the next change its watcher sees under it, on a visible editor inside it, or on a reload. |
+| 4. The Git extension found no git | `exports.enabled === false`, the reader says true | "The Git extension found no git — set git.path, then reload the window" | reload only; the Git extension never re-probes (and its own notification appears only when a workspace folder root holds a `.git` directory — not in the §1 layout) |
+| 5. `prCascade.gitPath` set to something unrunnable | our own spawn fails (E17) | the E17 error row, as today | the next refresh after the setting is fixed |
+
+The status bar item is hidden in all five states. The first four are one message row in an otherwise empty
+view — no spawn of ours runs, so nothing can crash-loop. The row texts here are the single source: the E82
+tests assert them exactly (pending item 7b's rule), so the §7.14.1 block only points at row numbers.
 
 ---
 
@@ -1048,8 +1254,9 @@ entries mirror the `view/item/context` ones with `webviewId == 'prCascade.smartl
 
 | # | Situation | Required behavior |
 |---|---|---|
-| E1 | Repo is a nested subfolder of a workspace folder | Discovered and shown (via `--show-toplevel` from the folder). |
-| E2 | Two workspace folders resolve to the same repo | Shown once. |
+| E1 | Repo is *below* a workspace folder (the §1 parent-folder layout) | Shown. **From M4 delegated (§7.14.2):** the built-in Git extension opens it when `git.autoRepositoryDetection` is `true` (default) or `subFolders` and the depth is within `git.repositoryScanMaxDepth` (default 1); it appears when `onDidOpenRepository` fires — in its initial scan only: a parent folder added to the workspace later is opened as a repository itself but not scanned below (`scanWorkspaceFolders` runs from `doInitialScan` alone, both versions), so the §1 layout must be in the workspace when the window opens. M1–M3: found by our own scan (D26). |
+| E1b | Workspace folder is *inside* a repository (the root is above it) | Shown once when the root is also a workspace folder — the Git extension opens it silently and once. Root not a workspace folder: the Git extension parks it behind its own Yes / Always / Never notification (`git.openRepositoryInParentFolders`, default `prompt`) and until it is answered we show "No git repository in this workspace" — accepted 2026-09-26 (§7.14.2). The fixture lists the root too, so no prompt in tests. M1–M3: `--show-toplevel` walked up silently. |
+| E2 | Two workspace folders resolve to the same repo | Shown once. **From M4 delegated:** one `Repository` per root; rows keyed by `rootUri.fsPath`. |
 | E3 | Detached HEAD | Layers still computed (`--merged HEAD` works); header says "Detached HEAD"; no layer is `isCurrent`. |
 | E4 | No trunk resolvable | Informational node; no crash; setting hint. |
 | E5 | On trunk itself (zero layers) | "Not on a stack" node. |
@@ -1059,15 +1266,15 @@ entries mirror the `view/item/context` ones with `webviewId == 'prCascade.smartl
 | E9 | Deleted file | Left pane content, right pane empty. |
 | E10 | Binary file | Not opened in diff editor; opened as file (or informational message). |
 | E11 | Path with spaces / unicode / `#` | URI round-trips; `git show` gets the exact path (`-z` parsing). |
-| E12 | Rebase in progress | Banner node; `pushStack`/`checkout` refuse with a message. |
+| E12 | Rebase in progress | Banner node; `pushStack`/`checkout` refuse with a message. Detected by our own `--git-path` check (§5), never by the Git extension's `state.rebaseCommit` (§7.14, E19). |
 | E13 | Dirty working tree + checkout | Refused with message; nothing changed. |
 | E14 | Bottom layer amended (descendants now stale) | After amending the bottom, the amended branch is *no longer* an ancestor of HEAD, so it drops out of the HEAD stack and the old commit shows as an unnamed layer. Render what git says; git-spice marks it `needsRestack` once tracked (M5) and M9's restack fixes it. Test documents the behavior. |
 | E15 | Bottom PR squash-merged, local branch still exists | Its commits are not in trunk (squash rewrote them), so it still shows as a layer until `sync` (M9) removes it and restacks the rest. Test documents this. |
 | E16 | Second, unrelated stack exists in the repo | Not shown (not ancestors of HEAD). Never mixed in. |
-| E17 | `git` missing / wrong path | One clear error node, not a crash loop. |
+| E17 | `git` missing / wrong path | One clear error node, not a crash loop. **From M4 (§7.14.3):** the built-in Git extension found no git → one message row naming *its* `git.path` setting and that a reload is needed (it never re-probes); `prCascade.gitPath` set to something unrunnable → the E17 error row as today, from our own spawn. |
 | E18 | Large layer (1000+ files) | `-z` parsing handles it; tree renders (VS Code virtualizes). `maxBuffer` sufficient. |
-| E19 | Worktree checkout (`.git` is a file) | `--git-path` used for rebase detection; discovery works. |
-| E20 | Window regains focus after external git activity | View refreshes within the debounce window. |
+| E19 | Worktree checkout (`.git` is a file) | `--git-path` used for rebase detection — **kept in M4**: the Git extension's `state.rebaseCommit` reads `<root>/.git/REBASE_HEAD` literally and is undefined in a linked worktree (verified 2026-09-26, §13.4). Discovery works: a worktree opened as a workspace folder is an ordinary `Repository` to the Git extension. |
+| E20 | Window regains focus after external git activity | View refreshes within the debounce window. **Mechanism from M4 (§7.14.2):** the Git extension's watcher saw the change, waited for focus, ran `git status`, fired `state.onDidChange`; we debounce and recompute. Holds only with `git.autorefresh` on (default) and a repository under `git.statusLimit`; a ref-only change is not seen (E83). Test: subscribe to `provider.onDidChangeTreeData` (the event a tree provider fires to make VS Code re-ask `getChildren`; `vscode/tree.ts` already exposes it) before the external commit; commit; `await repository.status()` — the same event without the focus wait; await that one tree-change event (the debounced handler's `refresh()`); then `getChildren()`. The test never calls the exported `refresh` or `prCascade.refresh` itself, so a missing `state.onDidChange` subscription fails it by timeout — reading the tree straight after `status()` would prove nothing, since `getChildren()` re-runs the pipeline on every call. |
 | E21 | Remote URL in each supported form (§7.5) | `parseRemoteUrl` returns the right host/owner/repo; unparseable → `null`, PR features disabled, tree still works. |
 | E22 | Workspace contains a github.com repo and a `*.ghe.com` (or other Enterprise) repo | Each repo's `gh` calls carry its own `GH_HOST`; auth status evaluated per host. |
 | E23 | `gh` not authenticated for a repo's host | Tree renders fully; layer description shows the hint; any `gh` action shows the "Log in" prompt → terminal runs `gh auth login --hostname <host> --web …` → extension polls `gh auth status` and, on success, refreshes and re-runs the original action. Second click while pending only focuses the terminal. Timeout gives up silently. |
@@ -1129,6 +1336,8 @@ entries mirror the `view/item/context` ones with `webviewId == 'prCascade.smartl
 | E80 | Narrow smartlog | At 260 px the tail shows only the PR circle and the age, the rest is tooltip; at 200 px only the PR circle; the name is ellipsised and the row stays one line; nothing overflows horizontally. |
 | E81 | Both views, one state | After any refresh the smartlog and the graph show the same rows, indicators and checked-out row (one model object is posted to both); a command run from either view refreshes both. |
 | E76 | A stack branch was rewritten on the remote by someone else (GitHub's "Rebase stack" button, `gh stack sync`, a co-worker's force-push) — with and without unpushed local commits | Sync Stack detects it after fetch (`push.ahead > 0 && push.behind > 0`, or neither tip an ancestor of the other) and **adopts** the remote before any restack: no unpushed work → `git branch -f <b> origin/<b>`; unpushed work → `git rebase --onto origin/<b> origin/<b>@{1} <b>` after confirming; then `gs stack restack` is a no-op. Restack/submit **refuse** while a branch is diverged and unadopted; the banner names the branch. Never force-push over a diverged remote (git-spice's lease only protects a clone that has not fetched). Procedure verified 2026-09-20, §13.4. |
+| E82 | The built-in Git extension is disabled, or its `activate()` rejected, or `git.enabled` was false when the window opened, or it found no git | One message row per case (§7.14.3), no spawn of ours, status bar hidden, no crash. Git extension re-enabled from the Extensions view → `vscode.extensions.onDidChange` → the handshake runs again and the row goes, no reload. `git.enabled` false at window start and flipped on → the Git extension fires `onDidChangeEnablement(true)` and we recover without a reload (taking the API one tick later, §7.14.1); flipped off and on *while running* → no event: the repositories close and re-open through `onDidCloseRepository` / `onDidOpenRepository` (§7.14.3 row 3). Git not found → the row says a reload is needed; nothing else recovers it. Test: the adapter fed `undefined`, an `Extension` whose `activate()` rejects, and `Extension`s resolving to a fake `GitExtension` — one per §7.14.3 row, the injected `git.enabled` reader returning false / true, a fake `extensions.onDidChange` that flips `getExtension` from `undefined` to the fake and fires; each case asserts the exact row text. |
+| E83 | A ref moves without the working tree, the index or `HEAD` changing — `gs branch track` / `untrack`, `gs repo init`, `git branch -f`, `git update-ref`, `git tag`, `git push` of a branch other than HEAD's upstream — by a command of ours or in a terminal | The Git extension watches the working tree, the first level of `.git` and HEAD's upstream ref only, so `state.onDidChange` does not fire (probed 2026-09-26, table in §13.4 (k); git-spice's checkout / onto / restack / commit / sync commands and a push of the current branch *are* seen, §7.14.2). Every command of ours refreshes explicitly afterwards (§3 "Refresh"); for a silent one typed in a terminal the manual button is the recovery, and the README says so. Test: from M5, the fake runner records a refresh after each command. |
 
 ---
 
@@ -1153,10 +1362,29 @@ entries mirror the `view/item/context` ones with `webviewId == 'prCascade.smartl
    `--extensionDevelopmentPath` and a workspace pointing at a fixture repo (built in a `globalSetup`).
    Assert: extension activates; `provider.getChildren()` yields the expected layers and files;
    executing `prCascade.openDiff` opens a tab whose input is a diff with `stackdiff:` URIs
-   (`vscode.window.tabGroups`); refresh command updates after an external `git commit`; nested-repo
-   workspace (E1) shows the repo. Keep these few and slow-tolerant; the bulk of coverage is layers 1–2.
+   (`vscode.window.tabGroups`); refresh command updates after an external `git commit`; a two-folder
+   workspace whose folders are one repository (E1b, E2) shows it once. Keep these few and slow-tolerant; the bulk of coverage is layers 1–2.
    From M6 the same tests read the last model each webview provider posted (a test-mode-only handle,
    §13.4) instead of `getChildren()`.
+   **From M4 (§7.14):** the tests reach the built-in Git extension the way the code does —
+   `extensions.getExtension('vscode.git')`, `activate()`, `getAPI(1)`, then `api.state === 'initialized'` or
+   one `onDidChangeState` — through one helper (`test/ext/helpers/gitApi.ts`). After an external git command
+   a test calls `await repository.status()` (the Git extension runs the status without waiting for window
+   focus, whose value in a headless run is unverified — §13.4) and then awaits one `provider.onDidChangeTreeData`
+   — our `refresh()` recomputes nothing, it only tells VS Code to re-ask `getChildren()`, so that event is the
+   only sign our debounced handler ran; it never waits on `state.onDidChange` after `status()` resolved, because
+   the event has already fired. The
+   harness launches with `--disable-workspace-trust` and without `--disable-extensions`, so the Git extension
+   is present and no trust prompt appears; the fixture lists the repository root as a folder, so no
+   parent-folder prompt appears either (E1b). `.vscode-test/user-data` persists between runs, so no test may
+   answer a Git-extension prompt: *Always* / *Never* write `git.openRepositoryInParentFolders` into that
+   profile's user settings and would change every later run (*Yes* writes no setting but records
+   `parentRepository:<root>` in the Git extension's `globalState` — VS Code's per-extension key-value store,
+   which it calls a *memento* — as does *Always* for each parked root; those entries are harmless only because
+   the fixture root is a fresh `mkdtemp` each run, so the key never matches again — an invariant to keep). Pin
+   any `git.*` value a test needs
+   in the fixture's `.code-workspace` `settings` block, never at runtime: the Git extension's scan is already
+   running when the tests start.
 
 4. **Opt-in end-to-end tests against a real github.com scratch repo (Vitest, `test/e2e`)** — skipped
    unless `PRCASCADE_E2E_REPO=owner/repo` (GitHub) / `PRCASCADE_E2E_GITLAB=group/project` (GitLab) is
@@ -1222,8 +1450,9 @@ Every layer commits one distinct file (`a`, `b`, `c`, …) so file lists are tri
 | `unit/uri.test.ts` | encode/decode round-trip incl. E11 chars; rejects foreign schemes |
 | `unit/stack.test.ts` | ordering by count, tie-break by name (E6), parent chain, `isCurrent`, detached (E3), zero layers (E5), fake runner failures (E17) |
 | `unit/trunk.test.ts` | config wins → origin/HEAD → candidates → null (E4) |
-| `unit/discovery.test.ts` | dedupe (E2), nested folder resolves (E1, with fake runner) |
+| `unit/discovery.test.ts` | M1–M3 only: dedupe (E2), nested folder resolves (E1, with fake runner). Deleted in M4 item 12a together with `core/discovery.ts`, `git/discovery.git.test.ts` and `ext/scanSettings.test.ts` — discovery is the Git extension's (§7.14); E1/E1b/E2 move to `ext/gitApi.test.ts` |
 | `unit/debounce.test.ts` | coalescing, trailing call |
+| `unit/digest.test.ts` | M5: the §7.14.2 pre-filter as a pure compare — same inputs → `gs log` not run; each of HEAD name / commit / upstream commit, or a `refs/heads`, `refs/remotes` or `refs/spice` object name moving → run; `state.HEAD` undefined is one more value; inputs are object names only, never the contents of `refs/spice/data` |
 | `unit/ghstatus.test.ts` | fake runner: exit 0 / non-zero / ENOENT → authenticated / not-logged-in / not-installed (E23, E24); `waitForLogin` with fake timers: resolves on first success, rejects on timeout, stops polling when aborted, one in-flight poll per host |
 | `unit/prs.test.ts` | §7.7 planner as a pure function: given layers + status map + forge kind → ordered list of `{track[], push, create[], reassertBases, link?}` operations; E26–E31 as table-driven cases; per-entry draft flags; `link` present only for `github`; never plans a create for a layer with an open PR |
 | `unit/prstatus.test.ts` | §7.8 JSON parsing → map by head; missing fields; empty list; malformed JSON → "no PR info" |
@@ -1240,8 +1469,8 @@ Every layer commits one distinct file (`a`, `b`, `c`, …) so file lists are tri
 | `unit/forge.test.ts` | every URL form (E21, E65): ssh, scp-like, https, ports, `user@`, no `.git`, trailing slash, garbage → null; forge kind per host; `spice.forge.*.url` override; `ghEnv()` sets `GH_HOST` |
 | `ext/nativeStack.test.ts` | fake runner: `gh stack link` argv is branch names bottom→top with `GH_HOST`; stack number parsed and recorded; re-link after insert uses the full new order (E72); relink idempotent (E73); refuses createPRs on GitHub when gh/gh-stack missing (E62b); never runs on GitLab (E74) |
 | `ext/backend-gitspice.test.ts` | fake runner: exact argv + env for every §7.13.3 row; `--no-prompt` on every call; track-before-mutate ordering (E56); conflict pause → banner (E58); mixed drafts (E61); merge method selection; never reads `refs/spice/data` |
-| `git/gitspice.git.test.ts` | **real `gs` against the fixture, offline** (git-spice needs no network for local ops): `repo init`, `branch track`, `log short --json` schema, `upstack restack` after amending the bottom (patch-ids stable), `branch onto`, `branch create --below --no-commit` + commit + restack (E48/E49 graph assertions), conflict pause + `rebase continue`. Skipped with a clear message if `gs` is not installed; CI installs it. |
-| `e2e/gitspice.github.e2e.test.ts` | opt-in scratch repo on github.com: createPRs with mixed drafts → PRs with correct bases, titles/bodies from the plan → native link (E68: badge + map) → `markStackReady` → all ready → re-run createPRs → nothing created → `gs branch merge --method squash` bottom → `sync` → bases retargeted, native map agrees (E71) → insert below → finish → cleanup |
+| `git/gitspice.git.test.ts` | **real `gs` against the fixture, offline** (git-spice needs no network for local ops): `repo init`, `branch track`, `log short --json` schema, `upstack restack` after amending the bottom (patch-ids stable), `branch onto`, `branch create --below --no-commit` + commit + restack (E48/E49 graph assertions), conflict pause + `rebase continue`. Skipped with a clear message if `gs` is not installed; CI installs it. M5 item 22 adds the §13.4 (k) pin: `log short --json` (and `--cr-status`, which against a local bare origin takes the no-forge path) change no file under `.git` at any depth — mtime/inode snapshot before and after |
+| `e2e/gitspice.github.e2e.test.ts` | opt-in scratch repo on github.com: createPRs with mixed drafts → PRs with correct bases, titles/bodies from the plan → native link (E68: badge + map) → `markStackReady` → all ready → re-run createPRs → nothing created → `gs branch merge --method squash` bottom → `sync` → bases retargeted, native map agrees (E71) → insert below → finish → cleanup; plus a `.git` snapshot around one `gs log short --json --cr-status` against the scratch repo (the §13.4 (k) pin for the forge path) |
 | `e2e/gitspice.gitlab.e2e.test.ts` | scratch project on gitlab.com (`PRCASCADE_E2E_GITLAB=group/project`): same flow minus native link; asserts GitLab's stack detection via the MR API (E66, E74). **Required before a release** — GitLab is a supported forge, so Ric needs a gitlab.com account for this. |
 | `ext/markReady.test.ts` | fake runner: E45–E47; confirm dialog cancel → no calls; ordering asserted |
 | `ext/createStackPRs.test.ts` | fake runner records argv sequence; asserts exact order (`track` → `submit --no-publish` → `branch submit` ×N → `gh stack link` on github only) and env (`--no-prompt`; `GH_HOST` on the link); mid-sequence failure stops and reports (E29); re-run is idempotent; cancel between steps; login flow then continue (E32) — never calls real `gs`/`gh` |
@@ -1253,14 +1482,15 @@ Every layer commits one distinct file (`a`, `b`, `c`, …) so file lists are tri
 | `git/remote.git.test.ts` | fixture with no remote (E25); with bare origin; two remotes with `prCascade.remote` selecting the second |
 | `git/stack.git.test.ts` | real 3-layer fixture: layers, order, parents, counts; E3, E5, E6, E14, E15, E16, E19 |
 | `git/changes.git.test.ts` | real diffs: E7, E8, E9, E10, E11, E18 (generate 1500 files) |
-| `git/rebase.git.test.ts` | E12 detection via `--git-path`; worktree variant (E19) |
+| `git/rebase.git.test.ts` | E12 detection via `--git-path`; worktree variant (E19) — stays in M4: the Git extension cannot see a rebase in a linked worktree (§7.14); add the pause points its `REBASE_HEAD` misses even in the main worktree — interactive `break`, a failed `exec`, `git am` — so the directory check is shown to cover them |
 | `git/trunk.git.test.ts` | origin/HEAD present/absent; master-only repo; no remote |
 | `ext/activate.test.ts` | activates, view registered, provider returned |
 | `ext/menus.test.ts` | `package.json` menus parsed: exactly two `navigation` items in `view/title`; every other title item has a group from §7.2.1; every `view/item/context` item's `when` references a known `contextValue`; every command in menus is registered on activation; layer `contextValue` matches spec for each state (no PR / PR / draft PR × current or not) |
 | `ext/statusbar.test.ts` | text is `<branch> · n of N` on each layer (E44); "not on a stack" on trunk; hidden with no repo; click focuses the view |
-| `ext/tree.test.ts` | every layer label equals its branch name, no SHA in any label (E44); children match fixture; nested-repo workspace (E1); refresh after external commit (E20) |
+| `ext/tree.test.ts` | every layer label equals its branch name, no SHA in any label (E44); children match fixture; nested-repo workspace (E1b); refresh after external commit (E20 — `await repository.status()`, then await one `provider.onDidChangeTreeData`, then `getChildren()`; never calls refresh itself) |
+| `ext/gitApi.test.ts` | M4 (§7.14). With the real Git extension: the handshake yields exactly the fixture repository — two folders, one root, no prompt (E1b, E2 delegated); a second repository folder appended at runtime sorts after `<repo>` (whose lowest folder index is 0) and a folder reorder → one refresh with no open/close event; `onDidOpenRepository` / `onDidCloseRepository` → refresh; `state.onDidChange` → refresh via `await repository.status()` then one `provider.onDidChangeTreeData` — no count, because the event also fires for the initial status of any repository the Git extension opens during the run. **E1 delegated** needs the §1 layout present at launch (the depth-1 scan runs in the initial scan only, §8 E1): a second `defineConfig` entry in `.vscode-test.mjs` (the CLI accepts an array, each with its own `files` and `workspaceFolder`) opens a workspace whose one folder is a plain `parent/` (fresh `mkdtemp`, not a repository) with a fixture repository one level below and another two levels below — after `initialized` the API holds exactly the one-level repository with no setting of ours and the tree shows its stack; the two-level one is absent at the default depth; removing the folder is not asserted to close it (the Git extension disposes only the repository that contains a removed folder). With fakes, importing `src/vscode/gitApi` directly (§7.14.1): coalescing — two `state.onDidChange` events inside the debounce window from a fake `Repository` whose event the test fires → exactly one `onDidChangeTreeData`; the E82 rows — `getExtension` result `undefined`, an `Extension` whose `activate()` rejects, `Extension`s resolving to a fake `GitExtension` with `enabled: false` and the injected `git.enabled` reader returning false / true (no setting written), `getAPI` throwing `Git model not found`, `onDidChangeEnablement(true)` → recovery, a fake `extensions.onDidChange` flipping `getExtension` from `undefined` to the fake → recovery — each asserting the exact §7.14.3 row text; `gitExecutable('', apiPath)` → `apiPath`, `gitExecutable(setting, apiPath)` → `setting` (the runner's own argv[0] is not observable through `{ provider, refresh }`; the non-empty branch is exercised end to end by `ext/tree`'s E17 tests, which keep passing) |
 | `ext/diff.test.ts` | openDiff opens a diff tab with `stackdiff:` URIs; content provider returns file text; added file → empty left |
-| `ext/commands.test.ts` | checkout refuses on dirty tree (E13); pushStack refuses during rebase (E12) — assert message, don't actually push |
+| `ext/commands.test.ts` | checkout refuses on dirty tree (E13); pushStack refuses during rebase (E12) — assert message, don't actually push; from M5 every command of ours is followed by exactly one explicit refresh, the fake runner records it (E83) |
 
 Milestones 5–8: every `gs`/`gh` invocation is asserted by injecting a fake runner/terminal and checking
 the exact argv and env; unit and extension-host tests never call the real tools. Only `git/gitspice.git`
@@ -1308,10 +1538,13 @@ in order with commit counts and the current marker. Tests: `unit/stack`, `unit/t
 `stackdiff:` content provider, `uri.ts`, `openDiff`. Tests: `unit/uri`, `ext/diff`.
 *Done when:* clicking a file opens native diff, parent vs layer; adds/deletes/renames/binary all behave per §8.
 
-**M4 — Refresh + state nodes + status bar.**
-Debounced focus/editor refresh, manual button, rebase-in-progress / detached / no-trunk / no-stack
-nodes, and the `<branch> · n of N` status bar item (§7.1). Tests: `unit/debounce`, `git/rebase`, `ext/tree` (E20, E44), `ext/statusbar`, `ext/commands` (E12).
-*Done when:* `git commit` in a terminal → alt-tab back → tree updates without clicking refresh.
+**M4 — Refresh + state nodes + status bar.** Built on the built-in Git extension's API (§7.14; decided
+2026-09-20, recorded 2026-09-26): the repositories and the change signal come from it, our own scan and its two
+settings go. Debounced refresh on each repository's `state.onDidChange`, manual button, rebase-in-progress /
+detached / no-trunk / no-stack nodes, the E82 rows, and the `<branch> · n of N` status bar item (§7.1). Tests:
+`ext/gitApi`, `unit/debounce`, `git/rebase`, `ext/tree` (E20, E44), `ext/statusbar`, `ext/commands` (E12).
+*Done when:* `git commit` in a terminal → alt-tab back → tree updates without clicking refresh; the fixture's
+two-folder workspace still shows one repository with the two scan settings gone.
 **→ Ship v0.1 here. Use it for a week before continuing.**
 
 **M5 — Backend interface + git-spice readiness + push + login flows.**
@@ -1396,12 +1629,39 @@ one PR — the split is itself the lesson in how the layers relate.
 11. `stackdiff:` content provider + `openDiff` command + binary fallback; `ext/diff` tests.
     *This is the PR that makes it a usable tool.*
 
-**M4 stack — "it stays fresh and tells you where you are"**
-12. `core/debounce` + refresh triggers (focus, editor change, manual, post-command); E20 test.
-13. state nodes: rebase-in-progress (`--git-path`), detached, no trunk, not on a stack; `git/rebase`.
-14. status bar item `<branch> · n of N`; `ext/statusbar`; E44.
-15. `v0.1.0`: packaging (`vsce`), README for users, CHANGELOG, release workflow attaching the
-    `.vsix`. *Use it for a week before M5.*
+**M4 stack — "it stays fresh and tells you where you are"** (built on the Git extension's API, §7.14;
+item 12 split 2026-09-26 into 12a/12b so every later item number stays true)
+12a. `vscode/gitApi.ts` + `vscode/git.d.ts` (the `release/1.85` file, verbatim, in a commit of its own) + the
+     wiring in `extension.ts`: the §7.14.1 handshake (including the `extensions.onDidChange` re-check for a
+     re-enabled Git extension), `initialized`, `repositories` → sorted roots, open/close → refresh, the E82 rows,
+     `gitExecutable()` with `prCascade.gitPath` default `""`. **Deletes** `core/discovery.ts`, the two
+     `prCascade.repositoryScan*` settings (package.json, config.ts, README's settings table) and their tests
+     (`unit/discovery`, `git/discovery.git`, `ext/scanSettings`), plus README's two "works without the built-in
+     git extension" sentences (false from this PR on; the user-facing rewrite is item 15) and, in
+     `docs/typescript-primer.md`, the eight sections anchored "First seen in `src/core/discovery.ts`" (§21–§23,
+     §36–§40), §41's scan-reader quotes and §42–§43's `scanSettings` anchor — retargeted to a surviving first use
+     or marked "Deleted in M4 (item 12a)", the §11.1 rule applied to the file that leaves; `docs/reading-order.md`
+     follows its files as always. The core/vscode split rule is waived once, on purpose: the core side is a
+     deletion with nothing to review, and the lesson is the boundary moving. Expected size: over the §0
+     guideline on purpose — `git.d.ts` is 411 lines (317 of them code), copied not written, reviewed for
+     provenance (the Microsoft MIT header, the `release/1.85` tag) rather than line by line; ours is `gitApi.ts`
+     plus the `extension.ts` / `config.ts` / `package.json` edits, aim ≤ ~300 with comments; the overrun goes in
+     the PR body and a §13.2 row — a different cause from D23's comments, so Ric rules on it separately. Tests:
+     `ext/gitApi` (handshake, E82, `gitExecutable`, E1 / E1b / E2, open/close, folder reorder); `ext/activate`
+     still passes with the Git extension present.
+12b. `core/debounce` + refresh triggers: each repository's `state.onDidChange` (debounced), the manual button,
+     an explicit refresh after every command of ours (none exist yet — the rule lands with M5's first one, E83);
+     the `onDidChangeWorkspaceFolders` listener stays (folder order is the sort key; a reorder or a guarded
+     add/remove fires no open/close event, §7.14.2). Tests: `unit/debounce`; `ext/gitApi` (the coalescing case
+     with a fake `Repository`); `ext/tree` (E20 through `repository.status()` then one
+     `provider.onDidChangeTreeData`, §8 E20).
+13. state nodes: rebase-in-progress through our own `--git-path` check (E12, E19 — not `state.rebaseCommit`,
+    §7.14), detached (E3), no trunk, not on a stack (the D20 rows, restyled if needed); `git/rebase`.
+14. status bar item `<branch> · n of N`; `ext/statusbar`; E44. Rider: `capabilities` in package.json (§13.4
+    2026-09-19 "Activation and the empty window" — the note that keeps `onStartupFinished` for this item); no test.
+15. `v0.1.0`: packaging (`vsce`), README for users (gains the `git.*` settings that decide which repositories
+    appear, and the E83 note that a ref moved from a terminal needs the refresh button), CHANGELOG, release
+    workflow attaching the `.vsix`. *Use it for a week before M5.*
 
 **M5 stack — "the backend exists and can push"**
 16. `core/forge`: `parseRemoteUrl` + forge kind + `ghEnv`. First **library decision** (`hosted-git-info`
@@ -1413,11 +1673,16 @@ one PR — the split is itself the lesson in how the layers relate.
 19. `vscode`: install / `gs repo init` / `gs auth login` offers and the poll-then-continue login flow
     (`vscode/login.ts`, `core/ghstatus.ts` generalized to both tools). Tests: `ext/login`.
 20. `track` + `enrich` (local tier): tree gains CR ids, `needs push`, `needs restack`, `not tracked`,
-    "Track Stack with git-spice". Tests: `ext/backend-gitspice` rows, `ext/tree` additions (E56).
+    "Track Stack with git-spice"; plus the §7.14.2 digest pre-filter in front of `gs log short --json`
+    (`state.HEAD?.{name, commit, upstream?.commit}` + one `for-each-ref --format='%(refname) %(objectname)'
+    refs/heads refs/remotes refs/spice`; `gs log` runs only when it changed) and the first instance of the E83
+    rule — an explicit refresh after `track`. Tests: `ext/backend-gitspice` rows, `ext/tree` additions (E56),
+    `unit/digest`, `ext/commands` (a refresh recorded after `track`, E83).
 21. `push` + **Push Whole Stack** + refuse during rebase. Library decision (`execa` vs `execFile`
     wrapper — measure the 12-dependency cost). Tests: `ext/commands` (E12), argv row.
 22. `git/gitspice.git` bootstrap: CI installs `gs`; init/track/log scenarios pass offline. Settle §12
-    item 7 (exit codes, paused-op detection) and write the first §9.6 contract rows.
+    item 7 (exit codes, paused-op detection) and write the first §9.6 contract rows. Plus the §13.4 (k) pin:
+    `log short --json` (and `--cr-status` against the bare origin) change nothing under `.git`.
 23. `gh` readiness on GitHub repos (E62b) + `gh` login flow. Tests: `unit/ghstatus`, `ext/login` rows.
 
 **M6 stack — "the two views"** (numbered 23a–23j so every item number below stays true)
@@ -1766,7 +2031,11 @@ and explains the one API we use. Removing a dependency later is a normal PR, not
 and setting prefix `prCascade.*`, panel
 titled "Stack"); native stacks verified on the work host; `gh` OAuth login is permitted at work (used
 2026-09-17); restacking is git-spice's (`gs upstack restack`, `gs repo sync`), not `--update-refs`;
-no footer/nav comment by default on GitHub/GitLab (native views).
+no footer/nav comment by default on GitHub/GitLab (native views); **the built-in Git extension is the source
+of repositories, change events and the git executable** (decided 2026-09-20, recorded 2026-09-26, §7.14) —
+acquired at runtime rather than through `extensionDependencies` — of the four ★ points in §13.4 the one that is a
+design choice rather than a correction the source forced (§13.4 (h) says why; say so in that PR's review if you
+want the dependency declared in package.json instead).
 
 **Open — ask, unless he has said "go with the recommendations":**
 1. **Commits as an intermediate tree level?** Recommendation: no — branch → files. Squash merge
@@ -2087,7 +2356,9 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
   added on top. So `prCascade.relinkStack` and the post-insert relink (§7.13.4) can always pass the full list;
   the stack-number append form is an optimisation, not a necessity. (§12 6c, the PR JSON field for stack
   membership, is still open.)
-- **RESOLVED 2026-09-19 and delivered as M1 PRs 7 and 8 (`m1/07-core-discovery-subfolders`,
+- *(Superseded 2026-09-26 by the Git-extension decision below and §7.14 — the scan, its two settings and the
+  silent up direction go in M4 item 12a; E1b now inherits the Git extension's parent-folder prompt, a consequence
+  of the note's "no fallback path"; kept for the record.)* **RESOLVED 2026-09-19 and delivered as M1 PRs 7 and 8 (`m1/07-core-discovery-subfolders`,
   `m1/08-vscode-scan-settings`; see D26–D29) — discovery must work in both directions.** Ric confirmed: the extension must find a
   repo whether it *is* a workspace folder, a workspace folder is *inside* it, or it sits *below* a workspace
   folder (§1's "parent open for browsing, repos in subdirectories"). M1 as submitted handles only the first two
@@ -2115,7 +2386,10 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
   `untrustedWorkspaces: { supported: false }` and `virtualWorkspaces: false` (the only correct declarative
   "do not load where there cannot be a repo"). Keep the §6 message row; `viewsWelcome` would cover only the
   zero-repo case, needs a context key to avoid flashing, and duplicates the built-in SCM welcome.
-- **§3 "Refresh" row premise is wrong.** `.git` is *not* in the default `files.watcherExclude`; only
+- *(Superseded 2026-09-26 by the DECIDED 2026-09-20 / RECORDED 2026-09-26 Git-extension bullet below and §7.14 —
+  no watcher, focus listener or discovery cache of our own; and the `**/.git/HEAD` watcher it attributes to the Git
+  extension does not exist — that extension watches the whole first level of `.git`; kept for the record.)*
+  **§3 "Refresh" row premise is wrong.** `.git` is *not* in the default `files.watcherExclude`; only
   `.git/objects/**` and `.git/subtree-cache/**` are (VS Code `files.contribution.ts`). A create-only
   `createFileSystemWatcher('**/.git/HEAD')` is allowed and is what the built-in git extension relies on. For M4:
   cache discovered roots; re-run on `onDidChangeWorkspaceFolders`, manual refresh, and that watcher; gate the
@@ -2135,4 +2409,97 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
   time; reruns pass; CI has never hit it). Consider a longer `testTimeout` for the `git` project, or find the stall,
   before M4 adds more real-git suites.
 - **M3 started 2026-09-20** as branches `m3/01-core-uri`, `m3/02-vscode-diff` (plan §10.1 items 10–11); #16 (idiomatic cleanup) merged the same day. (M2's GitHub numbers, promised above: PRs #11–#13, merged 2026-09-20; the §11.1 rule change was #15.)
-- M3 stack built, reviewed and submitted 2026-09-20 (see D40–D45). After M3 merges, **M4** is next: refresh triggers, state nodes, status bar, v0.1.0 — with the activation / discovery-caching / `capabilities` decisions already recorded above.
+- M3 stack built, reviewed and submitted 2026-09-20 (see D40–D45). After M3 merges, **M4** is next: refresh triggers, state nodes, status bar, v0.1.0 — with the activation and `capabilities` decisions already recorded above (the discovery-caching idea was superseded a week later, next bullets).
+- **M3 merged 2026-09-20** (PRs #17, #18). The same day's Q&A produced the decision below; it was recorded on
+  2026-09-26 as a docs PR off `main`, before M4 starts.
+- **DECIDED 2026-09-20, RECORDED 2026-09-26: use the built-in Git extension's API where it does the job
+  (§7.14; touched: §1, §2, §3, §4.2, §5, §6, §7.1.0, §7.3, §7.11, §8 E1/E1b/E2/E12/E17/E19/E20/E82/E83, §9.1,
+  §9.4, §10 M4, §10.1 items 12a–15, 20, 22, §12).** Ric's rule: prefer VS Code's own APIs over re-implementing them. Taken
+  from `vscode.git`: the repository list with its open/close events, the change signal
+  (`repository.state.onDidChange`), the git executable (`api.git.path`). Kept as our own spawns: everything the
+  API cannot express — stack membership, layer order and diffs, file content, trunk, the current branch,
+  rebase-in-progress. Accepted: `core/discovery.ts` and the two `prCascade.repositoryScan*` settings go in M4
+  item 12a; the "works with `git.enabled: false`" promise (§2, §3 "Diff rendering", README) is dropped; E1b
+  inherits the Git extension's parent-folder prompt. **Verified before recording** against the Git extension's
+  source at VS Code `release/1.85` (our `engines` floor) and `release/1.138` (what the tests download and Ric
+  runs), every material fact re-read by an independent second pass; the note's own wording was corrected in
+  four places, marked ★:
+  (a) ★ `Repository.onDidCommit` / `onDidCheckout` are not in 1.85's `git.d.ts` at all and, where they exist,
+  fire only for the Git extension's own commit/checkout operations — never for a terminal or `gs`. Not used;
+  `state.onDidChange` is the one signal (`api/api1.ts` maps it to the internal `onDidRunGitStatus`).
+  (b) `state.onDidChange` fires after **every completed** `git status` run, changed or not, and not for a run a
+  newer one cancelled. Watcher-driven runs: the working tree, the **first level** of `.git`
+  (`RelativePattern(dotGit.path, '*')`, by design) and HEAD's upstream ref (`refs/remotes/<remote>/<name>`, a
+  transient watcher rebuilt after every status while HEAD has an upstream) → 1 s trailing debounce →
+  `whenIdleAndFocused` (no Git-extension operation running **and** `window.state.focused`) → status → 5 s
+  cool-down. Events are dropped, not queued, while an operation runs, when `git.autorefresh` is off, or when the
+  last status exceeded `git.statusLimit`. Ref-only writes are never seen (E83) — except a push of the current
+  branch to its upstream, which rewrites the one watched ref file. `files.watcherExclude` is not a factor: its default
+  excludes only `.git/objects/**` and `.git/subtree-cache/**` (both versions; the pattern spelling changed),
+  and a user's `**/.git/**` exclude is inverted by VS Code into a dedicated watcher for the request, so the
+  events still arrive. (The superseded bullet above got the default right and the `**/.git/HEAD` watcher wrong —
+  the Git extension watches the whole first level of `.git`.)
+  (c) ★ `getRebaseCommit` builds `path.join(root, '.git', 'REBASE_HEAD' | 'rebase-apply' | 'rebase-merge')` —
+  not `dotGit.path` — so `state.rebaseCommit` is undefined in a linked worktree (reproduced on git 2.50.1 for
+  both rebase backends), and it needs `REBASE_HEAD`, which git 2.50.1 does not write at an interactive `break`,
+  after a failed `exec` or during `git am` — false negatives in the main worktree too; it never gives a false
+  positive. Merge and cherry-pick state are not exposed at all. Our `--git-path` directory check was present at
+  every pause point probed (conflict stops on both backends, `edit`, `break`, `exec`, `am`, `--update-refs`,
+  `--onto`, `gs stack restack`) and absent after abort and completion; it stays primary everywhere (E12, E19);
+  the note's "rebase in progress from `state.rebaseCommit`" is withdrawn.
+  (d) ★ `state.HEAD` reads the `HEAD` file under `rev-parse --git-dir` (worktree-correct, no D17 hazard on the
+  primary path), but `getHEADRef` then substitutes a **tag's** name (type `Tag`) when a tag points at a
+  detached HEAD, leaves an unborn branch with a name and no commit, and has no name mid-rebase (or a tag's) — so
+  `name === undefined` is neither necessary nor sufficient for "detached"; we keep `symbolic-ref --quiet HEAD`
+  (D17); the note's "HEAD / detached from `state.HEAD`" for item 13 is withdrawn.
+  (e) `state.refs` is deprecated and returns `[]` at both versions; `api.getRepositoryRoot`, `Repository.kind`
+  and `state.worktrees` are absent from 1.85's `git.d.ts` and present at 1.138 (added somewhere between; only
+  those two versions were read) — hence the vendored `git.d.ts` is the **1.85** file.
+  (f) `api.repositories` is re-sorted in place by root length on every lookup (order unstable) and every access
+  wraps a fresh `ApiRepository` (identity unstable): sort ourselves, key by `rootUri.fsPath`.
+  (g) `git.enabled: false` and "git not found" both leave `exports.enabled === false` and make `getAPI(1)` throw
+  `Git model not found`; only the former recovers (`onDidChangeEnablement(true)`, once), and at 1.138 the event
+  fires one statement before the API is usable — call `getAPI` a tick later. The true→false flip is not reported.
+  (h) ★ With `extensionDependencies: ["vscode.git"]` a user who disables the Git extension gets **no PR Cascade
+  at all** — the enablement service computes `DisabledByExtensionDependency` and the extension is never loaded;
+  only the Extensions view shows a warning — and the E82 row for (g) is needed regardless. So the API is
+  acquired at runtime (`getExtension` → `activate()`), one `undefined` check more. Of the four ★ points this is
+  the one design choice rather than a fact the source forced — (a), (c) and (d) record what the note had wrong;
+  Ric confirms or overrules it in the docs PR review. (`@vscode/test-cli`
+  would also run `code --install-extension vscode.git` for a manifest dependency; harmless on the 1.138 CLI,
+  a marketplace miss on the 1.85 one.)
+  (i) Discovery: `initialized` is set when the initial scan settles, independent of any repository's first
+  `git status`; submodules (default on, ten at most) arrive later as repositories of their own; a repository
+  closed from Source Control stays closed (`workspaceState`); a folder inside a repository whose root is not a
+  folder is parked and prompted (`git.openRepositoryInParentFolders`, default `prompt`), and the API's
+  `openRepository` cannot bypass that at 1.85 (it can at 1.138, behind a resource-trust request).
+  (j) Harness: `@vscode/test-electron` 3.1.0 passes `--disable-workspace-trust` and **no** `--disable-extensions`
+  (which spares built-ins anyway), so the Git extension is present in `test:ext`; the fixture's `[nested, root]`
+  workspace yields exactly one repository and no prompt (`openRepository` is `@sequentialize`d, so no race
+  either); `await repository.status()` runs the status without the focus wait and fires the event before it
+  resolves — the tests' synchronisation point, since `window.state.focused` under CI/xvfb is unverified.
+  Answering the Git extension's parent-folder prompt with *Always* / *Never* writes a **global** setting into
+  the reused `.vscode-test/user-data`; the per-root `parentRepository:<root>` entries it keeps in its
+  `globalState` (VS Code's per-extension key-value store) are harmless only while the fixture root is a fresh
+  `mkdtemp` per run.
+  (k) git-spice, measured with 0.31.2 on this Mac: `gs log short --json` and `log long --json` spawn only
+  read-only git children (`config`, `rev-parse`, `cat-file`, `for-each-ref`, `ls-tree`, `merge-base`,
+  `branch --show-current`) and write **nothing** under `.git` even with a stale index — so an event-driven
+  refresh cannot loop. `--cr-status` measured the same, but only where no forge matched the remote (no remote; a
+  local bare origin takes the same path): the forge path that queries GitHub/GitLab did not run offline, so it is
+  pinned in the e2e suite instead. It costs **~1.1 s per call**, a fixed floor independent of repository size, so
+  M5's `enrich` needs the §7.14.2 digest pre-filter rather than running on every event. What each command
+  touches at `.git`'s first level (E83's evidence, from before/after snapshots of `.git`): **nothing** —
+  `gs branch track` / `untrack` / `downstack track` (`refs/spice/data` + objects), `gs repo init`, `gs log …`,
+  `git branch -f`, `git update-ref`, `git tag`, `git push` of a branch other than HEAD's upstream;
+  **seen** — `gs branch checkout` / `onto` / `upstack onto` / `restack` with work to do (`HEAD`, `index`,
+  `ORIG_HEAD`), `gs commit create` / `amend` (`COMMIT_EDITMSG`, `index`), `gs branch create` / `delete` /
+  `rename` / `fold` (`HEAD`, `index`, `config`, `packed-refs`), `gs repo sync` (`FETCH_HEAD`), and `git push`
+  of the current branch to its upstream (the watched ref file). Remote windows: both extensions are
+  `workspace`-kind (each has `main`, no `extensionKind`), so they share the remote host and `getExtension`
+  works unchanged; PR Cascade must be installed on the remote.
+  **Open:** probe `window.state.focused` from an ext test on CI before any test relies on the focus-gated path;
+  re-measure the `gs log` floor on Linux CI before choosing M5's debounce and timeout values; pin "`gs log`
+  writes nothing under `.git`" with a test in M5 (item 22, offline; the `--cr-status` forge path in the opt-in
+  e2e suite by snapshotting `.git` around one call against the scratch repo) so a later git-spice cannot
+  reintroduce a writer unnoticed.
