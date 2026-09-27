@@ -6,8 +6,8 @@
  * GitRunner interface every git-reading module is written against, and the data model the
  * tree renders — StackLayer, RepoState, and the ChangedFile under each layer. Depends on:
  * nothing. Depended on by: every core module — core/git.ts implements GitRunner;
- * core/discovery.ts, core/trunk.ts, core/stack.ts and core/changes.ts take one;
- * core/stack.ts builds the RepoState and core/changes.ts the ChangedFiles. Plan: §4.3.
+ * core/trunk.ts, core/stack.ts and core/changes.ts take one; core/stack.ts builds the
+ * RepoState and core/changes.ts the ChangedFiles. Plan: §4.3.
  */
 
 /**
@@ -41,8 +41,8 @@ export interface GitRunner {
    * `rev-parse --verify` for a branch that may not exist. Resolves with `null` in that case,
    * so the caller can write `if (root === null)` instead of catching an exception. A
    * `cwd` that cannot be used — it does not exist, it is a file, or it cannot be entered —
-   * gets the same `null`: a workspace folder deleted or renamed on disk is "no repository
-   * here" to discovery (PR 3), not a problem with git.
+   * gets the same `null`: a repository folder deleted or renamed on disk under an open
+   * window is "nothing to ask here", not a problem with git.
    *
    * It swallows only those two — "git ran and said no" and "there is no usable place to
    * ask in". If git itself could not run — the executable is missing or the path setting
@@ -116,8 +116,9 @@ export interface ChangedFile {
 
 /**
  * Everything the tree knows about one repository — the output of the whole core pipeline
- * for one root: discovery finds `root`, detectTrunk finds `trunk`, computeStack fills in
- * `head` and `layers`. One object rather than four loose values so the tree view receives
+ * for one root: the built-in Git extension supplies `root` (src/vscode/gitApi.ts, plan
+ * §7.14), detectTrunk finds `trunk`, computeStack fills in `head` and `layers`. One object
+ * rather than four loose values so the tree view receives
  * one thing per repository and a test can assert on one thing (`toEqual`). The `null`
  * cases are states the tree shows as a message instead of a stack: no trunk (E4, "set
  * prCascade.trunk"), detached HEAD (E3). M4 adds `rebaseInProgress` here when it is
@@ -125,7 +126,7 @@ export interface ChangedFile {
  */
 // see primer §10 (union types: `string | null`)
 export interface RepoState {
-  /** The repository root, as discovery found it (physical path, no trailing slash). */
+  /** The repository root, as the Git extension reports it (the physical path, no trailing slash). */
   root: string;
   /** The ref the stack is measured against (`origin/main`, `main`), or null when none was found (E4). */
   trunk: string | null;

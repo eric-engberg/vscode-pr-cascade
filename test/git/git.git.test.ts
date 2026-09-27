@@ -275,7 +275,7 @@ describe('RealGitRunner', () => {
     });
 
     it('resolves null when the working directory does not exist (a stale workspace folder)', async () => {
-      // arrange: to discovery (PR 3) a folder that is gone is "no repository here", not an error
+      // arrange: to a caller asking about a folder that is gone, that is "no repository here", not an error
       const goneDir = path.join(scratchDir, 'gone');
       const git = new RealGitRunner();
 

@@ -47,7 +47,7 @@ const AUTO_DETECT: TrunkOptions = { configured: '', remote: 'origin' };
 
 /**
  * Creates a repository at `dir` with one commit on `branch`. Inline, as in
- * test/git/discovery.git.test.ts, rather than the fixture builder
+ * M1's discovery tests did (deleted in M4), rather than the fixture builder
  * (test/helpers/fixture.ts): the builder makes a stack on `main` or `master`, and the
  * repositories here need a branch called `trunk`, a second remote, and `origin/HEAD`
  * pointers set by hand.

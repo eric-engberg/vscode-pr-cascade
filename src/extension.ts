@@ -4,15 +4,16 @@
  *
  * Layer: wiring (plan §4.1); the only file VS Code loads directly (package.json "main"
  * points at its bundled form, dist/extension.js). Depends on: the `vscode` module,
- * core/git.ts, discovery.ts, trunk.ts, stack.ts, changes.ts, uri.ts (the scheme name),
- * vscode/config.ts, tree.ts, content.ts, commands.ts. Depended on by: VS Code itself,
- * and test/ext/*. Plan: §4.1, §9.1 (what activate returns), §10.1 items 6, M2 9, M3 11.
+ * core/git.ts, trunk.ts, stack.ts, changes.ts, uri.ts (the scheme name), vscode/gitApi.ts
+ * (the built-in Git extension: repositories, events, the git executable), vscode/config.ts,
+ * tree.ts, content.ts, commands.ts. Depended on by: VS Code itself, test/ext/* and
+ * test/ext-parent/*. Plan:
+ * §4.1, §6, §7.14, §9.1 (what activate returns), §10.1 items 6, M2 9, M3 11, M4 12a.
  */
 
 // see primer §1 (import / export), §2 (the vscode module) and §9 (`import type`)
 import * as vscode from 'vscode';
 import { changedFiles } from './core/changes';
-import { discoverRepoRoots } from './core/discovery';
 import { RealGitRunner } from './core/git';
 import type { ChangedFile, RepoState, StackLayer } from './core/model';
 import { computeStack } from './core/stack';
@@ -20,7 +21,10 @@ import { detectTrunk } from './core/trunk';
 import { STACK_DIFF_SCHEME } from './core/uri';
 import { openDiff } from './vscode/commands';
 import { readSettings } from './vscode/config';
+import type { PrCascadeSettings } from './vscode/config';
 import { StackDiffContentProvider } from './vscode/content';
+import { GitExtensionAdapter, GitUnavailableError, gitExecutable, realGitExtensionHost, sortRepositoryRoots } from './vscode/gitApi';
+import type { GitApi } from './vscode/gitApi';
 import { StackTreeProvider } from './vscode/tree';
 
 /**
@@ -58,14 +62,24 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
   // is deactivated, so nothing here has to be cleaned up by hand.
   context.subscriptions.push(output);
 
+  // The built-in Git extension is where the repositories come from (plan §7.14): the
+  // adapter runs its handshake when the first of the three pipelines below asks for the
+  // connection — the first refresh, moments from now — and keeps the outcome for every
+  // later one. The
+  // real host — `getExtension('vscode.git')`, the extensions event, the `git.enabled`
+  // setting — is handed in here so the adapter itself never has to touch those and a test
+  // can hand it stand-ins instead (vscode/gitApi.ts says why).
+  const gitExtension = new GitExtensionAdapter(realGitExtensionHost, output);
+  context.subscriptions.push(gitExtension);
+
   // The provider is handed both pipelines as functions and calls them when VS Code asks:
   // the first for the top of the tree, the second for the rows under a layer the user
   // opens (vscode/tree.ts explains why functions and not the results). The output
   // channel goes along so a failure the provider turns into a row is also logged.
   // see primer §5 (arrow functions) and §33 (function types: a closure over `output`)
   const provider = new StackTreeProvider(
-    () => loadRepoStates(output),
-    (root, layer) => loadChangedFiles(output, root, layer),
+    () => loadRepoStates(output, gitExtension),
+    (root, layer) => loadChangedFiles(output, gitExtension, root, layer),
     output,
   );
   context.subscriptions.push(provider);
@@ -79,9 +93,14 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
   // The toolbar button (package.json "contributes.menus" › "view/title") runs the command
   // by this id; registering it here is what gives the id a function to run.
   context.subscriptions.push(vscode.commands.registerCommand('prCascade.refresh', refresh));
-  // A folder added to or removed from the workspace changes which repositories exist
-  // (plan §6: "re-run discovery on onDidChangeWorkspaceFolders"). Every other trigger —
-  // window focus, the editor changing, after a command — is M4's.
+  // The Git extension opened or closed a repository, or became usable (plan §7.14.2) — the
+  // list of repositories changed, so redraw.
+  context.subscriptions.push(gitExtension.onDidChange(refresh));
+  // A folder added, removed or reordered in the workspace changes the order the
+  // repositories are listed in (plan §6: folder order is the sort key), and need not open
+  // or close a repository at all — a folder added inside an open repository opens nothing
+  // — so this one-line listener stays beside the Git extension's events. The refresh on
+  // every change a repository sees is M4 item 12b's.
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(refresh));
 
   // The diff on click (M3). Two registrations that only meet inside VS Code: the
@@ -93,7 +112,7 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
   // loaders: a function closing over `output`, built here, so vscode/content.ts never
   // sees a runner or a setting.
   // see primer §53 (TextDocumentContentProvider and registering one for a scheme)
-  const contentProvider = new StackDiffContentProvider((root, ref, relPath) => loadFileAtRef(output, root, ref, relPath));
+  const contentProvider = new StackDiffContentProvider((root, ref, relPath) => loadFileAtRef(output, gitExtension, root, ref, relPath));
   context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(STACK_DIFF_SCHEME, contentProvider));
   // Run by a click on a file row (vscode/tree.ts sets `item.command` to this id) with
   // the row's node as the argument, or from the Command Palette with none.
@@ -114,37 +133,64 @@ export function deactivate(): void {
 }
 
 /**
- * The whole read pipeline, run once per refresh: the four core functions in the order
- * the plan lays them out (§6 discovery, §5 trunk, §5 stack), over the folders open in
- * this window. One RepoState per repository, in workspace order; a repository whose
- * trunk cannot be found is kept, with `trunk: null`, so the tree can say so (E4) rather
- * than leave the repository out without a word.
- *
- * Settings are read here, on every run, so a changed `prCascade.gitPath`,
- * `prCascade.trunk` or scan setting takes effect at the next refresh — and the git
- * runner is rebuilt from them for the same reason (it holds nothing but the path). A
- * failure anywhere in here — git missing (E17), a command exiting non-zero — rejects, and
- * the provider turns that into one error row (vscode/tree.ts, topLevelNodes).
+ * What every pipeline starts from: the Git extension's API, the settings as they are right
+ * now, and a git runner built from the two. Read afresh on every call — a corrected
+ * `prCascade.gitPath` or `prCascade.trunk` takes effect at the next refresh or click, not
+ * the next window — while the connection itself is the adapter's one memoised handshake,
+ * so awaiting it costs nothing once it has settled.
  */
-// see primer §6 (async / await), §22 (for ... of) and §30 (`??`)
-async function loadRepoStates(output: vscode.OutputChannel): Promise<RepoState[]> {
-  const settings = readSettings();
-  const git = new RealGitRunner(settings.gitPath);
+// see primer §9 (interface)
+interface ConnectedGit {
+  api: GitApi;
+  settings: PrCascadeSettings;
+  git: RealGitRunner;
+}
 
-  // `workspaceFolders` is `undefined` when no folder is open at all (an empty window),
-  // and a list otherwise; `?? []` makes both cases a list. `uri.fsPath` is the folder as
-  // a plain file-system path, which is what git needs as a working directory.
-  // see primer §25 (arrays: map)
+/**
+ * Waits for the Git extension and builds the runner. The executable is `prCascade.gitPath`
+ * when set, else the git the Git extension found (vscode/gitApi.ts, `gitExecutable`), so
+ * both extensions run the same git. An unusable Git extension (E82) is thrown as a
+ * GitUnavailableError carrying the row text from plan §7.14.3: no git of ours runs, and
+ * the tree draws the message as a warning (vscode/tree.ts).
+ */
+// see primer §6 (async / await) and §59 (tagged unions: `connection.kind` decides which
+// fields exist)
+async function connectedGit(gitExtension: GitExtensionAdapter): Promise<ConnectedGit> {
+  const connection = await gitExtension.connection();
+  if (connection.kind === 'unavailable') {
+    throw new GitUnavailableError(connection.message);
+  }
+  const settings = readSettings();
+  const git = new RealGitRunner(gitExecutable(settings.gitPath, connection.api.git.path));
+  return { api: connection.api, settings, git };
+}
+
+/**
+ * The whole read pipeline, run once per refresh: the repositories the Git extension has
+ * open (plan §6, §7.14), then the core functions in the order the plan lays them out (§5
+ * trunk, §5 stack). One RepoState per repository, in the order of plan §6 — by the
+ * workspace folder each belongs to, then by path — and a repository whose trunk cannot be
+ * found is kept, with `trunk: null`, so the tree can say so (E4) rather than leave the
+ * repository out without a word. A failure anywhere in here — git missing (E17), a command
+ * exiting non-zero, the Git extension unusable (E82) — rejects, and the provider turns
+ * that into one row (vscode/tree.ts, topLevelNodes).
+ */
+// see primer §6 (async / await), §22 (for ... of), §25 (arrays: map) and §30 (`??`)
+async function loadRepoStates(output: vscode.OutputChannel, gitExtension: GitExtensionAdapter): Promise<RepoState[]> {
+  const { api, settings, git } = await connectedGit(gitExtension);
+
+  // `rootUri.fsPath` is the repository root as a plain file-system path — the physical
+  // path, since the Git extension gets it from `git rev-parse --show-toplevel`. The Git
+  // extension's own list is in no stable order (vscode/gitApi.ts, sortRepositoryRoots);
+  // `workspaceFolders` is `undefined` when no folder is open at all (an empty window), and
+  // a list otherwise; `?? []` makes both cases a list.
+  const roots = api.repositories.map((repository) => repository.rootUri.fsPath);
   const folders = vscode.workspace.workspaceFolders ?? [];
   const folderPaths = folders.map((folder) => folder.uri.fsPath);
-  // The settings object is a DiscoveryOptions by declaration (vscode/config.ts:
-  // `PrCascadeSettings extends DiscoveryOptions`), its two scan fields already checked
-  // there, so it is handed over as it is — no second copy to keep in step. The rules of
-  // the scan itself live in core/discovery.ts (plan §13.4).
-  const roots = await discoverRepoRoots(folderPaths, git, settings);
+  const sortedRoots = sortRepositoryRoots(roots, folderPaths);
 
   const states: RepoState[] = [];
-  for (const root of roots) {
+  for (const root of sortedRoots) {
     const trunk = await detectTrunk(git, root, { configured: settings.trunk, remote: settings.remote });
     if (trunk === null) {
       output.appendLine(`${root}: no trunk found (set prCascade.trunk)`);
@@ -172,16 +218,20 @@ async function loadRepoStates(output: vscode.OutputChannel): Promise<RepoState[]
  * (core/changes.ts) does the work, over the two SHAs the layer carries rather than the
  * branch names — its doc comment says why.
  *
- * The runner is built here, the way loadRepoStates builds its own: from the setting, on
+ * The runner comes from connectedGit, the way loadRepoStates' does: from the settings, on
  * every call, so a corrected `prCascade.gitPath` takes effect at the next click and not
  * at the next window. Neither the provider nor the core ever constructs one (plan §4.1):
  * this function is what activate() hands the provider, and a test could hand it
  * something else. A failure rejects, and the provider turns it into one error row under
  * the layer (vscode/tree.ts, filesForLayer).
  */
-async function loadChangedFiles(output: vscode.OutputChannel, root: string, layer: StackLayer): Promise<ChangedFile[]> {
-  const settings = readSettings();
-  const git = new RealGitRunner(settings.gitPath);
+async function loadChangedFiles(
+  output: vscode.OutputChannel,
+  gitExtension: GitExtensionAdapter,
+  root: string,
+  layer: StackLayer,
+): Promise<ChangedFile[]> {
+  const { git } = await connectedGit(gitExtension);
   const files = await changedFiles(git, root, layer.parentSha, layer.sha);
   output.appendLine(`${layer.name}: ${files.length} file(s) changed against ${layer.parent}`);
   return files;
@@ -191,8 +241,8 @@ async function loadChangedFiles(output: vscode.OutputChannel, root: string, laye
  * The third pipeline, one file deep: the text of `relPath` as it was at the commit `ref`
  * in the repository at `root` — what the content provider (vscode/content.ts) hands VS
  * Code for one side of a diff. Run once per side of each diff the user opens, and never
- * on a refresh. The runner is built from the setting on every call, as the other two
- * pipelines build theirs, and for the same reason.
+ * on a refresh. The runner comes from connectedGit on every call, as the other two
+ * pipelines' do, and for the same reason.
  *
  * The command is `git show <ref>:<relPath> --` (plan §5 "File content at ref"): `<ref>:<path>`
  * names a blob — that file in that commit's tree — and `git show` prints it as it is, no
@@ -217,9 +267,14 @@ async function loadChangedFiles(output: vscode.OutputChannel, root: string, laye
  */
 // see primer §6 (async / await), §12 (template strings), §48 (the conditional expression)
 // and §30 (`??`: the empty string for a file the commit does not have)
-async function loadFileAtRef(output: vscode.OutputChannel, root: string, ref: string, relPath: string): Promise<string> {
-  const settings = readSettings();
-  const git = new RealGitRunner(settings.gitPath);
+async function loadFileAtRef(
+  output: vscode.OutputChannel,
+  gitExtension: GitExtensionAdapter,
+  root: string,
+  ref: string,
+  relPath: string,
+): Promise<string> {
+  const { git } = await connectedGit(gitExtension);
   const content = await git.tryRun(['show', `${ref}:${relPath}`, '--'], root);
   const outcome = content === null ? 'git had no content for it, shown empty' : `${content.length} character(s)`;
   // The SHA cut to seven characters, as the tooltips show it (vscode/tree.ts, shortSha,

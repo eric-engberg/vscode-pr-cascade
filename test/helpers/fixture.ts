@@ -47,7 +47,7 @@ export interface FixtureOptions {
  */
 // see primer §9 (interface: methods) and §11 (an optional `?` parameter)
 export interface Fixture {
-  /** The repository root — the physical path, so it compares equal to what discovery returns. */
+  /** The repository root — the physical path, so it compares equal to what git (and the built-in Git extension) report as the root. */
   dir: string;
   /** Runs `git <args>` in the repository and returns stdout; throws on a non-zero exit. For assertions and one-off setup. */
   git(args: string[]): string;
@@ -81,8 +81,8 @@ const FILE_NAMES = 'abcdefghijklmnopqrstuvwxyz';
  * Follows plan Appendix A line by line, with two additions the shell script did not need:
  * `origin/HEAD` is set explicitly (git versions differ in whether `fetch` creates it; see
  * test/git/trunk.git.test.ts), and the scratch directory's path is resolved to its
- * physical form, because on macOS `os.tmpdir()` lives under a symlink and discovery
- * returns physical paths (brief §4).
+ * physical form, because on macOS `os.tmpdir()` lives under a symlink and git reports a
+ * repository root by its physical path (brief §4).
  */
 // see primer §30 (`??`: a default for a missing option) and §29 (counted `for` loops)
 export function buildStack(options: FixtureOptions = {}): Fixture {
