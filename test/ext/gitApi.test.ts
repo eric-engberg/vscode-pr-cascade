@@ -5,14 +5,15 @@
  * expanded, reordered and removed at runtime, seen through the Git extension's own
  * open/close events); the sort rule for roots; which git the extension spawns; and, with
  * stand-ins for the Git extension, every way the handshake can fail (E82), the two ways
- * it recovers, and what a handshake overtaken by a newer one or by dispose() leaves behind
- * (nothing).
+ * it recovers, what a handshake overtaken by a newer one or by dispose() leaves behind
+ * (nothing), and the status signal — one event per completed `git status` in any open
+ * repository, including one opened later (M4 item 12b).
  *
  * Layer: test, extension host (plan §9.1 layer 3; Mocha inside VS Code, `npm run test:ext`).
  * Depends on: the running extension (what activate() returns), the real built-in Git
  * extension through test/ext/helpers/gitApi.ts, src/vscode/gitApi.ts imported directly
  * (the adapter, its pure helpers), the fixture builder. Depended on by: nothing. Plan:
- * §7.14, §6, §8 E1b/E2/E82, §9.4 row `ext/gitApi.test.ts`, §10.1 item 12a.
+ * §7.14, §7.14.2, §6, §8 E1b/E2/E82, §9.4 row `ext/gitApi.test.ts`, §10.1 items 12a and 12b.
  */
 
 // see primer §1 (import / export) and §9 (`import type`); the `src/vscode/gitApi` import
@@ -26,7 +27,7 @@ import { after, before, describe, it } from 'mocha';
 import * as vscode from 'vscode';
 import type { ExtensionApi } from '../../src/extension';
 import { GitExtensionAdapter, GitUnavailableError, gitExecutable, realGitExtensionHost, sortRepositoryRoots } from '../../src/vscode/gitApi';
-import type { GitApi, GitConnection, GitExtensionExports, GitExtensionHandle, GitExtensionHost } from '../../src/vscode/gitApi';
+import type { GitApi, GitConnection, GitExtensionExports, GitExtensionHandle, GitExtensionHost, GitRepository } from '../../src/vscode/gitApi';
 import { StackTreeProvider } from '../../src/vscode/tree';
 import { buildStack } from '../helpers/fixture';
 import type { Fixture } from '../helpers/fixture';
@@ -93,19 +94,26 @@ function tick(): Promise<void> {
 // has (src/vscode/gitApi.ts, GitExtensionHost), each under the test's control.
 // ---------------------------------------------------------------------------------------
 
-/** What a fake API needs so the tests can fire its events: the emitters behind them. */
+/** What a fake API needs so the tests can fire its events and change its repository list. */
 // see primer §9 (interface) and §32 (EventEmitter)
 interface FakeApi {
   api: GitApi;
   stateChanges: vscode.EventEmitter<'uninitialized' | 'initialized'>;
   opened: vscode.EventEmitter<unknown>;
   closed: vscode.EventEmitter<unknown>;
+  /**
+   * Replaces what `api.repositories` reports. The real Git extension updates its list
+   * *before* it fires `opened` / `closed` (plan §7.14.2), so a test does the same: set the
+   * list, then fire.
+   */
+  setRepositories(repositories: GitRepository[]): void;
 }
 
 /**
- * A Git extension API with no repositories and a made-up git path. `state` starts as
- * given so a test can hold the handshake at `uninitialized` and release it later: firing
- * `stateChanges` moves it on, the way the real one moves after the initial scan.
+ * A Git extension API with no repositories (until `setRepositories`) and a made-up git
+ * path. `state` starts as given so a test can hold the handshake at `uninitialized` and
+ * release it later: firing `stateChanges` moves it on, the way the real one moves after the
+ * initial scan.
  */
 // see primer §61 (a getter in an object literal: `get state()` is read like a field)
 function fakeApi(state: 'uninitialized' | 'initialized' = 'initialized'): FakeApi {
@@ -113,6 +121,7 @@ function fakeApi(state: 'uninitialized' | 'initialized' = 'initialized'): FakeAp
   const opened = new vscode.EventEmitter<unknown>();
   const closed = new vscode.EventEmitter<unknown>();
   let current = state;
+  let repositories: GitRepository[] = [];
   stateChanges.event((next) => {
     current = next;
   });
@@ -122,11 +131,39 @@ function fakeApi(state: 'uninitialized' | 'initialized' = 'initialized'): FakeAp
     },
     onDidChangeState: stateChanges.event,
     git: { path: '/fake/bin/git' },
-    repositories: [],
+    get repositories() {
+      return repositories;
+    },
     onDidOpenRepository: opened.event,
     onDidCloseRepository: closed.event,
   };
-  return { api, stateChanges, opened, closed };
+  return {
+    api,
+    stateChanges,
+    opened,
+    closed,
+    setRepositories(next: GitRepository[]): void {
+      repositories = next;
+    },
+  };
+}
+
+/** A stand-in repository: its root, the event a test fires for "a git status completed", and a `status()` that runs nothing. */
+interface FakeRepository {
+  repository: GitRepository;
+  statusRuns: vscode.EventEmitter<void>;
+}
+
+function fakeRepository(root: string): FakeRepository {
+  const statusRuns = new vscode.EventEmitter<void>();
+  return {
+    repository: {
+      rootUri: vscode.Uri.file(root),
+      state: { onDidChange: statusRuns.event },
+      status: () => Promise.resolve(),
+    },
+    statusRuns,
+  };
 }
 
 /** What a fake exports object needs so the tests can flip `enabled`, hold `getAPI` back, and fire the event. */
@@ -320,6 +357,10 @@ describe('the built-in Git extension as the source of repositories (plan §7.14)
       await foldersChanged;
       await opened;
       await tick();
+      // The Git extension runs the new repository's first `git status` right after opening
+      // it, and that status becomes a debounced refresh (M4 item 12b): waited for, so it
+      // cannot land in the test that called this helper.
+      await nextEvent(provider.onDidChangeTreeData);
     }
 
     it('lists the repository once the Git extension has opened it, and refreshes twice on the way: for the folder, then for the open event', async () => {
@@ -346,9 +387,14 @@ describe('the built-in Git extension as the source of repositories (plan §7.14)
         // once for the open event (the adapter's) — two, not one, or the open event is
         // not wired; and the view now has a row per repository (plan §6), the fixture
         // repository first (its folders come first in the workspace), so the repository
-        // the Git extension opened is the one that was added
+        // the Git extension opened is the one that was added. A third refresh follows,
+        // debounced (M4 item 12b): the Git extension runs the new repository's first
+        // `git status` right after opening it, and that status is relayed like any other.
+        // Waited for at the end, so it cannot land in the next test.
         assert.deepStrictEqual(treeChanges, ['tree', 'tree']);
+        const thirdRefresh = nextEvent(provider.onDidChangeTreeData);
         assert.deepStrictEqual(await topLevelLabels(), ['repo', 'second']);
+        await thirdRefresh;
       } finally {
         subscription.dispose();
       }
@@ -833,6 +879,96 @@ describe('the built-in Git extension as the source of repositories (plan §7.14)
       // into a Promise nobody can catch
       const connection = await pending;
       assert.strictEqual(connection.kind, 'ready');
+    });
+  });
+
+  describe('the status signal: one onDidRunStatus per completed git status (plan §7.14.2)', () => {
+    it('relays a completed status of any open repository — one event each; the coalescing is the refresh\'s debounce (src/extension.ts), not the adapter\'s', async () => {
+      // arrange: two repositories open before the handshake
+      const fake = fakeApi();
+      const alpha = fakeRepository('/w/alpha');
+      const beta = fakeRepository('/w/beta');
+      fake.setRepositories([alpha.repository, beta.repository]);
+      const { exports } = fakeExports(true, fake.api);
+      const { host } = fakeHost(handleFor(exports), true);
+      const adapter = new GitExtensionAdapter(host, output);
+      try {
+        await adapter.connection();
+        const statuses: string[] = [];
+        const subscription = adapter.onDidRunStatus(() => {
+          statuses.push('status');
+        });
+
+        // act: two statuses in alpha, one in beta
+        alpha.statusRuns.fire();
+        alpha.statusRuns.fire();
+        beta.statusRuns.fire();
+        subscription.dispose();
+
+        // assert
+        assert.deepStrictEqual(statuses, ['status', 'status', 'status']);
+      } finally {
+        adapter.dispose();
+      }
+    });
+
+    it('listens to a repository the Git extension opens later, and stops for one it closes', async () => {
+      // arrange: alpha open at the handshake; beta not yet
+      const fake = fakeApi();
+      const alpha = fakeRepository('/w/alpha');
+      const beta = fakeRepository('/w/beta');
+      fake.setRepositories([alpha.repository]);
+      const { exports } = fakeExports(true, fake.api);
+      const { host } = fakeHost(handleFor(exports), true);
+      const adapter = new GitExtensionAdapter(host, output);
+      try {
+        await adapter.connection();
+        const statuses: string[] = [];
+        const subscription = adapter.onDidRunStatus(() => {
+          statuses.push('status');
+        });
+
+        // act: beta opens (list first, then the event, as the real one does) and runs a
+        // status; alpha runs one; alpha closes and runs another, which nobody should hear;
+        // beta runs a last one
+        fake.setRepositories([alpha.repository, beta.repository]);
+        fake.opened.fire(undefined);
+        beta.statusRuns.fire();
+        alpha.statusRuns.fire();
+        fake.setRepositories([beta.repository]);
+        fake.closed.fire(undefined);
+        alpha.statusRuns.fire();
+        beta.statusRuns.fire();
+        subscription.dispose();
+
+        // assert: three heard — beta's first, alpha's, beta's last — and alpha's after its
+        // close not. Two would mean beta was never listened to; four, alpha still was.
+        assert.deepStrictEqual(statuses, ['status', 'status', 'status']);
+      } finally {
+        adapter.dispose();
+      }
+    });
+
+    it('stops relaying when disposed', async () => {
+      // arrange
+      const fake = fakeApi();
+      const alpha = fakeRepository('/w/alpha');
+      fake.setRepositories([alpha.repository]);
+      const { exports } = fakeExports(true, fake.api);
+      const { host } = fakeHost(handleFor(exports), true);
+      const adapter = new GitExtensionAdapter(host, output);
+      await adapter.connection();
+      const statuses: string[] = [];
+      adapter.onDidRunStatus(() => {
+        statuses.push('status');
+      });
+
+      // act
+      adapter.dispose();
+      alpha.statusRuns.fire();
+
+      // assert
+      assert.deepStrictEqual(statuses, []);
     });
   });
 

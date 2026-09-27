@@ -265,8 +265,9 @@ Two small things that appear alongside it:
 An interface can also `extends` another interface. The first example here,
 `PrCascadeSettings extends DiscoveryOptions` in `src/vscode/config.ts`, left with
 `core/discovery.ts` in M4 (item 12a); the live ones are in `src/vscode/gitApi.ts`:
-`GitApi extends Pick<API, 'state' | 'onDidChangeState' | 'git' | 'repositories'>` (§49 for
-`Pick`) has those four members of the Git extension's `API` plus two events of its own, and
+`GitApi extends Pick<API, 'state' | 'onDidChangeState' | 'git'>` (§49 for `Pick`) has those
+three members of the Git extension's `API` plus `repositories`, declared beside them with the
+narrower `readonly GitRepository[]` type (§14), and two events of its own, and
 `GitExtensionExports extends Pick<GitExtension, 'enabled' | 'onDidChangeEnablement'>` adds
 `getAPI`. The child lists the parent's fields as its own, so anything that has all of them
 fits — the Git extension's real object can be handed over wherever a `GitApi` is expected,
@@ -425,6 +426,17 @@ in its initializer — and `error.exitCode = 1` anywhere later is a compile erro
 `const` (§4) for fields, and like `const` it is a compile-time promise only. Read it as
 "this is a fact about the object, not a knob": a `GitError` describes one failure, and
 nothing should be able to edit that description afterwards.
+
+`readonly` also goes in front of an **array type** — `readonly string[]`
+(`sortRepositoryRoots` in `src/vscode/gitApi.ts`, M4) and `readonly GitRepository[]`
+(`GitApi.repositories`). That is the same promise for the array itself: reading, `length`,
+`map`, `filter` and `for … of` work, while `push`, `sort`, `splice` and `roots[0] = …` are
+compile errors. A function taking one promises not to change its caller's array — which is
+why `sortRepositoryRoots` copies with `map` before it sorts — and a field declared with it
+cannot be edited in place through the type. A plain `string[]` is accepted where a
+`readonly string[]` is asked for (giving up rights is always fine), never the other way
+round; so the Git extension's own mutable `repositories` array fits `GitApi`, and so does a
+test stand-in's.
 
 ## 15. new Promise
 
@@ -2439,9 +2451,9 @@ imported using 'import type'"). So nothing from that file is ever used as a valu
 against the number (`Tag` is `2`) or a constant of our own, as plan §7.14.1 says. Today the
 adapter reads no `RefType` at all.
 
-The last piece is why `gitApi.ts` narrows what it takes: `GitApi` is a `Pick` (§49) of four
-members plus the two events, declared as `Event<unknown>` because the adapter never reads
-the repository an event carries. A test can then build the whole API from a small object
+The last piece is why `gitApi.ts` narrows what it takes: `GitApi` is a `Pick` (§49) of three
+members plus `repositories`, narrowed to the `GitRepository` slice, and the two events,
+declared as `Event<unknown>` because the adapter never reads the repository an event carries. A test can then build the whole API from a small object
 literal (§61) — six things, where the real `API` has eighteen and a `Repository`, what its
 events carry, 53 — and that, with the three seams in `GitExtensionHost`, is what lets
 `test/ext/gitApi.test.ts` import the adapter and put it through every E82 row inside a
@@ -2547,3 +2559,98 @@ never rejects by design (every way out is an E82 row, and `keep` / `log` keep ev
 shutdown case quiet) and the queued functions only assign and fire. Where a rejection is
 possible, `await` inside a `try` (§18) is the right tool, and this codebase uses it
 everywhere else.
+
+## 64. A debounce: one pending timer as a queue of one
+
+*First seen in `src/core/debounce.ts`; used in `src/extension.ts` (the refresh).*
+
+```ts
+export function debounce(action: () => void, delayMs: number): Debounced {
+  let pending: NodeJS.Timeout | undefined;
+  return {
+    schedule(): void {
+      if (pending !== undefined) {
+        clearTimeout(pending);
+      }
+      pending = setTimeout(() => {
+        pending = undefined;
+        action();
+      }, delayMs);
+    },
+    cancel(): void { … },
+  };
+}
+```
+
+A **debounce** turns a burst of calls into one: the action runs once, a quiet period after
+the *last* call. The whole mechanism is §58's two timer calls and one variable. Each
+`schedule()` cancels the run the previous call had queued (`clearTimeout`) and queues a new
+one `delayMs` away (`setTimeout`); as long as calls keep coming closer together than
+`delayMs`, no run ever fires, and the first quiet period lets the last one through. The
+callback clears `pending` before running the action. Not for safety — `clearTimeout` on a
+handle that has already fired does nothing (§58: it cancels the call *if it has not happened
+yet*), and `schedule()` starts a fresh count either way — but as bookkeeping: once the run
+starts nothing is pending, and the variable should say so, so neither method ever handles a
+dead timer. The *order* is what matters: a `schedule()` from inside the action stores a new
+handle, and a clear placed after `action()` would overwrite it, leaving a timer that no
+later `schedule()` or `cancel()` could withdraw.
+
+Three things to notice. `pending` is a `let` in the function body (§4), not a field on a
+class: the two methods in the returned object literal close over it (§5, §33), which is all
+the state a debounce needs, and there is no `this` for a caller to lose when it passes
+`refreshSoon.schedule` around. Its type, `NodeJS.Timeout | undefined` (§8, §10), is written
+out because the `let` starts with no value (§4) and the assignments that would tell the
+compiler its type happen inside the two methods — closures the compiler does not follow
+when working a variable's type out from later assignments. Left bare, `strict` reports
+`pending` as implicitly `any` (TS7034); the union names both things the variable holds
+over its life. `Timeout` is Node's type for the handle `setTimeout` returns (§58);
+`tsconfig.json` loads Node's types, so the name is in scope with no import. And `cancel()` exists for shutdown: a run still
+pending when the extension is disposed would fire into a view that is gone.
+
+Why hand-rolled and not `lodash.debounce`: plan §11.3 — ten lines specific to us, against
+a dependency to audit and bundle. `src/extension.ts` builds one, `refreshSoon`, and hands
+its `schedule` to the two callers that come in bursts, the Git extension's status events
+and the Refresh button; `{ dispose: () => refreshSoon.cancel() }` on `context.subscriptions`
+is an object literal standing in for a `Disposable` (§9: anything with a `dispose` method
+fits).
+
+## 65. Faking the clock in a test: `vi.useFakeTimers` and `vi.advanceTimersByTime`
+
+*First seen in `test/unit/debounce.test.ts`.*
+
+```ts
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+debounced.schedule();
+vi.advanceTimersByTime(DELAY_MS - 1);
+debounced.schedule();
+vi.advanceTimersByTime(DELAY_MS - 1);
+expect(runs).toBe(0);
+vi.advanceTimersByTime(1);
+expect(runs).toBe(1);
+```
+
+A test of a debounce is a test about *time*, and real time makes a poor test: a 100 ms wait
+is slow, and a busy machine can stretch it so that "just before the deadline" lands after
+it. Vitest's `vi` object can replace `setTimeout`, `clearTimeout` and their relatives with
+fakes that keep a clock of their own: `vi.useFakeTimers()` installs them, and from then on
+a queued callback runs only when the test moves the clock — `vi.advanceTimersByTime(ms)`
+runs every callback whose time has come, in order, and returns. The code under test is not
+changed and does not know: `debounce.ts` calls the global `setTimeout`, and the global is
+what was swapped. `vi.useRealTimers()` puts the real ones back.
+
+`beforeEach` / `afterEach` (Vitest's, the same names Mocha uses in §57) run around every
+`it` in the block, so each test starts with fresh fake timers and none leaks them into the
+next file. The tests then read as a timeline — above: a call, almost the whole period, a
+second call, almost the whole period again, a look at the count (still nothing: the first
+call's deadline passed unfired), one more millisecond, another look — which is exactly the
+specification of "a quiet period counted from the last call", and distinguishes it from one
+counted from the first. (Vitest's `vi.fn()` spies would also count the calls; a plain
+`let runs = 0` counter says the same with nothing new to learn.)

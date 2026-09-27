@@ -1,19 +1,21 @@
 /**
  * vscode/gitApi.ts — the extension's connection to VS Code's built-in Git extension: the
  * one place that asks it for its API, waits until it has found the repositories in the
- * window, and passes on the three things this extension takes from it (plan §7.14) — the
- * repository list, the "a repository opened / closed" events, and the git executable it
- * found. Everything else the extension knows about a repository still comes from its own
- * git commands (plan §5).
+ * window, and passes on the four things this extension takes from it (plan §7.14) — the
+ * repository list, the "a repository opened / closed" events, each repository's "a git
+ * status just completed" event (relayed as one signal, `onDidRunStatus`), and the git
+ * executable it found. Everything else the extension knows about a repository still comes
+ * from its own git commands (plan §5).
  *
  * Layer: vscode adapter (plan §4.1). Depends on: the `vscode` module, Node's `node:path`,
  * and vscode/git.d.ts — the Git extension's public types, copied verbatim from VS Code
  * 1.85 (the oldest VS Code this extension supports) so the compiler refuses anything a
  * newer Git extension added. Depended on by: src/extension.ts (one adapter per window,
- * handed the real host; roots and the git path read from it on every refresh),
- * vscode/tree.ts (GitUnavailableError → a warning row), test/ext/gitApi.test.ts, and the
- * ext-test helper test/ext/helpers/gitApi.ts (so test/ext-parent/parentFolder.test.ts).
- * Plan: §7.14, §6, §7.3 `prCascade.gitPath`, §8 E82, §10.1 item 12a.
+ * handed the real host; roots and the git path read from it on every refresh, the status
+ * signal debounced into the refresh), vscode/tree.ts (GitUnavailableError → a warning
+ * row), test/ext/gitApi.test.ts, and the ext-test helper test/ext/helpers/gitApi.ts (so
+ * test/ext/tree.test.ts's E20 and test/ext-parent/parentFolder.test.ts). Plan: §7.14, §6,
+ * §7.3 `prCascade.gitPath`, §8 E20/E82, §10.1 items 12a and 12b.
  */
 
 // see primer §1 (import / export), §2 (the vscode module) and §9 (`import type`); the
@@ -24,26 +26,42 @@
 // `const enum` — into a compile error instead of a bundle-time failure
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import type { API, GitExtension } from './git';
+import type { API, GitExtension, Repository, RepositoryState } from './git';
+
+/**
+ * The part of a Git-extension `Repository` this extension reads: where it is (`rootUri`);
+ * its "a git status just completed" event (`state.onDidChange`, plan §7.14.2 — it fires
+ * after every completed run, changed or not, so it says "look again", never what changed);
+ * and `status()`, which runs one now, without the Git extension's wait for window focus —
+ * the tests' synchronisation point after a git command run outside VS Code (plan §9.1).
+ * Nothing else of the fifty-odd members: the branch name, the change lists and the rest
+ * stay this extension's own git's answers (plan §5, §7.14), and a stand-in for tests has
+ * three things to provide.
+ */
+// see primer §49 (`Pick<T, K>`) and §9 (`extends` on an interface)
+export interface GitRepository extends Pick<Repository, 'rootUri' | 'status'> {
+  readonly state: Pick<RepositoryState, 'onDidChange'>;
+}
 
 /**
  * The part of the Git extension's API this extension reads — and, by being a type of its
- * own, the whole of it: `Pick` (primer §49) names four members and the two events are
- * declared beside them, and nothing else on the real object is reachable through this
- * type, so a stand-in for tests has six things to provide, not the eighteen of the real
- * `API` — nor a `Repository` per event, see below. `state` says
- * whether the Git extension has finished its first look through the workspace;
- * `repositories` are the repositories it has open right now; the two events say when that
- * list changes; `git.path` is the executable it found.
+ * own, the whole of it: `Pick` (primer §49) names three members, the other three are
+ * declared beside them with narrower types, and nothing else on the real object is
+ * reachable through this type, so a stand-in for tests has six things to provide, not the
+ * eighteen of the real `API`. `state` says whether the Git extension has finished its
+ * first look through the workspace; `repositories` are the repositories it has open right
+ * now (each as the `GitRepository` slice above); the two events say when that list
+ * changes; `git.path` is the executable it found.
  *
  * The events are typed `Event<unknown>` rather than the `Event<Repository>` git.d.ts
  * declares: this file never reads the repository an event carries — the list is re-read
  * whole — and the looser type is what lets a test fire the event without building a whole
  * `Repository`. The real API still fits: an event that hands out a `Repository` is an
- * event that hands out *something*.
+ * event that hands out *something*, and a `Repository` is a `GitRepository` with more.
  */
-// see primer §49 (`Pick<T, K>`) and §9 (`extends` on an interface)
-export interface GitApi extends Pick<API, 'state' | 'onDidChangeState' | 'git' | 'repositories'> {
+// see primer §49 (`Pick<T, K>`), §9 (`extends` on an interface) and §14 (`readonly` on an array type)
+export interface GitApi extends Pick<API, 'state' | 'onDidChangeState' | 'git'> {
+  readonly repositories: readonly GitRepository[];
   readonly onDidOpenRepository: vscode.Event<unknown>;
   readonly onDidCloseRepository: vscode.Event<unknown>;
 }
@@ -163,7 +181,8 @@ export function gitExecutable(setting: string, apiPath: string): string {
  * it, and that repository sorts as belonging to no folder — last, still shown. Accepted:
  * the view is right, only the order is not, and the case needs a symlinked workspace.
  */
-// see primer §25 (arrays: map) and §26 (sort and comparison functions)
+// see primer §25 (arrays: map), §26 (sort and comparison functions) and §14 (`readonly` on
+// an array type: the caller's arrays are read, never changed)
 export function sortRepositoryRoots(roots: readonly string[], folderPaths: readonly string[]): string[] {
   // Pair every root with the index of its folder once, so the comparison below is two
   // numbers and two strings rather than a search per comparison.
@@ -228,7 +247,9 @@ function compareByCharacterCode(first: string, second: string): number {
  * enabled again in the Extensions view (`vscode.extensions.onDidChange`; VS Code starts a
  * re-enabled extension in place, without a reload — plan §7.14.3 row 1). It fires
  * `onDidChange` — "the view should refresh" — whenever the Git extension opens or closes
- * a repository, and after every reconnect.
+ * a repository, and after every reconnect; and `onDidRunStatus` — "a repository's
+ * `git status` just completed" — for every open repository, listened to per repository
+ * and re-listened whenever the list changes (plan §7.14.2).
  *
  * `connection()` is a Promise and stays one: src/extension.ts awaits it at the start of
  * every refresh, which costs nothing once it has settled and, before it settles, is what
@@ -243,6 +264,15 @@ export class GitExtensionAdapter implements vscode.Disposable {
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   /** Fires when the repository list or the Git extension's usability changed: the extension refreshes the view on it. */
   readonly onDidChange: vscode.Event<void>;
+  private readonly statusEmitter = new vscode.EventEmitter<void>();
+  /**
+   * Fires once for every completed `git status` in any open repository — the Git
+   * extension's `state.onDidChange`, relayed (plan §7.14.2: it means "a status just
+   * completed", not "something changed", and it comes in bursts from the Git extension's
+   * own operations). Not debounced here: src/extension.ts debounces it in front of the
+   * refresh, where the Refresh button joins the same queue.
+   */
+  readonly onDidRunStatus: vscode.Event<void>;
 
   /**
    * The handshake in flight or finished; none until the first `connection()` call starts
@@ -264,6 +294,8 @@ export class GitExtensionAdapter implements vscode.Disposable {
    * reconnect and on dispose. A handshake that finishes after either adds none (`keep`).
    */
   private connectionSubscriptions: vscode.Disposable[] = [];
+  /** One listener per open repository, on its `state.onDidChange`; rebuilt whenever the list changes, dropped with the connection's. */
+  private repositorySubscriptions: vscode.Disposable[] = [];
   private readonly extensionsSubscription: vscode.Disposable;
   private disposed = false;
 
@@ -274,6 +306,7 @@ export class GitExtensionAdapter implements vscode.Disposable {
     private readonly output: vscode.OutputChannel,
   ) {
     this.onDidChange = this.changeEmitter.event;
+    this.onDidRunStatus = this.statusEmitter.event;
     // Fires for every extension that changes state, ours included. Only an unusable Git
     // extension can be helped by it — the user just enabled it (row 1); for the other rows
     // the re-check is harmless and ends in the same row — so a ready connection is left
@@ -291,7 +324,8 @@ export class GitExtensionAdapter implements vscode.Disposable {
   /**
    * The outcome of the handshake — the API, or the E82 row — once it is known. The first
    * call starts the handshake; every later call returns the same Promise until a reconnect
-   * replaces it. Never rejects.
+   * replaces it. Never rejects. (A first call after dispose() still runs a handshake, which
+   * then keeps nothing — `isStale` — so it is harmless; nothing should make that call.)
    */
   connection(): Promise<GitConnection> {
     if (this.current === undefined) {
@@ -306,6 +340,7 @@ export class GitExtensionAdapter implements vscode.Disposable {
     this.extensionsSubscription.dispose();
     this.dropConnectionSubscriptions();
     this.changeEmitter.dispose();
+    this.statusEmitter.dispose();
   }
 
   /**
@@ -385,6 +420,40 @@ export class GitExtensionAdapter implements vscode.Disposable {
       subscription.dispose();
     }
     this.connectionSubscriptions = [];
+    this.dropRepositorySubscriptions();
+  }
+
+  private dropRepositorySubscriptions(): void {
+    for (const subscription of this.repositorySubscriptions) {
+      subscription.dispose();
+    }
+    this.repositorySubscriptions = [];
+  }
+
+  /**
+   * One `state.onDidChange` listener per repository the Git extension has open right now,
+   * replacing the previous set — simpler than working out which repository came or went,
+   * and the list is short. Nothing for a stale handshake (see `isStale`), whose
+   * repositories a newer one is already listening to.
+   */
+  private watchRepositories(generation: number, api: GitApi): void {
+    if (this.isStale(generation)) {
+      return;
+    }
+    this.dropRepositorySubscriptions();
+    for (const repository of api.repositories) {
+      this.repositorySubscriptions.push(repository.state.onDidChange(() => this.statusEmitter.fire()));
+    }
+  }
+
+  /**
+   * The Git extension opened or closed a repository: listen to the new list, then have the
+   * view redraw. The Git extension updates its list *before* it fires either event, so the
+   * list read here is the new one (plan §7.14.2).
+   */
+  private repositoriesChanged(generation: number, api: GitApi): void {
+    this.watchRepositories(generation, api);
+    this.changeEmitter.fire();
   }
 
   /**
@@ -455,11 +524,14 @@ export class GitExtensionAdapter implements vscode.Disposable {
 
     // The two events that change the repository list: a repository the Git extension
     // opened later (a folder added, a submodule, a prompt answered) or closed (a folder
-    // removed, "Close Repository" in Source Control). Either way the view redraws.
+    // removed, "Close Repository" in Source Control). Either way the per-repository
+    // listeners are rebuilt and the view redraws; and the repositories open right now get
+    // their listeners here.
     this.keep(generation, [
-      api.onDidOpenRepository(() => this.changeEmitter.fire()),
-      api.onDidCloseRepository(() => this.changeEmitter.fire()),
+      api.onDidOpenRepository(() => this.repositoriesChanged(generation, api)),
+      api.onDidCloseRepository(() => this.repositoriesChanged(generation, api)),
     ]);
+    this.watchRepositories(generation, api);
     // see primer §12 (template strings)
     this.log(generation, `connected to the Git extension: ${api.repositories.length} repository(ies) open, git at ${api.git.path}`);
     return { kind: 'ready', api };
