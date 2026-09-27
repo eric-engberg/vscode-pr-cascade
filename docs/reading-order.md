@@ -244,7 +244,8 @@ the repository root; its §13 is the running log of decisions and deviations mad
     plan §6 order — by workspace folder, then path; why a root with no folder goes last;
     why `isEqualOrBelow` puts the separator on before the prefix test). Then
     `GitExtensionAdapter`: the class comment for what is memoised and the two recovery
-    events; `beginHandshake` / `reconnect` (primer §63 for the `.then`) and `isStale` /
+    events; `connection()` (the first call starts the handshake — the constructor only
+    wires listeners); `beginHandshake` / `reconnect` (primer §63 for the `.then`) and `isStale` /
     `keep` / `log` for how a handshake overtaken by a newer one, or by `dispose()`, leaves
     nothing behind; and `handshake` itself, plan §7.14.1 line by line — each way
     out one row, the `setTimeout(…, 0)` before the reconnect (and the VS Code 1.138 fact

@@ -63,7 +63,9 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
   context.subscriptions.push(output);
 
   // The built-in Git extension is where the repositories come from (plan §7.14): the
-  // adapter starts its handshake now and the three pipelines below await the outcome. The
+  // adapter runs its handshake when the first of the three pipelines below asks for the
+  // connection — the first refresh, moments from now — and keeps the outcome for every
+  // later one. The
   // real host — `getExtension('vscode.git')`, the extensions event, the `git.enabled`
   // setting — is handed in here so the adapter itself never has to touch those and a test
   // can hand it stand-ins instead (vscode/gitApi.ts says why).

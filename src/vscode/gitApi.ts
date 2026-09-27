@@ -221,7 +221,8 @@ function compareByCharacterCode(first: string, second: string): number {
 
 /**
  * The connection to the Git extension, kept for the life of the window. It runs the
- * handshake of plan §7.14.1 once, memoises the outcome, and runs it again on the two
+ * handshake of plan §7.14.1 once — when first asked, by the first `connection()` call —
+ * memoises the outcome, and runs it again on the two
  * events that can turn an unusable Git extension into a usable one: `git.enabled` turned
  * on (the Git extension's own `onDidChangeEnablement`) and the Git extension itself
  * enabled again in the Extensions view (`vscode.extensions.onDidChange`; VS Code starts a
@@ -232,7 +233,9 @@ function compareByCharacterCode(first: string, second: string): number {
  * `connection()` is a Promise and stays one: src/extension.ts awaits it at the start of
  * every refresh, which costs nothing once it has settled and, before it settles, is what
  * makes the first refresh wait for the Git extension's initial scan instead of showing
- * "no repository" for a moment.
+ * "no repository" for a moment. The first refresh is also what starts the handshake: the
+ * constructor only wires listeners, so no asynchronous work is running behind an object
+ * that has just been built (a rule SonarCloud checks — S7059).
  */
 // see primer §13 (class, extends and constructor: `implements`), §32 (EventEmitter and
 // Event), §47 (parameter properties) and §7 (Promise: one kept and awaited many times)
@@ -242,11 +245,11 @@ export class GitExtensionAdapter implements vscode.Disposable {
   readonly onDidChange: vscode.Event<void>;
 
   /**
-   * The handshake in flight or finished. Replaced whole on a reconnect, so a caller
-   * holding the old Promise still gets the old answer and the next `connection()` call
-   * gets the new one.
+   * The handshake in flight or finished; none until the first `connection()` call starts
+   * it. Replaced whole on a reconnect, so a caller holding the old Promise still gets the
+   * old answer and the next `connection()` call gets the new one.
    */
-  private current: Promise<GitConnection>;
+  private current: Promise<GitConnection> | undefined;
   /** What the newest handshake ended in, for the extensions listener to look at without awaiting. */
   private latest: GitConnection | undefined;
   /**
@@ -282,11 +285,18 @@ export class GitExtensionAdapter implements vscode.Disposable {
         this.reconnect();
       }
     });
-    this.current = this.beginHandshake();
+    // No handshake here — see `connection()`.
   }
 
-  /** The outcome of the handshake — the API, or the E82 row — once it is known. Never rejects. */
+  /**
+   * The outcome of the handshake — the API, or the E82 row — once it is known. The first
+   * call starts the handshake; every later call returns the same Promise until a reconnect
+   * replaces it. Never rejects.
+   */
   connection(): Promise<GitConnection> {
+    if (this.current === undefined) {
+      this.current = this.beginHandshake();
+    }
     return this.current;
   }
 
@@ -299,8 +309,8 @@ export class GitExtensionAdapter implements vscode.Disposable {
   }
 
   /**
-   * Starts a handshake, numbered, and returns its Promise, which the caller stores as
-   * `current`. Its answer becomes `latest` only if it is still the newest handshake when
+   * Starts a handshake, numbered, and returns its Promise, which the caller (`connection()`
+   * the first time, `reconnect()` after) stores as `current`. Its answer becomes `latest` only if it is still the newest handshake when
    * it settles — two recovery events in quick succession start two handshakes, and only
    * the last one's answer may stand.
    */
@@ -308,7 +318,7 @@ export class GitExtensionAdapter implements vscode.Disposable {
     this.generation += 1;
     const generation = this.generation;
     const run = this.handshake(generation);
-    // Not awaited: the constructor and reconnect() must return at once. `.then` queues
+    // Not awaited: `connection()` and `reconnect()` must return at once. `.then` queues
     // what should happen once the handshake settles (primer §63).
     run.then((connection) => {
       if (!this.isStale(generation)) {
@@ -324,10 +334,11 @@ export class GitExtensionAdapter implements vscode.Disposable {
       return;
     }
     this.dropConnectionSubscriptions();
-    this.current = this.beginHandshake();
+    const run = this.beginHandshake();
+    this.current = run;
     const generation = this.generation;
     // see primer §63 (`.then`)
-    this.current.then(() => {
+    run.then(() => {
       if (!this.isStale(generation)) {
         this.changeEmitter.fire();
       }
