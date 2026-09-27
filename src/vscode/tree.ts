@@ -4,15 +4,18 @@
  * and under each layer one row per file that layer changes against the layer below it.
  *
  * Layer: vscode adapter (plan §4.1). Depends on: the `vscode` module, core/model.ts (types
- * only), Node's `node:path`. Depended on by: src/extension.ts (registers the provider and
- * hands it the two loaders), vscode/commands.ts (the FileNode a file row hands its command)
- * and test/ext/tree.test.ts. Plan: §6, §7.1, §7.2 (the click), §8 E7/E10/E17/E44, §12 item 3.
+ * only), vscode/gitApi.ts (GitUnavailableError, the one failure drawn as a warning), Node's
+ * `node:path`. Depended on by: src/extension.ts (registers the provider and hands it the two
+ * loaders), vscode/commands.ts (the FileNode a file row hands its command) and
+ * test/ext/tree.test.ts. Plan: §6, §7.1, §7.2 (the click), §7.14.3, §8 E7/E10/E17/E44/E82,
+ * §12 item 3.
  */
 
 // see primer §1 (import / export), §2 (the vscode module) and §9 (`import type`)
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { ChangedFile, RepoState, StackLayer } from '../core/model';
+import { GitUnavailableError } from './gitApi';
 
 /**
  * One layer of the stack — the row `retry-metrics   3 commits · current`. The label is
@@ -26,7 +29,7 @@ import type { ChangedFile, RepoState, StackLayer } from '../core/model';
 // constructor parameter declares the public field and fills it)
 export class LayerNode {
   constructor(
-    /** The repository the layer is in, as discovery found it (RepoState.root). */
+    /** The repository the layer is in, as the Git extension reports it (RepoState.root). */
     readonly root: string,
     readonly layer: StackLayer,
   ) {}
@@ -216,8 +219,9 @@ export type StackNode = RepoNode | LayerNode | FileNode | MessageNode;
  * the data itself: the states go stale with every commit, and re-asking git is the only
  * way to know what changed (plan §3 "Refresh"). So `refresh()` does not recompute
  * anything — it tells VS Code "the tree changed", VS Code asks for the top level again,
- * and `getChildren` calls the loader, which runs the whole pipeline (discovery → trunk →
- * stack) afresh; a layer's files are loaded the same way, when its row is opened.
+ * and `getChildren` calls the loader, which runs the whole pipeline (the Git extension's
+ * repositories → trunk → stack) afresh; a layer's files are loaded the same way, when
+ * its row is opened.
  * src/extension.ts owns both pipelines; this class only knows they exist.
  */
 // see primer §31 (generics on classes: TreeDataProvider<StackNode>), §32 (EventEmitter and
@@ -307,21 +311,33 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
    * directly; several → one RepoNode each; none → one message. A pipeline failure — git
    * not runnable (E17), a command that exited non-zero on a `run` — becomes one error row
    * with git's own words, rather than a rejected Promise that VS Code would report as a
-   * toast and an empty view. The next refresh tries again from scratch.
+   * toast and an empty view. The built-in Git extension being unusable (E82: disabled,
+   * failed to start, `git.enabled` off, no git found) is the one failure drawn as a
+   * warning instead: not something that broke, but a state the user can change, and the
+   * row text (plan §7.14.3) says how. For an error row the next refresh tries again from
+   * scratch — a corrected `prCascade.gitPath` takes effect then. For the warning row it does
+   * not: a refresh only re-awaits the adapter's one memoised handshake (vscode/gitApi.ts,
+   * `connection()`), and the row goes when the adapter reconnects on its own — the Git
+   * extension enabled again, or `git.enabled` turned on — or, for "failed to start" and
+   * "no git", after a reload.
    */
-  // see primer §18 (try / catch and unknown)
+  // see primer §18 (try / catch and unknown) and §34 (instanceof on a class)
   private async topLevelNodes(): Promise<StackNode[]> {
     let states: RepoState[];
     try {
       states = await this.loadStates();
     } catch (error) {
       let message = 'PR Cascade could not read the repository';
-      if (error instanceof Error) {
+      let icon = 'error';
+      if (error instanceof GitUnavailableError) {
+        message = error.message;
+        icon = 'warning';
+      } else if (error instanceof Error) {
         // GitError (core/git.ts) already phrases E17 as "git not found at <path>".
         message = error.message;
       }
       this.output.appendLine(message);
-      return [new MessageNode(message, 'error')];
+      return [new MessageNode(message, icon)];
     }
     if (states.length === 0) {
       return [new MessageNode('No git repository in this workspace')];

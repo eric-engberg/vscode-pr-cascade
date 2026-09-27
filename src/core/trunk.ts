@@ -147,7 +147,7 @@ async function remoteDefaultBranch(git: GitRunner, root: string, remote: string)
     return null;
   }
   // `--short` prints `origin/main` rather than `refs/remotes/origin/main`, followed by a
-  // newline. Unlike a directory name (core/discovery.ts), a ref name can never contain
+  // newline. Unlike a directory name (M1's repository scan learned that the hard way), a ref name can never contain
   // whitespace — git refuses to create one — so trim() removes exactly that newline.
   // see primer §23 (string methods)
   const target = output.trim();

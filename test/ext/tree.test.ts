@@ -115,8 +115,8 @@ describe('the Stack view', () => {
   it('shows the layers at the top level: the two workspace folders are one repository, found from its subfolder (E1b) and listed once (E2)', async () => {
     // precondition, not the idea under test: the workspace .vscode-test.mjs built has the
     // nested folder first, then the root — the shape E1b and E2 need. Fails fast otherwise.
-    // (E1b, not E1: plan §8's E1 row was split when discovery learned to look below a
-    // folder — test/git/discovery.git.test.ts says how.)
+    // (E1b, not E1: plan §8's E1 row is a repository *below* a folder; since M4 both rows
+    // are the built-in Git extension's to satisfy — test/ext/gitApi.test.ts, plan §7.14.)
     const folders = vscode.workspace.workspaceFolders ?? [];
     const folderNames = folders.map((folder) => path.basename(folder.uri.fsPath));
     assert.deepStrictEqual(folderNames, ['nested', 'repo']);
@@ -273,8 +273,8 @@ describe('the Stack view', () => {
       const bottom = await filesUnderLayer('api-refactor');
 
       // assert: the URI's path is `<repository root>/a`, which is where the file is —
-      // the root is the physical path discovery found, the same one VS Code lists for
-      // the `repo` folder
+      // the root is the physical path the Git extension reports, the same one VS Code
+      // lists for the `repo` folder
       // see primer §8 (undefined and narrowing) and §42 (Uri: `fsPath` is the path back)
       const resourceUri = bottom[0].resourceUri;
       assert.ok(resourceUri !== undefined, 'a file row without a resourceUri');
@@ -464,10 +464,12 @@ describe('the Stack view', () => {
     });
 
     it('shows one error row with the message from RealGitRunner when git cannot be run (E17)', async () => {
-      // arrange: a `prCascade.gitPath` that does not exist. The first git command of the
-      // pipeline is discovery's `rev-parse --show-toplevel` (core/discovery.ts), and
+      // arrange: a `prCascade.gitPath` that does not exist. The repositories come from the
+      // built-in Git extension, so the first git command of *our* pipeline is trunk
+      // detection's read of `origin/HEAD` (core/trunk.ts, remoteDefaultBranch), and
       // RealGitRunner (core/git.ts) phrases a git that never started as "git not found
-      // at <path>", naming the command it was about to run.
+      // at <path>", naming the command it was about to run. (Until M4 the first command
+      // was the scan's `rev-parse --show-toplevel`.)
       const configuration = vscode.workspace.getConfiguration('prCascade');
       await configuration.update('gitPath', '/nowhere/git', vscode.ConfigurationTarget.Workspace);
       try {
@@ -476,7 +478,9 @@ describe('the Stack view', () => {
 
         // assert: one row, git's message as its label, drawn with the error icon
         const labels = items.map((item) => item.label);
-        assert.deepStrictEqual(labels, ['git not found at /nowhere/git (while running: git rev-parse --show-toplevel)']);
+        assert.deepStrictEqual(labels, [
+          'git not found at /nowhere/git (while running: git symbolic-ref --quiet --short refs/remotes/origin/HEAD)',
+        ]);
         assert.ok(items[0].iconPath instanceof vscode.ThemeIcon, 'expected a ThemeIcon');
         assert.strictEqual(items[0].iconPath.id, 'error');
       } finally {

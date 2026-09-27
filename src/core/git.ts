@@ -224,8 +224,12 @@ function classifyStartFailure(error: ExecFileException): StartFailure {
 export class RealGitRunner implements GitRunner {
   constructor(
     /**
-     * `gitPath` is the `prCascade.gitPath` setting (PR 6): normally just `git`, resolved via
-     * PATH the same way a terminal would; a full path when git is somewhere unusual.
+     * `gitPath` is whatever src/extension.ts resolved for this window (vscode/gitApi.ts,
+     * `gitExecutable`): the `prCascade.gitPath` setting when the user set one, else the git
+     * the built-in Git extension found (`api.git.path`, plan §7.3, §7.14) — which honours
+     * `git.path` and may itself be a bare `git` that PATH resolves, the way a terminal
+     * would. The `'git'` default is for the tests that build a runner without a Git
+     * extension (test/git/*.git.test.ts).
      */
     private readonly gitPath: string = 'git',
   ) {}
@@ -315,8 +319,8 @@ export class RealGitRunner implements GitRunner {
       return await this.run(args, cwd);
     } catch (error) {
       // `null` means "no answer from git about this place": git ran and exited non-zero,
-      // or there is no usable directory to ask in (a stale workspace folder, which PR 3's
-      // discovery skips). Anything else is re-thrown — a missing or unrunnable git (E17),
+      // or there is no usable directory to ask in (a repository folder deleted under an
+      // open window). Anything else is re-thrown — a missing or unrunnable git (E17),
       // a signal, an output overflow (E18) are problems to surface, not answers. `error`
       // is `unknown` in a catch block, so it is narrowed first.
       if (error instanceof GitError) {

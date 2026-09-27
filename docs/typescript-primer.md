@@ -185,7 +185,9 @@ test. Later PRs put the type in signatures (`Promise<string>`: a string, eventua
 A Promise ends in one of two ways: it **resolves** with a value (`await` hands you the value)
 or it **rejects** with an error (`await` throws it, and `try`/`catch` can catch it — that
 construct gets its own section when it first appears). VS Code's API uses the name `Thenable`
-in a few places; for our purposes it is a Promise.
+in a few places; for our purposes it is a Promise. `await` is not the only way to be handed
+the value: `.then` (§63) queues a function for it instead — and is what `Thenable` is named
+after.
 
 ## 8. undefined and narrowing
 
@@ -260,13 +262,18 @@ Two small things that appear alongside it:
   — and only annotates with `StackTreeProvider`). Same meaning, one import line per module;
   the whole-line form is for a line that is types only.
 
-An interface can also `extends` another interface. `PrCascadeSettings extends
-DiscoveryOptions` (`src/vscode/config.ts`) has every `DiscoveryOptions` field plus its own
-three, so a `PrCascadeSettings` can be passed wherever a `DiscoveryOptions` is expected —
-`src/extension.ts` hands the settings object straight to `discoverRepoRoots` — and a field
-added to `DiscoveryOptions` must be supplied by whatever builds a `PrCascadeSettings`, here
-`readSettings`, or it will not compile. This is not §13's `extends` on a class: nothing is
-inherited at run time, the interface simply lists the parent's fields as its own.
+An interface can also `extends` another interface. The first example here,
+`PrCascadeSettings extends DiscoveryOptions` in `src/vscode/config.ts`, left with
+`core/discovery.ts` in M4 (item 12a); the live ones are in `src/vscode/gitApi.ts`:
+`GitApi extends Pick<API, 'state' | 'onDidChangeState' | 'git' | 'repositories'>` (§49 for
+`Pick`) has those four members of the Git extension's `API` plus two events of its own, and
+`GitExtensionExports extends Pick<GitExtension, 'enabled' | 'onDidChangeEnablement'>` adds
+`getAPI`. The child lists the parent's fields as its own, so anything that has all of them
+fits — the Git extension's real object can be handed over wherever a `GitApi` is expected,
+and so can a test's small object literal (§61) — and a field added to the parent must be
+supplied by whatever claims to be the child, or it will not compile. This is not §13's
+`extends` on a class: nothing is inherited at run time, the interface simply lists the
+parent's fields as its own.
 
 ## 10. Union types
 
@@ -592,8 +599,9 @@ takes any key type, iterates in insertion order, and has no built-in names (`toS
 The angle brackets are **type parameters**: `Map<string, string | Error>` says this
 particular map's keys are strings and its values are strings or Errors, so the compiler
 knows `.get` returns `string | Error | undefined`. `Promise<string>` (§7) is the same idea:
-"a Promise of a string". This codebase only *uses* generic built-in types like these; it
-does not define generic types of its own (plan §11.1).
+"a Promise of a string". This codebase mostly *uses* generic types like these; the one it
+declares itself — a function with a type parameter — is §62 (plan §11.1: generics wherever
+they are the natural tool, and nowhere else).
 
 Usually the compiler works the parameters out from the pairs you pass, and
 `new Map([['--version', 'git version 2.50.1\n']])` needs nothing more. When the pairs mix
@@ -633,7 +641,9 @@ and has a name that says what it recognises.
 
 ## 21. Set
 
-*First seen in `src/core/discovery.ts`.*
+*First seen in `src/core/discovery.ts` — a file M4 (item 12a) deleted when VS Code's built-in
+Git extension took over finding repositories (plan §7.14); the example stays as it was
+written. Live uses today: `src/core/changes.ts` (`binaryPaths`), `test/git/changes.git.test.ts`.*
 
 ```ts
 const roots = new Set<string>();
@@ -663,7 +673,9 @@ going, and nothing needs writing.
 
 ## 22. for ... of, and continue
 
-*First seen in `src/core/discovery.ts`.*
+*First seen in `src/core/discovery.ts` (deleted in M4 item 12a; the example stays). Live uses
+today: `src/core/stack.ts` (`computeStack`), `src/core/trunk.ts` (`detectTrunk`),
+`src/extension.ts` (`loadRepoStates`, with `continue`).*
 
 ```ts
 for (const folder of folders) {
@@ -696,7 +708,9 @@ does not use it.
 
 ## 23. String methods: trim, endsWith, slice
 
-*First seen in `src/core/discovery.ts` (`trim` in `core/git.ts`).*
+*First seen in `src/core/discovery.ts` (deleted in M4 item 12a; the example stays); `trim` in
+`core/git.ts`. Live uses today: `src/core/stack.ts` (`currentBranch`: `startsWith`, `slice`,
+`trim`), `src/vscode/gitApi.ts` (`isEqualOrBelow`: `endsWith`, `startsWith`).*
 
 ```ts
 if (printedRoot.endsWith('\n')) {
@@ -947,7 +961,9 @@ steps with no `async`, no `await`, and no Promise to hand back. That is also wha
 6's `npm run fixture` script call `buildStack()` as an ordinary function.
 
 Three small Node helpers appear alongside: `path.join(a, b)` glues path pieces with the
-platform's separator; `os.tmpdir()` is the system temp directory (`$TMPDIR`);
+platform's separator — `path.sep`, `/` on macOS and Linux and `\` on Windows, which
+`src/vscode/gitApi.ts` puts on the end of a folder before a prefix test, so that `/w/repo2`
+is not taken for a path inside `/w/repo`; `os.tmpdir()` is the system temp directory (`$TMPDIR`);
 `fs.mkdtempSync(prefix)` creates a uniquely named directory starting with that prefix, the
 same as `mktemp -d`. The `execFileSync` options are commented in the fixture where they
 are set — `encoding` (text rather than raw bytes) and `stdio` (close stdin so no command
@@ -1071,7 +1087,8 @@ hand:
 
 A class can `implements` more than one interface, comma-separated, as
 `StackTreeProvider` does: it is a `TreeDataProvider` *and* a `Disposable` (§32). And as
-§19 said: this codebase only *uses* generic types; it defines none (plan §11.1).
+§19 said: this codebase mostly *uses* generic types; §62 is the one place it declares a
+type parameter of its own (plan §11.1).
 
 ## 32. EventEmitter and Event
 
@@ -1238,7 +1255,10 @@ folded — a `FileNode` and a `MessageNode` are `None`, a `RepoNode` is `Expande
 
 ## 36. export const: a shared constant object
 
-*First seen in `src/core/discovery.ts` (`DEFAULT_DISCOVERY_OPTIONS`).*
+*First seen in `src/core/discovery.ts` (`DEFAULT_DISCOVERY_OPTIONS`; deleted in M4 item 12a,
+the example stays). Live uses today: `src/core/uri.ts` (`STACK_DIFF_SCHEME`, below) and
+`src/vscode/gitApi.ts` (`realGitExtensionHost` — an object, shared, and like this one never
+assigned into).*
 
 ```ts
 export const DEFAULT_DISCOVERY_OPTIONS: DiscoveryOptions = {
@@ -1284,7 +1304,9 @@ mutate, so only the first paragraph above applies to it.
 
 ## 37. Promise.all
 
-*First seen in `src/core/discovery.ts` (`discoverRepoRoots`).*
+*First seen in `src/core/discovery.ts` (`discoverRepoRoots`; deleted in M4 item 12a, the
+example stays). No live use today — the pattern is still the one to reach for when several
+git processes may run at once.*
 
 ```ts
 const probes = candidates.map((candidate) => git.tryRun(['rev-parse', '--show-toplevel'], candidate));
@@ -1316,7 +1338,8 @@ unwraps that to `(string | null)[]`.
 
 ## 38. while loops and a queue
 
-*First seen in `src/core/discovery.ts` (`listCandidates`).*
+*First seen in `src/core/discovery.ts` (`listCandidates`; deleted in M4 item 12a, the example
+stays). Live use today: `src/core/changes.ts`, the second shape at the end of this section.*
 
 ```ts
 const queue: PendingDirectory[] = [{ directory: folder, depth: 0 }];
@@ -1364,7 +1387,8 @@ so the step reads as the arithmetic it is.
 ## 39. Node's Promise-returning file-system calls: readdir and Dirent
 
 *First seen in `src/core/discovery.ts` (`listCandidates`); `fs.realpath` in the same file
-since PR 3.*
+since PR 3. Deleted in M4 item 12a, the example stays; no live use today — `src/` reads no
+directories now that the built-in Git extension finds the repositories.*
 
 ```ts
 import type { Dirent } from 'node:fs';
@@ -1410,7 +1434,9 @@ directory, or cannot be read; discovery treats all three alike and skips what is
 
 ## 40. A sentinel value: -1 for "no limit"
 
-*First seen in `src/core/discovery.ts` (`DiscoveryOptions.scanMaxDepth`, `listCandidates`).*
+*First seen in `src/core/discovery.ts` (`DiscoveryOptions.scanMaxDepth`, `listCandidates`;
+deleted in M4 item 12a with the setting it served — the example and the lesson stay; no live
+use today).*
 
 ```ts
 const childrenWanted = current.depth < options.scanMaxDepth || options.scanMaxDepth === -1;
@@ -1433,7 +1459,10 @@ because settings are typed by hand. When the special case is ours to design, a u
 
 ## 41. Checking a value the compiler cannot vouch for: `get<unknown>`, `Number.isInteger`, `Array.isArray`
 
-*First seen in `src/vscode/config.ts` (`readScanMaxDepth`, `readScanIgnoredFolders`).*
+*First seen in `src/vscode/config.ts` (`readScanMaxDepth`, `readScanIgnoredFolders`) — both
+deleted with the two scan settings in M4 item 12a. The section stays because the rule it
+teaches is still the rule for the next setting with rules: read it as `unknown`, then prove
+what it is before using it. `config.ts` today reads three strings and takes them as they come.*
 
 ```ts
 import { DEFAULT_DISCOVERY_OPTIONS } from '../core/discovery';
@@ -1516,7 +1545,9 @@ every later refresh starts from.
 
 ## 42. Changing the workspace from a test: updateWorkspaceFolders, Uri.file, and waiting for an event
 
-*First seen in `test/ext/scanSettings.test.ts`.*
+*First seen in `test/ext/scanSettings.test.ts` (deleted in M4 item 12a; the example stays).
+Today in `test/ext/gitApi.test.ts`, which adds and removes a folder the same way and whose
+`nextEvent` is this wait written once for any event.*
 
 ```ts
 const changed = nextWorkspaceFoldersChange();
@@ -1564,7 +1595,8 @@ function nextWorkspaceFoldersChange(): Promise<void> {
   after — a listener attached after the change could miss the event, and a Promise that
   never resolves would hang the test until Mocha's timeout.
 
-Two smaller things in the same file. Mocha's **`after`** hook is `before`'s twin: it runs
+Two smaller things in the same file (now `test/ext/gitApi.test.ts` for the first; the second
+has no live use since M4). Mocha's **`after`** hook is `before`'s twin: it runs
 once when every test in the block is done, pass or fail, and here undoes what `before`
 did — settings back to their defaults, the folder out of the workspace, the repositories
 off disk — so the file that runs next meets the workspace as built. And
@@ -1583,7 +1615,9 @@ assertion, not by the compiler.
 
 ## 43. `keyof` and `Record<K, V>`: an object with exactly another type's fields
 
-*First seen in `test/ext/scanSettings.test.ts`.*
+*First seen in `test/ext/scanSettings.test.ts` (deleted in M4 item 12a; the example stays, and
+no live use remains — the shape waits for the next object that mirrors an interface's fields
+by hand).*
 
 ```ts
 const declared: Record<keyof DiscoveryOptions, unknown> = {
@@ -2324,3 +2358,192 @@ compiler rejects only a use before declaration that would run at once. `nextTabs
 leaned on the same thing already: its listener names `subscription`, the very `const`
 being assigned. Read such a closure as "when this fires, use whatever these names hold
 then".
+
+## 59. Tagged unions: object shapes told apart by a `kind` field
+
+*First seen in `src/vscode/gitApi.ts` (`GitConnection`); read in `src/extension.ts`
+(`connectedGit`).*
+
+```ts
+export type GitConnection =
+  | { readonly kind: 'ready'; readonly api: GitApi }
+  | { readonly kind: 'unavailable'; readonly message: string };
+
+const connection = await gitExtension.connection();
+if (connection.kind === 'unavailable') {
+  throw new GitUnavailableError(connection.message);
+}
+return { api: connection.api, settings, git };
+```
+
+§10 had unions of exact strings and §34 a union of classes told apart with `instanceof`.
+This is the third shape: a union of plain object types, with no class to ask `instanceof`
+about, so one field does the telling — `kind`, whose type in each member is a single exact
+string (§10). It is called a **tagged** (or discriminated) union, and the compiler
+understands it: after `connection.kind === 'unavailable'` has been tested, `connection`
+*is* the second member inside the `if` — `connection.message` exists and `connection.api`
+does not — and past the `if` it is the first, so `connection.api` is a `GitApi` with no
+further check. Write `connection.api` before the test and the compiler refuses: the
+`unavailable` member has no such field, so neither does the union as a whole until narrowed
+(the error names that member: "Property 'api' does not exist on type '{ readonly kind:
+\"unavailable\"; … }'").
+
+Why not one object with two optional fields, `api?` and `message?`: that type would also
+allow "both missing" and "both present", two states that can never happen, and every
+reader would have to decide what to do about them. The union makes the impossible states
+impossible to write down. Compare `RepoState` (plan §4.3), where `trunk: string | null` is
+enough — one field varies, so a nullable field (§10) is the lighter tool. When several
+fields vary *together*, as the outcome of a handshake does, the tagged union is the right
+one. The `readonly` on each field (§14) says a connection, once made, is a fact.
+
+## 60. Another extension's API: `extensions.getExtension`, `activate()`, `exports`, `Thenable`, and a vendored `.d.ts`
+
+*First seen in `src/vscode/gitApi.ts` (`realGitExtensionHost`, `GitExtensionAdapter`) and
+`src/vscode/git.d.ts`; tested directly in `test/ext/gitApi.test.ts`.*
+
+```ts
+import type { API, GitExtension } from './git';
+
+lookUp: () => vscode.extensions.getExtension<GitExtension>('vscode.git'),
+...
+const extensionExports = await handle.activate();
+const api = extensionExports.getAPI(1);
+```
+
+An extension may hand an object back from its `activate()` — its **exports** — and other
+extensions may reach it: `vscode.extensions.getExtension(id)` returns an `Extension<T>` for
+an installed, enabled extension (`undefined` otherwise; the id is `publisher.name`, and
+VS Code's own Git extension is `vscode.git`), `.activate()` starts it if it is not running
+yet and resolves with the exports, and `.exports` is the same object once it is active.
+`activate()` returns a **`Thenable<T>`** — VS Code's word for "a Promise, or anything that
+can be awaited like one" (§6, §7). `await` does not care which; the test stand-ins return
+`Promise.resolve(exports)` and `Promise.reject(error)`, ready-made settled Promises, and
+those fit too.
+
+The `<GitExtension>` on `getExtension` is a claim about the exports (§31 said what a type
+argument on a call is), and the truth behind the claim is the Git extension's own
+declaration file. VS Code publishes it in its source tree as `extensions/git/src/api/git.d.ts`
+and nowhere on npm, so a copy sits in `src/vscode/git.d.ts` with Microsoft's MIT header on
+top — copied from the `release/1.85` tag, the oldest VS Code this extension supports
+(`engines` in package.json): a newer file would let code call members that do not exist on
+1.85, compile, and fail at run time (plan §7.14.1, §13.4 (e)). A **`.d.ts`** file holds
+*declarations only*: shapes and names, no code. Names used only as types vanish whichever
+way they are imported (§9: `tsc` drops such an import, and so does esbuild), so a plain
+`import { API }` would compile and bundle too; `import type` is the plan's rule for this
+file (§7.14.1), and it earns its keep at the one trap: that file declares
+`const enum RefType { Head, RemoteHead, Tag }`. `tsc` replaces a `const enum` by its number
+while compiling and would accept `RefType.Tag`, but esbuild — which only strips types
+(esbuild.mjs) — would look for `./git` at bundle time and fail. Under `import type` that
+slip is a compile error instead ("'RefType' cannot be used as a value because it was
+imported using 'import type'"). So nothing from that file is ever used as a value: compare
+against the number (`Tag` is `2`) or a constant of our own, as plan §7.14.1 says. Today the
+adapter reads no `RefType` at all.
+
+The last piece is why `gitApi.ts` narrows what it takes: `GitApi` is a `Pick` (§49) of four
+members plus the two events, declared as `Event<unknown>` because the adapter never reads
+the repository an event carries. A test can then build the whole API from a small object
+literal (§61) — six things, where the real `API` has eighteen and a `Repository`, what its
+events carry, 53 — and that, with the three seams in `GitExtensionHost`, is what lets
+`test/ext/gitApi.test.ts` import the adapter and put it through every E82 row inside a
+VS Code whose real Git extension is present and working.
+
+## 61. A getter in an object literal: `get state() { … }`
+
+*First seen in `test/ext/gitApi.test.ts` (`fakeApi`, `fakeExports`).*
+
+```ts
+let current = state;
+stateChanges.event((next) => {
+  current = next;
+});
+const api: GitApi = {
+  get state() {
+    return current;
+  },
+  onDidChangeState: stateChanges.event,
+  ...
+};
+```
+
+`get name() { ... }` inside an object literal (§16) declares a **getter**: a field that is
+computed each time it is read. It is read like any field — `api.state`, no parentheses —
+and the body runs then. Here that is the point: the real Git extension's `state` changes
+from `'uninitialized'` to `'initialized'` when its scan finishes, and a stand-in whose
+`state` was a plain value copied at construction could never follow suit. The getter reads
+`current`, a `let` (§4) that the emitter's own listener updates, so firing the event moves
+the fake's `state` the way the real one moves. `fakeExports` does the same for `enabled`.
+
+An interface field declared `readonly` (§14) is satisfied by a getter with no setter: the
+interface only promises the field can be read. Classes have the same syntax — `get x()
+{ }` in a class body — and the Git extension's source uses it heavily; this codebase's own
+classes have not needed one yet. The twin, `set name(value) { ... }`, runs on assignment;
+it is not used here.
+
+## 62. Declaring a type parameter on a function: `function nextEvent<T>(…)`
+
+*First seen in `test/ext/gitApi.test.ts` (`nextEvent`).*
+
+```ts
+function nextEvent<T>(event: vscode.Event<T>): Promise<T> {
+  return new Promise((resolve) => {
+    const subscription = event((value) => {
+      subscription.dispose();
+      resolve(value);
+    });
+  });
+}
+
+const foldersChanged = nextEvent(vscode.workspace.onDidChangeWorkspaceFolders); // Promise<WorkspaceFoldersChangeEvent>
+const opened = nextEvent(api.onDidOpenRepository);                              // Promise<unknown>
+const changed = nextEvent(adapter.onDidChange);                                 // Promise<void>
+```
+
+§19 and §31 used type parameters that others had declared: `Map<string, Error>`,
+`EventEmitter<StackNode>`, `get<string>(…)`. The `<T>` after `nextEvent` **declares** one.
+Inside the signature `T` is a blank, and every `T` is the same blank: an event that carries
+a `T` gives a Promise of a `T`. The compiler fills it in at each call from the argument —
+`onDidChangeWorkspaceFolders` is an `Event<WorkspaceFoldersChangeEvent>`, so that call is a
+`Promise<WorkspaceFoldersChangeEvent>` and `await` hands back a value whose `added` and
+`removed` the compiler knows about; `api.onDidOpenRepository` is an `Event<unknown>` in
+`GitApi` (§60), so that call is a `Promise<unknown>`; the adapter's own `onDidChange` gives a
+`Promise<void>`. Nothing is written at the call site, as with `new Map([['a', 'b']])` in §19.
+
+Why declare one rather than write `event: vscode.Event<unknown>` and return
+`Promise<unknown>`: that version accepts the same arguments but throws the payload's type
+away, and every caller would have to narrow (§18) what the compiler already knew. One
+function, three payload types, no cast — which is what plan §11.1 means by "generics
+wherever they are the natural tool". It is the one type parameter this codebase declares;
+everywhere else it fills in someone else's.
+
+## 63. `.then` on a Promise: a continuation without `await`
+
+*First seen in `src/vscode/gitApi.ts` (`beginHandshake`, `reconnect`); also
+`test/ext/gitApi.test.ts` (the `initialized` test).*
+
+```ts
+const run = this.handshake(generation);
+run.then((connection) => {
+  if (!this.isStale(generation)) {
+    this.latest = connection;
+  }
+});
+return run;
+```
+
+`promise.then(fn)` queues `fn` to run with the value once the Promise resolves, and returns
+a new Promise for whatever `fn` returns. It is the mechanism under `await` (§6, §7): `await p`
+inside an `async` function is `p.then(<the rest of the function>)` with the plumbing hidden,
+and `Thenable` (§60) is named after this method. The plain form is for the places `await`
+cannot go. A constructor cannot be `async`, and `reconnect()` runs inside an event handler
+that must return at once — so both start the handshake, hand its Promise on (`current`),
+and only *queue* what should happen when it settles. The test uses the same form to notice
+the moment a Promise settles without waiting for it —
+`connection().then(() => { settled = true; })`, then `await tick()` and a look at `settled`.
+
+The trap: the Promise that `.then` returns rejects if the original rejects or `fn` throws,
+and with nobody awaiting it or attaching `.catch`, that is an *unhandled rejection* — Node
+prints a warning and the error is lost. It is safe in `gitApi.ts` because `handshake()`
+never rejects by design (every way out is an E82 row, and `keep` / `log` keep even the
+shutdown case quiet) and the queued functions only assign and fire. Where a rejection is
+possible, `await` inside a `try` (§18) is the right tool, and this codebase uses it
+everywhere else.

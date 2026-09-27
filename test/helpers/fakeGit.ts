@@ -24,11 +24,13 @@ export interface GitCall {
  * meaning "git exited non-zero". A test then asserts on what the code under test returned
  * and, through `calls`, on exactly which git commands it ran and in which directory.
  *
- * That constructor map ignores the directory a command runs in, and for almost every
- * core module that is right: trunk detection and the stack computation (PRs 4–5) ask all
- * their questions at one repository root. Discovery (PR 3) is the exception — it runs the
- * same `rev-parse --show-toplevel` once per workspace folder and needs a different answer
- * from each — so `answerIn` cans an answer for one command in one specific directory.
+ * That constructor map ignores the directory a command runs in, and for every core module
+ * today that is right: trunk detection and the stack computation (PRs 4–5) ask all their
+ * questions at one repository root. `answerIn` cans an answer for one command in one
+ * specific directory, for a caller that asks the same question in several places — M1's
+ * repository scan did (one `rev-parse --show-toplevel` per workspace folder) until M4
+ * handed that job to VS Code's built-in Git extension; the method stays for the next such
+ * caller, and test/unit/git.test.ts keeps it honest.
  *
  * Why it fails loudly on an unknown command: a fake that quietly returned '' for anything
  * unexpected would let a test pass while the code ran a command nobody canned — the exact
@@ -108,7 +110,7 @@ export class FakeGitRunner implements GitRunner {
     }
     if (response === undefined) {
       // "(none)" rather than an empty list, so the message never reads "...spaces): ." —
-      // the shape a discovery test produces when its fake was set up with answerIn only.
+      // the shape a test produces when its fake was set up with answerIn only.
       let cannedKeys = '(none)';
       if (this.responses.size > 0) {
         cannedKeys = Array.from(this.responses.keys()).join(', ');
