@@ -33,6 +33,12 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": false
+  },
   "main": "./dist/extension.js",
   "contributes": {
     "views": {
@@ -83,6 +89,11 @@
           "type": "string",
           "default": "origin",
           "markdownDescription": "The remote whose default branch is consulted first when auto-detecting the trunk. Change it if you work on a fork and keep the original repository as `upstream`."
+        },
+        "prCascade.statusBar": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the `<branch> · n of N` status bar item: the branch HEAD is on and its place in the stack, counted from the bottom. Click it to open the Stack view. Read again on each refresh, like every setting here."
         }
       }
     }

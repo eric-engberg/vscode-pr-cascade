@@ -14,7 +14,7 @@
 import * as vscode from 'vscode';
 
 /**
- * The three settings v0.1 reads, as plain values — no VS Code types, so a test can build
+ * The four settings v0.1 reads, as plain values — no VS Code types, so a test can build
  * one by hand and core code can take it without importing `vscode`. Each field's doc says
  * what the setting means; package.json "contributes.configuration" is what the user sees
  * in the Settings editor, and the two must agree. (M1 also read two repository-scan
@@ -34,6 +34,8 @@ export interface PrCascadeSettings {
   gitPath: string;
   /** `prCascade.remote`: the remote whose default branch is consulted first — `origin` unless the user works from a fork. */
   remote: string;
+  /** `prCascade.statusBar`: whether the `<branch> · n of N` status bar item is shown (vscode/statusbar.ts); read on every refresh like the rest, so turning it off takes effect at the next one. */
+  statusBar: boolean;
 }
 
 /**
@@ -47,7 +49,7 @@ export interface PrCascadeSettings {
  * that back when the user has set nothing — the argument here exists so the compiler knows
  * the result is a `string` and never `undefined`.
  *
- * All three are taken as they come: any string is a usable value, and a wrong one fails
+ * All of them are taken as they come: any string is a usable value, and a wrong one fails
  * where it is used, with a message that names it (a missing ref → E4, a missing executable
  * → E17). An empty `gitPath` is not turned into `git` here, as M1–M3 did: it now means
  * "the Git extension's git", and src/extension.ts resolves it with the connection in hand.
@@ -59,5 +61,6 @@ export function readSettings(): PrCascadeSettings {
     trunk: configuration.get<string>('trunk', ''),
     gitPath: configuration.get<string>('gitPath', ''),
     remote: configuration.get<string>('remote', 'origin'),
+    statusBar: configuration.get<boolean>('statusBar', true),
   };
 }
