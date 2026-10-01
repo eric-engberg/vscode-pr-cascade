@@ -457,7 +457,11 @@ function guessKind(host: string): ForgeKind {
  * Told apart by `kind` (primer §59); the `forge` member nests a Forge whose own `kind` is
  * the forge kind, so a reader writes `detection.kind === 'forge'` and then
  * `detection.forge.kind === 'github'`. Every member carries the remote's name, so a message
- * can be built from the result alone.
+ * can be built from the result alone; the `forge` member also carries the `spice.forge.*`
+ * configuration that decided it, because an E60/E70 message has to say *why* git-spice will
+ * not match — a rejected `spice.forge.kind`, a url key that displaced a default or names
+ * another port — and that is in the configuration, not in the Forge (item 17's `Readiness`
+ * carries both on).
  */
 // see primer §59 (tagged unions)
 export type ForgeDetection =
@@ -465,8 +469,8 @@ export type ForgeDetection =
   | { readonly kind: 'no-remote'; readonly remote: string }
   /** E21: the remote's URL names no forge repository — a local path, garbage. `url` is for the message. */
   | { readonly kind: 'unparseable'; readonly remote: string; readonly url: string }
-  /** A forge repository; E60, E70 and E75 are read off `forge.kind` and `forge.recognizedByGitSpice`. */
-  | { readonly kind: 'forge'; readonly remote: string; readonly forge: Forge };
+  /** A forge repository; E60, E70 and E75 are read off `forge.kind` and `forge.recognizedByGitSpice`, their remedy off `config`. */
+  | { readonly kind: 'forge'; readonly remote: string; readonly forge: Forge; readonly config: ForgeConfig };
 
 /**
  * Reads the remote's URL and classifies it: `git remote get-url <remote>` (tryRun — exit 2
@@ -495,7 +499,7 @@ export async function detectForge(git: GitRunner, root: string, remote: string):
   // regular-expression engine, not for ours.
   const configOutput = await git.tryRun(['config', '--get-regexp', '^spice\\.forge\\.'], root);
   const config = parseForgeConfig(configOutput ?? '');
-  return { kind: 'forge', remote, forge: { ...repository, ...classifyHost(repository, config) } };
+  return { kind: 'forge', remote, forge: { ...repository, ...classifyHost(repository, config) }, config };
 }
 
 /** The one environment variable for `gh` that varies per repository (plan §7.5, E22). */

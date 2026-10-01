@@ -20,8 +20,23 @@ import { detectForge } from '../../src/core/forge';
 import { RealGitRunner } from '../../src/core/git';
 import { buildStack } from '../helpers/fixture';
 import type { Fixture } from '../helpers/fixture';
+import type { ForgeConfig } from '../../src/core/forge';
 
 const git = new RealGitRunner();
+
+// What `parseForgeConfig` gives for a repository with no `spice.forge.*` keys at all.
+// see primer §9 (an object literal that satisfies an interface) and §19 (Map)
+const NO_CONFIG: ForgeConfig = { kind: null, rejectedKind: null, hosts: new Map() };
+
+// The two keys the configured block writes, as `parseForgeConfig` reads them back.
+const TWO_URLS: ForgeConfig = {
+  kind: null,
+  rejectedKind: null,
+  hosts: new Map([
+    ['github', { host: 'eu.ghe.com', port: '' }],
+    ['gitlab', { host: 'gitlab.example.com', port: '' }],
+  ]),
+};
 
 // see primer §5 (arrow functions)
 beforeAll(() => {
@@ -107,6 +122,7 @@ describe('detectForge (real git)', () => {
         kind: 'forge',
         remote: 'github',
         forge: { host: 'github.com', port: '', owner: 'org', repo: 'repo', kind: 'github', recognizedByGitSpice: true },
+        config: NO_CONFIG,
       });
     });
 
@@ -120,6 +136,7 @@ describe('detectForge (real git)', () => {
         kind: 'forge',
         remote: 'gl',
         forge: { host: 'gitlab.example.com', port: '', owner: 'group/sub', repo: 'repo', kind: 'unknown', recognizedByGitSpice: false },
+        config: NO_CONFIG,
       });
     });
 
@@ -134,6 +151,7 @@ describe('detectForge (real git)', () => {
         kind: 'forge',
         remote: 'glpush',
         forge: { host: 'glpush', port: '', owner: 'group/sub', repo: 'repo', kind: 'unknown', recognizedByGitSpice: false },
+        config: NO_CONFIG,
       });
     });
 
@@ -146,6 +164,7 @@ describe('detectForge (real git)', () => {
         kind: 'forge',
         remote: 'ghe',
         forge: { host: 'eu.ghe.com', port: '', owner: 'org', repo: 'repo', kind: 'github', recognizedByGitSpice: false },
+        config: NO_CONFIG,
       });
     });
 
@@ -186,6 +205,7 @@ describe('detectForge (real git)', () => {
         kind: 'forge',
         remote: 'gl',
         forge: { host: 'gitlab.example.com', port: '', owner: 'group/sub', repo: 'repo', kind: 'gitlab', recognizedByGitSpice: true },
+        config: TWO_URLS,
       });
     });
 
@@ -198,6 +218,7 @@ describe('detectForge (real git)', () => {
         kind: 'forge',
         remote: 'ghe',
         forge: { host: 'eu.ghe.com', port: '', owner: 'org', repo: 'repo', kind: 'github', recognizedByGitSpice: true },
+        config: TWO_URLS,
       });
     });
 
@@ -210,6 +231,7 @@ describe('detectForge (real git)', () => {
         kind: 'forge',
         remote: 'GHE',
         forge: { host: 'EU.ghe.com', port: '', owner: 'org', repo: 'repo', kind: 'github', recognizedByGitSpice: false },
+        config: TWO_URLS,
       });
     });
 
@@ -223,6 +245,7 @@ describe('detectForge (real git)', () => {
         kind: 'forge',
         remote: 'github',
         forge: { host: 'github.com', port: '', owner: 'org', repo: 'repo', kind: 'github', recognizedByGitSpice: false },
+        config: TWO_URLS,
       });
     });
   });
@@ -251,6 +274,7 @@ describe('detectForge (real git)', () => {
         kind: 'forge',
         remote: 'work',
         forge: { host: 'work', port: '', owner: 'org', repo: 'repo', kind: 'github', recognizedByGitSpice: true },
+        config: { kind: 'github', rejectedKind: null, hosts: new Map() },
       });
     });
   });
@@ -279,6 +303,7 @@ describe('detectForge (real git)', () => {
         kind: 'forge',
         remote: 'github',
         forge: { host: 'github.com', port: '', owner: 'org', repo: 'repo', kind: 'github', recognizedByGitSpice: false },
+        config: { kind: null, rejectedKind: 'GitHub', hosts: new Map() },
       });
     });
   });

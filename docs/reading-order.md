@@ -281,7 +281,8 @@ the repository root; its §13 is the running log of decisions and deviations mad
     same, with the same port if the base names one — then `guessKind`, the extension's own idea
     for a host git-spice will not match (`*.ghe.com`, Azure, a default host in capitals), which
     is what `recognizedByGitSpice` records (E70's trigger); `ForgeDetection` and `detectForge`
-    for the three answers E25, E21 and E60/E70/E75 need; `ghEnv` last, and why it is one key.
+    for the three answers E25, E21 and E60/E70/E75 need (the `forge` member carries the
+    configuration that decided it, so a message can say why); `ghEnv` last, and why it is one key.
     Hand-rolled after measuring `hosted-git-info`, which fails §7.5's own URL list (plan D54).
 24. **`test/unit/forge.test.ts`** — the URL forms as a table (one test per row, so a failure
     names the URL that broke), the texts that must be `null`, the configuration lines as git

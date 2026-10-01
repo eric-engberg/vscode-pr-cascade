@@ -700,7 +700,9 @@ hostname, and gh lower-cases it itself); the spelling is kept because git-spice 
 is the whole path between host and repository (`group/sub` on GitLab; Azure's raw path until M11); a local path
 and any `file:` URL are `null`. The composed reader `detectForge(git,
 root, remote)` tells no-remote (E25) from unparseable (E21) from a forge of unknown or unrecognised kind
-(E60/E70) — the tagged union `ForgeDetection`. `git remote get-url` has already applied `url.<base>.insteadOf`.
+(E60/E70) — the tagged union `ForgeDetection`, whose `forge` member also carries the `ForgeConfig` that decided
+the kind, so item 17's `Readiness` can say *why* git-spice will not match (a rejected `spice.forge.kind`, a url key
+that displaced a default). `git remote get-url` has already applied `url.<base>.insteadOf`.
 
 **Invoking `gh`:** always `cwd = repo root` and `env.GH_HOST = host`. `gh` would usually infer the host
 from the remote on its own, but setting `GH_HOST` makes multi-remote repos deterministic.

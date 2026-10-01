@@ -673,11 +673,13 @@ describe('detectForge', () => {
     // act
     const detection = await detectForge(git, ROOT, 'origin');
 
-    // assert: the whole shape — the repository, its kind, and that git-spice agrees
+    // assert: the whole shape — the repository, its kind, that git-spice agrees, and the
+    // configuration (none) that decided it
     expect(detection).toStrictEqual({
       kind: 'forge',
       remote: 'origin',
       forge: { host: 'github.com', port: '', owner: 'org', repo: 'repo', kind: 'github', recognizedByGitSpice: true },
+      config: NO_CONFIG,
     });
   });
 
@@ -698,6 +700,7 @@ describe('detectForge', () => {
       kind: 'forge',
       remote: 'origin',
       forge: { host: 'ghes.corp.com', port: '2222', owner: 'org', repo: 'repo', kind: 'unknown', recognizedByGitSpice: false },
+      config: NO_CONFIG,
     });
   });
 
@@ -719,6 +722,7 @@ describe('detectForge', () => {
       kind: 'forge',
       remote: 'origin',
       forge: { host: 'ghes.corp.com', port: '2222', owner: 'org', repo: 'repo', kind: 'github', recognizedByGitSpice: true },
+      config: configured('github', 'ghes.corp.com'),
     });
   });
 
@@ -739,6 +743,7 @@ describe('detectForge', () => {
       kind: 'forge',
       remote: 'origin',
       forge: { host: 'eu.ghe.com', port: '', owner: 'org', repo: 'repo', kind: 'github', recognizedByGitSpice: false },
+      config: NO_CONFIG,
     });
   });
 
@@ -759,6 +764,7 @@ describe('detectForge', () => {
       kind: 'forge',
       remote: 'origin',
       forge: { host: 'work', port: '', owner: 'org', repo: 'repo', kind: 'github', recognizedByGitSpice: true },
+      config: { kind: 'github', rejectedKind: null, hosts: new Map() },
     });
   });
 
@@ -779,6 +785,7 @@ describe('detectForge', () => {
       kind: 'forge',
       remote: 'origin',
       forge: { host: 'github.com', port: '', owner: 'org', repo: 'repo', kind: 'github', recognizedByGitSpice: false },
+      config: { kind: null, rejectedKind: 'GitHub', hosts: new Map() },
     });
   });
 
