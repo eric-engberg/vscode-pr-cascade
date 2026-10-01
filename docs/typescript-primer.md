@@ -997,7 +997,9 @@ absolute against `base` and returns an absolute `p` unchanged (`realpath -m`) â€
 `test/git/changes.git.test.ts` (PR 10): `fs.mkdirSync(p, { recursive: true })` is
 `mkdir -p` (the fixture builder uses it too), `fs.copyFileSync(a, b)` is `cp a b`, and
 `fs.symlinkSync(target, p)` is `ln -s target p` â€” the arguments in that order, target
-first, exactly as `ln` takes them.
+first, exactly as `ln` takes them. And `fs.readFileSync(p, 'utf8')` is `cat`:
+`test/unit/release.test.ts` (M4 item 15) reads package.json and CHANGELOG.md with it, the
+`'utf8'` saying "as text" the way `encoding` does for `execFileSync`.
 
 ## 29. Counted for loops
 

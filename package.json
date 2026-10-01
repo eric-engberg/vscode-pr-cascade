@@ -2,7 +2,7 @@
   "name": "vscode-pr-cascade",
   "displayName": "PR Cascade",
   "description": "Stacked pull requests in VS Code — see the stack, click a layer for its diff, create and restack PRs on GitHub and GitLab",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "local",
   "license": "MIT",
   "repository": {

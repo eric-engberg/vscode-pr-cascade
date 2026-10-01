@@ -21,8 +21,11 @@ the repository root; its §13 is the running log of decisions and deviations mad
    Git extension found", item 25 — `prCascade.remote`, and `prCascade.statusBar`, item 27).
    There is deliberately no
    `extensionDependencies` entry for the Git extension (plan §7.14.1 says why). Everything
-   declared here is given code in `src/extension.ts`. The `scripts` block is every command
-   a developer runs; the `devDependencies` block is the toolchain, nothing here ships.
+   declared here is given code in `src/extension.ts`. `version` is the release's tag without
+   its `v` (item 44 checks that), and `publisher` — `local` until a Marketplace publisher
+   exists — is the first half of the extension's id, `local.vscode-pr-cascade`, the name the
+   extension-host tests look it up by. The `scripts` block is every command a developer
+   runs; the `devDependencies` block is the toolchain, nothing here ships.
 2. **`src/extension.ts`** — the entry point and the wiring. Read it twice: now for the
    shape — `activate` builds the adapter for the built-in Git extension (item 25), builds
    the provider from two loader functions and the output channel, creates the view with
@@ -531,12 +534,26 @@ the repository root; its §13 is the running log of decisions and deviations mad
     that builds the extension; `&&` so a bundling error is not mistaken for success) and
     why Node's own type stripping was not used.
 43. **`.github/workflows/ci.yml`** — the same `npm test` and `npm run test:ext`, on Linux and
-    macOS, on every pull request and on pushes to `main`.
-44. **`scripts/depcheck.mjs`** — prints the dependency card (plan §11.3) that every PR adding
+    macOS, on every pull request and on pushes to `main` — and, since M4 item 15, `npm run
+    package` between them, so a packaging problem surfaces on a PR rather than on a tag.
+44. **`.github/workflows/release.yml`** — what a pushed `v*` tag does (M4 item 15): the tag
+    must equal `v` plus package.json's `version` and CHANGELOG.md must have that version's
+    section, else it stops before building; then `npm test`, `npm run package`, and `gh
+    release create` attaches the `.vsix` to a GitHub release whose notes are that CHANGELOG
+    section. Read the header for why only `npm test` runs here, and the comment on `on:` for
+    why a person pushes the tag. Plain YAML and shell, read for what it does (primer intro).
+45. **`test/unit/release.test.ts`** — the release facts pinned on every `npm test` instead
+    of discovered at tag time: a plain `major.minor.patch` version; CHANGELOG.md opening
+    with that version's section and linking it to its release tag; the VS Code floor in
+    `engines` equal to the `@types/vscode` version. The one test file that reads the
+    repository's own files (`readFileSync`, primer §28) rather than importing from `src/`;
+    `JSON.parse`'s answer is checked field by field (primer §51), never cast.
+46. **`scripts/depcheck.mjs`** — prints the dependency card (plan §11.3) that every PR adding
     a runtime library must include. Not used until M5. Plain JavaScript that runs ahead of
     the primer: read it for what it does, not how (primer intro).
-45. **`.vscodeignore`** — what is left out of the `.vsix`; the reason `node_modules` never
-    reaches a user.
+47. **`.vscodeignore`** — what is left out of the `.vsix`, so that exactly five files reach a
+    user: `dist/extension.js`, `package.json`, `README.md`, `CHANGELOG.md`, `LICENSE`; the
+    reason `node_modules` never does.
 
 ## Where the layers live
 

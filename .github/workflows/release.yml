@@ -1,0 +1,73 @@
+# release.yml — GitHub Actions: on a pushed `v*` tag, build the .vsix and attach it to a GitHub
+# release, so it can be installed anywhere with `code --install-extension`.
+#
+# Layer: tooling. Depends on: package.json `version` (the tag must be `v<version>` — vsce names
+# the file after the manifest, not the tag), CHANGELOG.md (its `## [<version>]` section becomes
+# the release notes), `npm run package` (vsce, which runs `npm run build` first through
+# `vscode:prepublish`), and `gh`, preinstalled on GitHub's runners. Depended on by: nothing — the
+# Releases page is where the .vsix is downloaded from. Only `npm test` runs here, not the
+# extension-host suite: a tag points at a `main` commit ci.yml has already tested on both
+# operating systems, and that suite needs a 300 MB VS Code download. Publishing to the
+# Marketplace is not here (plan §11.2, "later"). Plan: §9.5, §10.1 item 15, §13.2 D53.
+name: Release
+
+# A tag is pushed by a person — `git tag -a v0.1.0 -m v0.1.0 && git push origin v0.1.0` on the
+# merge commit — never by a workflow: a tag created with the workflow's own token starts no run.
+on:
+  push:
+    tags: ['v*']
+
+# The repository's default token is read-only; creating a release and uploading to it needs
+# write access to contents, and naming one scope here sets every other scope to none.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      # Exactly what ci.yml runs, for the reasons its comment gives (no install scripts).
+      - run: npm ci --ignore-scripts
+
+      # The tag and package.json must agree, and CHANGELOG.md must have this version's section
+      # (the release notes below) — fail here, before anything is built or published, if not.
+      # The section is found by the same exact prefix test the notes step uses (awk's `index`;
+      # a grep pattern would read the version's dots as "any character"). `version` is exported
+      # for the later steps through $GITHUB_ENV.
+      - name: Check the tag against package.json and CHANGELOG.md
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package.json version $version" >&2
+            exit 1
+          fi
+          if ! awk -v heading="## [$version]" 'index($0, heading) == 1 { found = 1 } END { exit !found }' CHANGELOG.md; then
+            echo "CHANGELOG.md has no '## [$version]' section" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_ENV"
+
+      - run: npm test
+
+      # `vsce package`; `vscode:prepublish` in package.json builds dist/extension.js first.
+      - run: npm run package
+
+      # The release notes: this version's CHANGELOG section — from its heading, up to the next
+      # `## ` heading or the reference links at the foot of the file. awk prints a line while
+      # `inside` is set; `index(...) == 1` is a plain prefix test, no regular expression.
+      - name: Extract the release notes
+        run: awk -v heading="## [$version]" 'index($0, heading) == 1 { inside = 1; next } /^## / || /^\[/ { inside = 0 } inside' CHANGELOG.md > notes.md
+
+      # `--verify-tag` refuses to invent a tag (gh's default would create one); the title is
+      # the tag; the .vsix is the one asset.
+      - name: Create the GitHub release with the .vsix attached
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" vscode-pr-cascade-*.vsix --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md

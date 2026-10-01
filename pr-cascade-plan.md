@@ -1521,8 +1521,8 @@ runs.
 ### 9.5 CI
 
 The extension's own repo lives on **github.com** (personal), so GitHub Actions is the primary CI:
-matrix `ubuntu-latest` + `macos-latest`; steps: checkout → node 20 → `npm ci` → `npm test` →
-`xvfb-run -a npm run test:ext` on Linux, plain on macOS. Cache the VS Code download. CI installs git-spice (`brew install git-spice` on macOS, release binary on Linux) so the real-`gs`
+matrix `ubuntu-latest` + `macos-latest`; steps: checkout → node 24 (D2) → `npm ci --ignore-scripts` → `npm test` →
+`npm run package` (M4 item 15) → `xvfb-run -a npm run test:ext` on Linux, plain on macOS. Cache the VS Code download. CI installs git-spice (`brew install git-spice` on macOS, release binary on Linux) so the real-`gs`
 suites run. The e2e suites (GitHub and GitLab) are **not** run in CI (they need a logged-in `gs`); they are a manual pre-release step. Tag → build →
 `vsce package` → attach the `.vsix` to a GitHub release so it can be installed on the work Mac with
 `code --install-extension`.
@@ -1686,7 +1686,9 @@ item 12 split 2026-09-26 into 12a/12b so every later item number stays true)
     `statusBar` and `treeView` returned under `ExtensionMode.Test` only.)
 15. `v0.1.0`: packaging (`vsce`), README for users (gains the `git.*` settings that decide which repositories
     appear, and the E83 note that a ref moved from a terminal needs the refresh button), CHANGELOG, release
-    workflow attaching the `.vsix`. *Use it for a week before M5.*
+    workflow attaching the `.vsix`. *Use it for a week before M5.* (D53: version 0.1.0 in the PR, the tag is
+    Ric's after merging; `release.yml` on a pushed `v*` tag, `npm test` only, the preinstalled `gh` attaches
+    the `.vsix`; `npm run package` in ci.yml; no icon, publisher `local`; `unit/release` pins the facts.)
 
 **M5 stack — "the backend exists and can push"**
 16. `core/forge`: `parseRemoteUrl` + forge kind + `ghEnv`. First **library decision** (`hosted-git-info`
@@ -1819,8 +1821,10 @@ vscode-pr-cascade/            (GitHub repo: <you>/vscode-pr-cascade)
 ├── .eslintrc.cjs             @typescript-eslint + no-restricted-imports(vscode) for src/core/**
 ├── .vscode/launch.json      "Run Extension" config (§11.2)
 ├── .vscode/tasks.json       npm: build / npm: watch
+├── .github/workflows/        ci.yml (every PR and main: test, package, test:ext), release.yml (a pushed v* tag → the .vsix on a GitHub release)
 ├── .vscodeignore
 ├── .gitignore                node_modules, dist, .vscode-test, coverage
+├── CHANGELOG.md              Keep a Changelog; the newest `## [<version>]` section is the release's notes
 ├── README.md                 what it is, install (Marketplace or the `.vsix`, §11.2), per-forge setup (`gs`, `gh`), settings
 ├── docs/typescript-primer.md the TS constructs used here, in order of appearance (§11.1)
 ├── docs/reading-order.md     which files to read first and why (kept current per milestone)
@@ -2298,6 +2302,7 @@ marks several commits `edit` (verified to work; note the todo list contains `upd
 | D50 | M4 PR 13a | Rebase detection is one `rev-parse --git-path rebase-merge --git-path rebase-apply` inside `computeStack`, each printed path resolved against the root and tested with `existsSync`; `computeStack` takes `directoryExists` as a fourth, defaulted parameter so the unit tests stay off the disk; the E4 path (`trunk: null`) leaves `rebaseInProgress: false` unchecked, as it leaves `head: null`; a paused `git am` counts as a rebase. Item 13 is split into 13a (core) and 13b (vscode) by §10.1's own rule, where 12a's waiver was for a deletion. | One spawn per repository per refresh, and `--git-path` may be repeated; the fixture already resolves the same way (`startConflictingRebase`). `FakeGitRunner` cannot model a directory, and the injected check is the D46 seam pattern. Nothing draws the field while `trunk` is null. `am` uses the same `rebase-apply` machinery and is among the pause points §13.4 (c) says the check must cover. |
 | D51 | M4 PR 13b | Row precedence in `nodesForRepo`: one row above the layers — "Rebase in progress — resolve it first" (warning) while `rebaseInProgress`, else "Detached HEAD" (info) while `head` is null — then the E5 row or the layers; E4 alone when `trunk` is null. A paused `git am` reads "Rebase in progress" too. `MessageNode`'s `contextValue` stays empty. | §7.1.0 fixes the texts but names neither icons nor an order. Every rebase pause point but `git am` detaches HEAD (git rebases on a detached HEAD on both backends — probed on git 2.50.1; `test/git/rebase.git.test.ts` pins `head === null` at the merge backend's conflict stop, `exec` and `break`, and `head` still on its branch during `am`), so two rows would say one thing twice, and the rebase row is the one that says what to do. Warning / info per D46's vocabulary: a rebase is a state the user must resolve (and M5 disables mutating commands in it, E12); a detached HEAD breaks nothing and the view still does its job (E3). The `viewItem` context values of §7.2.1, and the context key M5's `enablement` rule needs for a paused rebase, come with the commands that need them. |
 | D52 | M4 PR 14 | The status bar is fed by a second provider event, `onDidLoadStates` — the states `topLevelNodes` loaded, `[]` on a failed load or no repository — and hidden on `[]` or while `prCascade.statusBar` is false (read per refresh, like every setting; not live). With several repositories it describes the first in §6 order and carries that root in its tooltip; `name` is "PR Cascade Stack", the item id `prCascade.stack`, Left / 100. E44 reads `2 of 2`, not `2 of 3`. The view is created with `createTreeView`; `refresh()` runs `getChildren()` itself while `treeView.visible` is false, and `activate()` runs it once at startup unguarded — VS Code reports visibility asynchronously, so the property always reads false there (one duplicate load per window when the view is visible at startup). Two loads can overlap, so the provider numbers them (`loads`) and only the newest speaks to the status bar. `activate()` returns `statusBar` and `treeView` only under `ExtensionMode.Test`; the hidden-view run has a live test through `treeView`. | §7.1.0's "same refresh cycle" means the one place a refresh's states exist, `topLevelNodes`; §7.14.3's "hidden in all five states" is exactly "the load rejected", classified once in the catch that already draws the row. HEAD-only membership (`--merged HEAD`, §12 item 2) makes `2 of 3` unattainable in v0.1. Ric's layout is the many-repository case, so hiding the item there would hide the feature; the active-editor rule is M6's. VS Code asks a hidden view for nothing, so without the run of our own the item would go stale the moment the Source Control pane is collapsed, which contradicts §13.4's reason for `onStartupFinished`. The Test-mode hook is the §13.4 2026-09-19 note's own mechanism; an unconditional member would rewrite that decision. |
+| D53 | M4 PR 15 | v0.1.0 ships with publisher `local` (id `local.vscode-pr-cascade`) and without an icon: §11.3 lists one, but the only icon the plan names is M6's container SVG (§7.11), which vsce refuses as a manifest `icon`. The version is bumped in the PR (package.json and both lock lines); the `v0.1.0` tag is Ric's, pushed after the stack merges. `release.yml` runs on a pushed `v*` tag: the tag must equal `v<version>` and CHANGELOG.md must have that section; `npm test` but not `test:ext`; `npm run package`; the preinstalled `gh` creates the release with the `.vsix` and the CHANGELOG section as notes — no third-party action. `npm run package` joins ci.yml. CHANGELOG.md in Keep a Changelog form, no E-numbers or PR numbers (vsce turns ` #N` into issue links). The README is rewritten for users, with the developer material under one `Development` heading at the end rather than in a separate file. `unit/release.test.ts` pins version / CHANGELOG / engines on every `npm test`. Size: about 90 added lines of code and config (release.yml, ci.yml, .vscodeignore, package.json, the lock) and about 180 of prose (README, CHANGELOG.md, plan, reading order, primer) — inside the §0 guideline on D45's count, and inside it even with prose counted. | Marketplace publishing is §11.2's "later", and a publisher change later would change the extension id. A tag pushed with the workflow token starts no run, so the tag is a human step; the tagged commit is a `main` commit CI already ran on both OSes, so the release job repeats only the cheap suite. One new file and no new action keep the PR one idea. §10.1 asks every PR for tests, and the two facts the workflow guards are worth failing a push over, not only a tag. §11's skeleton lists README.md and docs/ and no contributor file. |
 
 ### 13.3 Test coverage delivered in M1 (all green on `m1/06-vscode-tree`, 2026-09-19)
 
@@ -2449,6 +2454,14 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
 - M3 stack built, reviewed and submitted 2026-09-20 (see D40–D45). After M3 merges, **M4** is next: refresh triggers, state nodes, status bar, v0.1.0 — with the activation and `capabilities` decisions already recorded above (the discovery-caching idea was superseded a week later, next bullets).
 - **M3 merged 2026-09-20** (PRs #17, #18). The same day's Q&A produced the decision below; it was recorded on
   2026-09-26 as a docs PR off `main` (#22, merged the same day), before M4 starts.
+- **M4 item 15, 2026-10-01**, branch `m4/15-v0.1.0` stacked on 14 (D53): package.json and package-lock.json at
+  0.1.0; CHANGELOG.md (Keep a Changelog); README rewritten for users — Install from the Releases page, What you
+  see, Refresh (E83's list and §7.14.2's `git.autorefresh` / `git.statusLimit` note), the `git.*` settings with
+  `git.detectSubmodules` and closed-stays-closed added, What's next, Development last; `.github/workflows/release.yml`;
+  `npm run package` in ci.yml; `test/unit/release.test.ts`; primer §28 gains `readFileSync`; reading order items 44
+  and 45 new, later items renumbered; §9.5's step list brought up to date (node 24, `--ignore-scripts`, `package`);
+  §11's skeleton gains CHANGELOG.md and `.github/workflows/`. The tag and the release are Ric's, after the merge, with
+  CHANGELOG.md's `## [0.1.0] - <date>` set to that day in a one-line commit on `main` first if it differs.
 - **M4 item 14, 2026-09-30**, branch `m4/14-status-bar` stacked on 13b (D52): `src/vscode/statusbar.ts`
   (`StackStatusBar`, `stackStatusText`), the provider's `onDidLoadStates`, `createTreeView` and the hidden-view
   run in `refresh()`, `prCascade.statusBar`, the `capabilities` rider; `test/ext/statusbar.test.ts` live through
