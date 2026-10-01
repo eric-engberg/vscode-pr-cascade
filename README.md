@@ -28,7 +28,8 @@ Milestones (each is one stack of PRs):
    built-in Git extension, which must be enabled (it is by default), and the view refreshes
    by itself whenever that extension runs a `git status` — after git activity outside
    VS Code, once the window has focus again. A ref that moves on its own (`gs branch track`)
-   is not seen by anyone; the Refresh button is for that. ← *now*
+   is not seen by anyone; the Refresh button is for that. When a rebase is paused, or HEAD is
+   detached, a row above the layers says so. ← *now*
 5. git-spice backend: readiness, login, push.
 6. Create PRs for the whole stack, linked as a native GitHub stack.
 7. Editable PR descriptions.

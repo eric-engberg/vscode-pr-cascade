@@ -237,6 +237,12 @@ async function loadRepoStates(output: vscode.OutputChannel, gitExtension: GitExt
     const state = await computeStack(git, root, trunk);
     // see primer §12 (template strings)
     output.appendLine(`${root}: ${state.layers.length} layer(s) above ${trunk}`);
+    if (state.rebaseInProgress) {
+      // Logged like the E4 line above: E4 and E12 are the view's two warning rows, states the
+      // user must act on (D51). Its information rows — detached HEAD (E3), not on a stack
+      // (E5) — get no line of their own.
+      output.appendLine(`${root}: rebase in progress`);
+    }
     states.push(state);
   }
   return states;

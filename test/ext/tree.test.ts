@@ -2,18 +2,20 @@
  * test/ext/tree.test.ts — the Stack view inside a real VS Code, over the fixture workspace
  * .vscode-test.mjs built: branch names top-first with counts, the current marker, SHAs in
  * tooltips only; the files under each layer (its own only, a rename, a binary, a deletion,
- * the click that runs `prCascade.openDiff`, the cache, an error row); the one-row messages;
- * and the refresh the view does by itself after a commit made outside VS Code (E20).
+ * the click that runs `prCascade.openDiff`, the cache, an error row); the two rows that
+ * stand above the layers (a paused rebase, a detached HEAD); the one-row messages; and the
+ * refresh the view does by itself after a commit made outside VS Code (E20).
  *
  * Layer: test, extension host (plan §9.1 layer 3; Mocha inside VS Code, `npm run test:ext`).
  * Depends on: the running extension (what activate() returns), the fixture workspace, and
  * the real built-in Git extension through test/ext/helpers/gitApi.ts (E20). Depended on by:
- * nothing. Plan: §6, §7.1, §7.2, §7.14.2, §8 E1b/E2/E4/E5/E7/E9/E10/E17/E20/E44, §9.4.
+ * nothing. Plan: §6, §7.1, §7.2, §7.14.2, §8 E1b/E2/E3/E4/E5/E7/E9/E10/E12/E17/E20/E44, §9.4.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
 import * as assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { after, before, describe, it } from 'mocha';
 import * as vscode from 'vscode';
@@ -83,6 +85,10 @@ function repositoryRoot(): string {
  * these commands need — no global or system config, English messages — so nothing on the
  * developer's machine can change the answer, whether git is asked a question or told to
  * check out a branch. The identity variables are for the one commit the E20 test makes.
+ * git's stderr is captured, not echoed into the test log, as the fixture builder does: Node
+ * puts it into the error message when git exits non-zero, so a failing step says what git
+ * said — and a step that is *meant* to exit non-zero (the paused rebase of the E12 test,
+ * which warns "execution failed: false") stays silent in a green run.
  */
 // see primer §28 (the Sync variants of Node's functions) and §16 (object literals: spread)
 function runGit(args: string[]): string {
@@ -98,6 +104,8 @@ function runGit(args: string[]): string {
       GIT_COMMITTER_NAME: 'PR Cascade test',
       GIT_COMMITTER_EMAIL: 'test@example.invalid',
     },
+    // stdin closed (no command can wait for input), stdout returned, stderr captured.
+    stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf8',
   });
 }
@@ -490,6 +498,63 @@ describe('the Stack view', () => {
       await repository.status();
       await restored;
     }
+  });
+
+  // The two rows that stand above the layers (plan §7.1.0; M4 item 13b): a paused rebase
+  // (E12) and a detached HEAD (E3). Each test puts the fixture repository into the state
+  // and undoes it in `finally`, as the one-row-message tests below do.
+  describe('the row above the layers', () => {
+    it('puts "Detached HEAD" above the layers, none of them current, when HEAD is detached (E3)', async () => {
+      // arrange: HEAD at the top layer's commit, as a commit rather than a branch
+      runGit(['checkout', '-q', '--detach']);
+      try {
+        // act
+        const items = await topLevelItems();
+
+        // assert: the row first, drawn as information — nothing is wrong, the view still
+        // does its job — with the empty contextValue that keeps every menu away; the
+        // layers follow, and no layer is current
+        assert.deepStrictEqual(items.map((item) => item.label), ['Detached HEAD', 'retry-metrics', 'add-retries', 'api-refactor']);
+        assert.ok(items[0].iconPath instanceof vscode.ThemeIcon, 'expected a ThemeIcon');
+        assert.strictEqual(items[0].iconPath.id, 'info');
+        assert.strictEqual(items[0].contextValue, '');
+        // see primer §25 (arrays: slice — the elements from position 1 on: the layers without the row above them)
+        assert.deepStrictEqual(items.slice(1).map((item) => item.description), ['3 commits', '2 commits', '1 commit']);
+      } finally {
+        runGit(['checkout', '-q', 'retry-metrics']);
+      }
+    });
+
+    it('puts "Rebase in progress — resolve it first" above the layers git still finds while a rebase is paused, and no "Detached HEAD" row (E12)', async () => {
+      // arrange: a rebase of the stack onto trunk that stops after the first replayed
+      // commit — `-x false` runs `false` after each one — leaving HEAD detached at the
+      // bottom layer's commit and git's rebase-merge directory in place. execFileSync
+      // throws on git's non-zero exit, which here is the paused state, not a failure.
+      // see primer §18 (try / catch: a `catch` with no name for the error)
+      try {
+        runGit(['rebase', '-x', 'false', 'main']);
+      } catch {
+        // Expected: exit 1 after "warning: execution failed: false".
+      }
+      // precondition, not the idea under test: the rebase did pause (plan §5: where this
+      // working tree keeps the directory, as git itself says)
+      const rebaseDir = path.resolve(repositoryRoot(), runGit(['rev-parse', '--git-path', 'rebase-merge']).trim());
+      assert.ok(fs.existsSync(rebaseDir), 'the rebase did not pause');
+      try {
+        // act
+        const items = await topLevelItems();
+
+        // assert: the warning row — a state the user can change — then the one layer below
+        // the pause; HEAD is detached too, but the rebase row says why, so no second row
+        assert.deepStrictEqual(items.map((item) => item.label), ['Rebase in progress — resolve it first', 'api-refactor']);
+        assert.ok(items[0].iconPath instanceof vscode.ThemeIcon, 'expected a ThemeIcon');
+        assert.strictEqual(items[0].iconPath.id, 'warning');
+        assert.strictEqual(items[0].contextValue, '');
+        assert.strictEqual(items[1].description, '1 commit');
+      } finally {
+        runGit(['rebase', '--abort']);
+      }
+    });
   });
 
   // Each test here puts the repository or the settings into one plan §8 state and undoes

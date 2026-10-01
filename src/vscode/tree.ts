@@ -7,7 +7,7 @@
  * only), vscode/gitApi.ts (GitUnavailableError, the one failure drawn as a warning), Node's
  * `node:path`. Depended on by: src/extension.ts (registers the provider and hands it the two
  * loaders), vscode/commands.ts (the FileNode a file row hands its command) and
- * test/ext/tree.test.ts. Plan: §6, §7.1, §7.2 (the click), §7.14.3, §8 E7/E10/E17/E44/E82,
+ * test/ext/tree.test.ts. Plan: §6, §7.1, §7.2 (the click), §7.14.3, §8 E3/E4/E5/E7/E10/E12/E17/E44/E82,
  * §12 item 3.
  */
 
@@ -174,12 +174,15 @@ export class RepoNode {
 }
 
 /**
- * A row that is a sentence rather than a layer: "No git repository in this workspace"
- * (plan §6, zero repositories), and the states in which a repository has no stack to
- * draw — no trunk found (E4), HEAD on trunk (E5) — or git could not be run at all (E17:
- * "one clear error node, not a crash loop"), at the top of the tree or under a layer
- * whose files could not be listed. M4 (plan §10.1 item 13) owns the full set of state
- * nodes and may reshape these; here they exist so the view is never silently empty.
+ * A row that is a sentence rather than a layer. The full set (plan §7.1.0, §6): "No git
+ * repository in this workspace" (zero repositories); per repository — at the top level with
+ * one, under its RepoNode with several — "No trunk found —
+ * set prCascade.trunk" (E4, a warning), "Rebase in progress — resolve it first" (E12, a
+ * warning, above the layers), "Detached HEAD" (E3, above the layers) and "Not on a stack"
+ * (E5); and the failures — git could not be run or a command failed (E17: "one clear
+ * error node, not a crash loop"), at the top of the tree or under a layer whose files could
+ * not be listed, and the Git extension unusable (E82, a warning). `nodesForRepo` and
+ * `topLevelNodes` decide which; this class only draws.
  */
 export class MessageNode {
   // see primer §13 (default parameters) and §47 (parameter properties)
@@ -383,23 +386,40 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
 }
 
 /**
- * The rows for one repository: its layers, top-first, or the one message that says why
- * there are none. Top-first — the reverse of RepoState.layers, which is bottom to top —
- * because that is how `git log` reads: the newest work at the top, trunk at the bottom
- * (plan §7.1). The loop counts down from the last layer to do the reversing; the array
- * is left as it was.
+ * The rows for one repository: the one row that may stand above the layers, then the
+ * layers top-first, or the one message that says why there are none (plan §7.1.0). Top-first
+ * — the reverse of RepoState.layers, which is bottom to top — because that is how `git log`
+ * reads: the newest work at the top, trunk at the bottom (plan §7.1). The loop counts down
+ * from the last layer to do the reversing; the array is left as it was.
+ *
+ * The row above the layers (M4 item 13b, D51): a paused rebase comes first — a warning,
+ * because it is a state the user must resolve, and the one in which M5's commands will
+ * refuse to run (E12). Only when no rebase is paused does a detached HEAD get its row (E3,
+ * information: nothing is wrong, the layers are still there, none of them current). Not
+ * both: every rebase pause point but `git am` detaches HEAD, so a second row would say the
+ * same thing twice, and the rebase row is the one that says what to do. No trunk (E4)
+ * stands alone — nothing else was computed on that path (src/extension.ts).
  */
-// see primer §29 (counted for loops)
+// see primer §29 (counted for loops) and §25 (arrays: push, a typed empty array)
 function nodesForRepo(state: RepoState): StackNode[] {
   if (state.trunk === null) {
     // Nothing can be measured without a base (E4); the message names the setting to fix.
     return [new MessageNode('No trunk found — set prCascade.trunk', 'warning')];
   }
-  if (state.layers.length === 0) {
-    // HEAD is on trunk, or on a branch trunk already contains (E5).
-    return [new MessageNode('Not on a stack')];
-  }
   const nodes: StackNode[] = [];
+  if (state.rebaseInProgress) {
+    nodes.push(new MessageNode('Rebase in progress — resolve it first', 'warning'));
+  } else if (state.head === null) {
+    nodes.push(new MessageNode('Detached HEAD'));
+  }
+  if (state.layers.length === 0) {
+    // HEAD is on trunk, or on a branch trunk already contains (E5). Mid-rebase that is the
+    // state before the first pick replayed anything (13a's `break` test: HEAD detached at
+    // trunk's own commit) — or HEAD is on a replayed commit no branch points at yet, when a
+    // rebase onto a moved trunk stopped after a pick; either way nothing is a member.
+    nodes.push(new MessageNode('Not on a stack'));
+    return nodes;
+  }
   for (let index = state.layers.length - 1; index >= 0; index--) {
     nodes.push(new LayerNode(state.root, state.layers[index]));
   }
