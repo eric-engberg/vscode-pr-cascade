@@ -25,7 +25,10 @@ Milestones (each is one stack of PRs):
    the left and the layer on the right, through the extension's own `stackdiff:` documents;
    adds, deletes and renames show what they should; a binary file opens as a file instead.
 4. Auto-refresh, state nodes, status bar → v0.1. The repositories now come from VS Code's
-   built-in Git extension, which must be enabled (it is by default). ← *now*
+   built-in Git extension, which must be enabled (it is by default), and the view refreshes
+   by itself whenever that extension runs a `git status` — after git activity outside
+   VS Code, once the window has focus again. A ref that moves on its own (`gs branch track`)
+   is not seen by anyone; the Refresh button is for that. ← *now*
 5. git-spice backend: readiness, login, push.
 6. Create PRs for the whole stack, linked as a native GitHub stack.
 7. Editable PR descriptions.

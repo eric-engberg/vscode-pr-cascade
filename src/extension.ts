@@ -4,16 +4,18 @@
  *
  * Layer: wiring (plan §4.1); the only file VS Code loads directly (package.json "main"
  * points at its bundled form, dist/extension.js). Depends on: the `vscode` module,
- * core/git.ts, trunk.ts, stack.ts, changes.ts, uri.ts (the scheme name), vscode/gitApi.ts
- * (the built-in Git extension: repositories, events, the git executable), vscode/config.ts,
+ * core/git.ts, trunk.ts, stack.ts, changes.ts, uri.ts (the scheme name), debounce.ts (the
+ * refresh), vscode/gitApi.ts (the built-in Git extension: repositories, events, the status
+ * signal, the git executable), vscode/config.ts,
  * tree.ts, content.ts, commands.ts. Depended on by: VS Code itself, test/ext/* and
  * test/ext-parent/*. Plan:
- * §4.1, §6, §7.14, §9.1 (what activate returns), §10.1 items 6, M2 9, M3 11, M4 12a.
+ * §4.1, §6, §7.14, §9.1 (what activate returns), §10.1 items 6, M2 9, M3 11, M4 12a, 12b.
  */
 
 // see primer §1 (import / export), §2 (the vscode module) and §9 (`import type`)
 import * as vscode from 'vscode';
 import { changedFiles } from './core/changes';
+import { debounce } from './core/debounce';
 import { RealGitRunner } from './core/git';
 import type { ChangedFile, RepoState, StackLayer } from './core/model';
 import { computeStack } from './core/stack';
@@ -28,17 +30,31 @@ import type { GitApi } from './vscode/gitApi';
 import { StackTreeProvider } from './vscode/tree';
 
 /**
+ * How long the view waits after the last "a git status completed" event, or the last click
+ * on Refresh, before it recomputes (core/debounce.ts). A quarter of a second is short next
+ * to the pipeline that follows it (a handful of git spawns) and well over the gap between
+ * the statuses of one burst of the Git extension's. M5 revisits the value with its digest
+ * pre-filter (plan §7.14.2).
+ */
+// see primer §4 (const)
+const STATUS_REFRESH_DELAY_MS = 250;
+
+/**
  * What activate() hands back. VS Code ignores it; the extension-host tests
  * (test/ext/*.test.ts) receive it from `extension.activate()` and drive the tree through
- * it — `provider.getChildren()` for the rows, `refresh()` for what the toolbar button
- * does — instead of reaching into the extension's insides (plan §9.1, "activate() must
- * return { provider, refresh }").
+ * it — `provider.getChildren()` for the rows, `refresh()` for a redraw at once — instead
+ * of reaching into the extension's insides (plan §9.1, "activate() must return
+ * { provider, refresh }").
  */
 // see primer §9 (interface) and §33 (function types)
 export interface ExtensionApi {
   /** The Stack view's data provider — the object VS Code asks for rows. */
   provider: StackTreeProvider;
-  /** Recompute everything and redraw: the same thing `prCascade.refresh` does. */
+  /**
+   * Recompute everything and redraw, at once. The toolbar button (`prCascade.refresh`) ends
+   * in this same function, but through `refreshSoon` — the debounce in `activate` — so a
+   * test that wants the redraw now uses this handle, not the command.
+   */
   refresh: () => void;
 }
 
@@ -90,17 +106,33 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
   function refresh(): void {
     provider.refresh();
   }
+  // The refreshes that come in bursts go through one debounce (core/debounce.ts): every
+  // completed `git status` in any repository — the Git extension runs several in a row
+  // during its own operations — and the toolbar button, so that a click during such a
+  // burst costs one redraw, not two (plan §7.14.2). The open/close and folder events below
+  // stay direct: each is a discrete change of the list, and a redraw per change is right.
+  // `schedule` is passed bare below, as `refresh` is: it closes over its own state and
+  // never reads `this`, so detaching it from `refreshSoon` loses nothing (primer §64).
+  const refreshSoon = debounce(refresh, STATUS_REFRESH_DELAY_MS);
+  // Cancelled on shutdown, so a run still pending cannot fire into a disposed view. An
+  // object with a `dispose` method is all a Disposable is (primer §9: structural typing).
+  context.subscriptions.push({ dispose: () => refreshSoon.cancel() });
   // The toolbar button (package.json "contributes.menus" › "view/title") runs the command
   // by this id; registering it here is what gives the id a function to run.
-  context.subscriptions.push(vscode.commands.registerCommand('prCascade.refresh', refresh));
+  context.subscriptions.push(vscode.commands.registerCommand('prCascade.refresh', refreshSoon.schedule));
   // The Git extension opened or closed a repository, or became usable (plan §7.14.2) — the
   // list of repositories changed, so redraw.
   context.subscriptions.push(gitExtension.onDidChange(refresh));
+  // A repository's `git status` completed (plan §7.14.2, E20): after git run in a terminal
+  // the Git extension's watcher saw it, waited for the window to regain focus, ran the
+  // status and fired — and after its own operations too. What changed is not in the event
+  // (and a ref that moved on its own is never seen — E83, the button is the recovery), so
+  // the answer is always the same: recompute, soon.
+  context.subscriptions.push(gitExtension.onDidRunStatus(refreshSoon.schedule));
   // A folder added, removed or reordered in the workspace changes the order the
   // repositories are listed in (plan §6: folder order is the sort key), and need not open
   // or close a repository at all — a folder added inside an open repository opens nothing
-  // — so this one-line listener stays beside the Git extension's events. The refresh on
-  // every change a repository sees is M4 item 12b's.
+  // — so this one-line listener stays beside the Git extension's events.
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(refresh));
 
   // The diff on click (M3). Two registrations that only meet inside VS Code: the

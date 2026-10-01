@@ -74,8 +74,16 @@ fs.mkdirSync(nestedDir);
 // A `.code-workspace` file is how VS Code opens several folders at once (a "multi-root
 // workspace"). Both entries resolve to the one repository; the nested one comes first
 // so whoever finds the repository — the built-in Git extension since M4 — meets E1b before the root.
+// Its `settings` block is the one place a test may pin a `git.*` value (plan §9.1): with
+// `git.autorefresh` off the Git extension never runs a `git status` of its own when a test's
+// git command touches the working tree or `.git` — a status the extension would relay into a
+// debounced refresh() landing at an unpredictable moment in a later test (M4 item 12b). The
+// tests synchronise through `repository.status()` instead (plan §7.14.2), which still runs.
 const workspaceFile = path.join(path.dirname(fixture.dir), 'fixture.code-workspace');
-fs.writeFileSync(workspaceFile, JSON.stringify({ folders: [{ path: nestedDir }, { path: fixture.dir }] }));
+fs.writeFileSync(
+  workspaceFile,
+  JSON.stringify({ folders: [{ path: nestedDir }, { path: fixture.dir }], settings: { 'git.autorefresh': false } }),
+);
 
 // The second workspace, for E1 (plan §8; test/ext-parent): Ric's layout — a parent folder
 // that is not a repository, with a repository one level below it and another two levels

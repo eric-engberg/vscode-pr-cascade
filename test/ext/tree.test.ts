@@ -2,21 +2,24 @@
  * test/ext/tree.test.ts — the Stack view inside a real VS Code, over the fixture workspace
  * .vscode-test.mjs built: branch names top-first with counts, the current marker, SHAs in
  * tooltips only; the files under each layer (its own only, a rename, a binary, a deletion,
- * the click that runs `prCascade.openDiff`, the cache, an error row); the one-row messages.
+ * the click that runs `prCascade.openDiff`, the cache, an error row); the one-row messages;
+ * and the refresh the view does by itself after a commit made outside VS Code (E20).
  *
  * Layer: test, extension host (plan §9.1 layer 3; Mocha inside VS Code, `npm run test:ext`).
- * Depends on: the running extension (what activate() returns) and the fixture workspace.
- * Depended on by: nothing. Plan: §6, §7.1, §7.2, §8 E1b/E2/E4/E5/E7/E9/E10/E17/E44, §9.4.
+ * Depends on: the running extension (what activate() returns), the fixture workspace, and
+ * the real built-in Git extension through test/ext/helpers/gitApi.ts (E20). Depended on by:
+ * nothing. Plan: §6, §7.1, §7.2, §7.14.2, §8 E1b/E2/E4/E5/E7/E9/E10/E17/E20/E44, §9.4.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
 import * as assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
-import { before, describe, it } from 'mocha';
+import { after, before, describe, it } from 'mocha';
 import * as vscode from 'vscode';
 import type { ExtensionApi } from '../../src/extension';
 import type { StackNode, StackTreeProvider } from '../../src/vscode/tree';
+import { realGitApi } from './helpers/gitApi';
 
 // The plan Appendix A stack as the view must list it: top layer first (plan §7.1). The
 // fixture leaves HEAD on retry-metrics.
@@ -27,6 +30,8 @@ const LAYERS_TOP_FIRST = ['retry-metrics', 'add-retries', 'api-refactor'];
 // `before` hook below). Everything is reached through it — `getChildren()` for the rows,
 // `getTreeItem(row)` for how each is drawn — the same two calls VS Code makes.
 let provider: StackTreeProvider;
+// An output channel for the adapter the E20 test builds to reach the Git extension's API.
+let output: vscode.OutputChannel;
 
 /** The rows at the top of the view, drawn: what VS Code would show under "Stack". */
 // see primer §6 (async / await) and §25 (arrays: map)
@@ -77,13 +82,22 @@ function repositoryRoot(): string {
  * part of the fixture builder's hermetic environment (test/helpers/fixture.ts, plan §9.1)
  * these commands need — no global or system config, English messages — so nothing on the
  * developer's machine can change the answer, whether git is asked a question or told to
- * check out a branch. No identity variables, because nothing here commits.
+ * check out a branch. The identity variables are for the one commit the E20 test makes.
  */
 // see primer §28 (the Sync variants of Node's functions) and §16 (object literals: spread)
 function runGit(args: string[]): string {
   return execFileSync('git', args, {
     cwd: repositoryRoot(),
-    env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', LC_ALL: 'C' },
+    env: {
+      ...process.env,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      LC_ALL: 'C',
+      GIT_AUTHOR_NAME: 'PR Cascade test',
+      GIT_AUTHOR_EMAIL: 'test@example.invalid',
+      GIT_COMMITTER_NAME: 'PR Cascade test',
+      GIT_COMMITTER_EMAIL: 'test@example.invalid',
+    },
     encoding: 'utf8',
   });
 }
@@ -99,6 +113,28 @@ function shortShaOf(ref: string): string {
   return shaOf(ref).slice(0, 7);
 }
 
+/**
+ * Resolves on the next `onDidChangeTreeData`, or rejects after `deadlineMs` naming the
+ * wait — so a test that expects a refresh and gets none fails at once with its cause, and
+ * its `finally` still runs (a Mocha timeout would skip it and leave the fixture changed).
+ * Set up before whatever should cause the refresh, so nothing can slip past it.
+ */
+// see primer §42 (waiting for an event with new Promise) and §58 (setTimeout and
+// clearTimeout: a wait with a deadline)
+function nextTreeChange(deadlineMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      subscription.dispose();
+      reject(new Error(`no onDidChangeTreeData within ${deadlineMs} ms`));
+    }, deadlineMs);
+    const subscription = provider.onDidChangeTreeData(() => {
+      clearTimeout(timer);
+      subscription.dispose();
+      resolve();
+    });
+  });
+}
+
 // see primer §5 (arrow functions)
 describe('the Stack view', () => {
   // Runs once before the tests in this block: activate the extension and keep its provider.
@@ -110,6 +146,11 @@ describe('the Stack view', () => {
     assert.ok(extension, 'the extension was not loaded');
     const api = await extension.activate();
     provider = api.provider;
+    output = vscode.window.createOutputChannel('PR Cascade tree tests');
+  });
+
+  after(() => {
+    output.dispose();
   });
 
   it('shows the layers at the top level: the two workspace folders are one repository, found from its subfolder (E1b) and listed once (E2)', async () => {
@@ -416,6 +457,39 @@ describe('the Stack view', () => {
     // assert: fired once, with `undefined` — "start again from the top"
     subscription.dispose();
     assert.deepStrictEqual(received, [undefined]);
+  });
+
+  it('refreshes by itself after a commit made outside VS Code, once the Git extension has run its status (E20)', async () => {
+    // arrange: the tree-change listener first — the only sign that our handler ran, since
+    // refresh() recomputes nothing itself, it only tells VS Code to ask again (plan §9.1) —
+    // and the fixture repository as the Git extension holds it. Five seconds is twenty
+    // times the debounce and leaves room for the `finally`'s own wait inside Mocha's 20 s.
+    const changed = nextTreeChange(5_000);
+    const api = await realGitApi(output);
+    const repository = api.repositories.find((candidate) => candidate.rootUri.fsPath === repositoryRoot());
+    assert.ok(repository !== undefined, 'the Git extension has not opened the fixture repository');
+    try {
+      // act: a commit from outside VS Code — a terminal, in real life — on the current (top)
+      // layer; then the status the Git extension would run once the window regains focus,
+      // run at once instead (`status()` skips the focus wait, plan §7.14.2); then wait for
+      // the view to say it changed. Nothing here calls refresh: without the adapter's
+      // status listener, or the wiring in src/extension.ts, `changed` rejects at its deadline.
+      runGit(['commit', '-q', '--allow-empty', '-m', 'made outside VS Code']);
+      await repository.status();
+      await changed;
+
+      // assert: the redraw shows the new commit — the top layer is one commit longer
+      const items = await topLevelItems();
+      assert.deepStrictEqual(items.map((item) => item.description), ['4 commits · current', '2 commits', '1 commit']);
+    } finally {
+      // Put the fixture back for the tests after this one; let the Git extension see that
+      // too, and wait for the refresh it causes, so this test leaves no refresh() pending
+      // for the next one.
+      const restored = nextTreeChange(5_000);
+      runGit(['reset', '-q', '--hard', 'HEAD~1']);
+      await repository.status();
+      await restored;
+    }
   });
 
   // Each test here puts the repository or the settings into one plan §8 state and undoes
