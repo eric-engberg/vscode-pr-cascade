@@ -117,12 +117,12 @@ export interface ChangedFile {
 /**
  * Everything the tree knows about one repository — the output of the whole core pipeline
  * for one root: the built-in Git extension supplies `root` (src/vscode/gitApi.ts, plan
- * §7.14), detectTrunk finds `trunk`, computeStack fills in `head` and `layers`. One object
- * rather than four loose values so the tree view receives
- * one thing per repository and a test can assert on one thing (`toEqual`). The `null`
- * cases are states the tree shows as a message instead of a stack: no trunk (E4, "set
- * prCascade.trunk"), detached HEAD (E3). M4 adds `rebaseInProgress` here when it is
- * computed and rendered (plan §5 "Rebase in progress").
+ * §7.14), detectTrunk finds `trunk`, computeStack fills in `head`, `rebaseInProgress` and
+ * `layers`. One object rather than five loose values so the tree view receives one thing
+ * per repository and a test can assert on one thing (`toEqual`). The `null` cases are
+ * states the tree shows as a message instead of a stack: no trunk (E4, "set
+ * prCascade.trunk"), detached HEAD (E3). `rebaseInProgress` is computed from M4 item 13a on
+ * and drawn as a row above the layers in item 13b (E12, plan §5 "Rebase in progress").
  */
 // see primer §10 (union types: `string | null`)
 export interface RepoState {
@@ -132,6 +132,16 @@ export interface RepoState {
   trunk: string | null;
   /** The branch HEAD is on; null when HEAD is detached (E3), or when no trunk was found and the stack was not computed (E4, `trunk` also null). */
   head: string | null;
+  /**
+   * Whether a rebase is paused in this working tree (E12): one of the two directories git
+   * keeps a rebase's state in exists — `rebase-merge` (the merge backend, the default: a
+   * conflict stop, `edit`, `break`, a failed `exec`) or `rebase-apply` (the apply backend,
+   * and `git am`, which uses the same machinery and so counts as a rebase here). Found
+   * through `git rev-parse --git-path`, which is right inside a linked worktree too (E19).
+   * False, unchecked, when no trunk was found (E4) — the same "not computed" convention as
+   * `head` on that path.
+   */
+  rebaseInProgress: boolean;
   /** Bottom to top: the first element sits directly on trunk. Empty when HEAD is on trunk (E5). */
   layers: StackLayer[];
 }

@@ -1,16 +1,21 @@
 /**
  * core/stack.ts — figures out which local branches form the stack under HEAD, in what
- * order, and which one is checked out.
+ * order, and which one is checked out — and whether a rebase is paused there.
  *
  * Layer: core (no VS Code imports; plan §4.1). Depends on: core/model.ts (GitRunner,
- * StackLayer, RepoState). Depended on by: src/extension.ts (PR 6), which calls
- * computeStack once per repository root with the trunk detectTrunk found and hands the
- * RepoState to the tree view in src/vscode/tree.ts. Plan: §5 rows "Current branch",
- * "Stack members", "Layer order", "Layer SHA"; §4.3; §8 E3/E5/E6/E14/E15/E16/E19;
- * §12 item 2 (only the stack HEAD is on).
+ * StackLayer, RepoState); Node's `node:fs` (one existence check) and `node:path`.
+ * Depended on by: src/extension.ts (PR 6), which calls computeStack once per repository
+ * root with the trunk detectTrunk found and hands the RepoState to the tree view in
+ * src/vscode/tree.ts. Plan: §5 rows "Current branch", "Stack members", "Layer order",
+ * "Layer SHA", "Rebase in progress"; §4.3; §7.14 (why not the Git extension's
+ * `state.rebaseCommit`); §8 E3/E5/E6/E12/E14/E15/E16/E19; §10.1 items 5 and 13a; §12
+ * item 2 (only the stack HEAD is on).
  */
 
-// see primer §1 (import / export) and §9 (interface: `import type`)
+// see primer §1 (import / export), §28 (`existsSync`, `path.resolve`) and §9 (interface:
+// `import type`)
+import { existsSync } from 'node:fs';
+import * as path from 'node:path';
 import type { GitRunner, RepoState, StackLayer } from './model';
 
 // Every local branch lives under this prefix in git's ref namespace: the branch `docs`
@@ -65,15 +70,32 @@ interface MeasuredBranch {
  * and the diffs would show whatever git says about neighbours that are not really
  * stacked.
  *
+ * Whether a rebase is paused in this working tree (E12) is asked alongside: `rebaseInProgress`
+ * is true while one of git's two rebase-state directories exists (isRebaseInProgress
+ * below says which, and why they are found through `rev-parse --git-path` rather than
+ * spelled out). The view draws it as a row above the layers (M4 item 13b).
+ *
  * The caller guarantees `trunk` exists (detectTrunk verified it), so every command here
  * uses `run` and a failure is a real problem that surfaces (E17), never a `null` — with
  * one exception: `symbolic-ref HEAD` fails by design when HEAD is detached (E3), so that
  * one uses `tryRun` and `null` means "no branch".
+ *
+ * `directoryExists` is how the rebase check looks at the disk: `existsSync` unless the
+ * caller says otherwise, which only the unit tests do — they hand in a stand-in so that
+ * they never touch the disk (the fake runner cannot fake a directory), the same reason
+ * `git` is a parameter. src/extension.ts passes nothing and gets the real check.
  */
 // see primer §6 (async / await), §22 (for ... of), §25 (arrays: push, length, a typed empty
-// array) and §26 (sort and comparison functions)
-export async function computeStack(git: GitRunner, root: string, trunk: string): Promise<RepoState> {
+// array), §26 (sort and comparison functions) and §33 (function types: a function as a
+// default parameter value)
+export async function computeStack(
+  git: GitRunner,
+  root: string,
+  trunk: string,
+  directoryExists: (candidate: string) => boolean = existsSync,
+): Promise<RepoState> {
   const head = await currentBranch(git, root);
+  const rebaseInProgress = await isRebaseInProgress(git, root, directoryExists);
   const memberNames = await stackMemberNames(git, root, trunk);
 
   // Ask git two questions per branch — how far from trunk, and which commit — one branch
@@ -91,7 +113,7 @@ export async function computeStack(git: GitRunner, root: string, trunk: string):
     // HEAD is on trunk, or on something trunk already contains: no stack (E5). The tree
     // shows "Not on a stack" for an empty list. Nothing more is asked of git.
     // see primer §16 (object literals: shorthand keys)
-    return { root, trunk, head, layers: [] };
+    return { root, trunk, head, rebaseInProgress, layers: [] };
   }
 
   // The bottom layer sits directly on trunk, so its parent is trunk and its parentSha is
@@ -115,7 +137,7 @@ export async function computeStack(git: GitRunner, root: string, trunk: string):
     parent = branch.name;
     parentSha = branch.sha;
   }
-  return { root, trunk, head, layers };
+  return { root, trunk, head, rebaseInProgress, layers };
 }
 
 /**
@@ -147,6 +169,50 @@ async function currentBranch(git: GitRunner, root: string): Promise<string | nul
     return null;
   }
   return ref.slice(LOCAL_BRANCH_PREFIX.length);
+}
+
+/**
+ * Whether a rebase is paused in the working tree at `root` (E12). git keeps a paused
+ * rebase's state in a directory — `rebase-merge` for the merge backend (the default: a
+ * conflict stop, `edit`, `break`, a failed `exec`), `rebase-apply` for the apply backend
+ * and for `git am`, which runs on the same machinery — and removes it whole when the
+ * rebase finishes or is aborted, so the directory's existence is the whole question.
+ * `rev-parse --git-path <name>` answers where *this* working tree keeps each one: under
+ * `.git/` in an ordinary repository, under `.git/worktrees/<name>/` of the main repository
+ * in a linked worktree (E19), which is why no `.git/` is ever spelled out here. Both names
+ * go in one call — `--git-path` may be repeated, and git prints one line per name, in
+ * order — so the check costs one spawn per repository per refresh.
+ *
+ * Why not the built-in Git extension's `state.rebaseCommit` (plan §7.14, §13.4 (c)): it
+ * builds `<root>/.git/REBASE_HEAD` by hand, so it is always undefined in a linked
+ * worktree, and git writes no `REBASE_HEAD` at an interactive `break`, after a failed
+ * `exec` or during `git am` — while the directory is there at every pause point.
+ *
+ * `rev-parse --git-path` succeeds in every repository state, so this is a `run`: a
+ * failure is git itself failing (E17), which must surface. The printed path is relative
+ * to the working directory in an ordinary repository and absolute in a linked worktree;
+ * `path.resolve` against `root` — where the runner ran the command — covers both, and
+ * leaves an absolute path alone. `existsSync` says whether *anything* is at the path, not
+ * only a directory; git creates these names only as directories, and its own `git status`
+ * asks the same plain question.
+ */
+// see primer §22 (for ... of), §25 (arrays: split, filter) and §28 (`path.resolve`)
+async function isRebaseInProgress(
+  git: GitRunner,
+  root: string,
+  directoryExists: (candidate: string) => boolean,
+): Promise<boolean> {
+  const output = await git.run(['rev-parse', '--git-path', 'rebase-merge', '--git-path', 'rebase-apply'], root);
+  // One line per name, and a newline after the last; the filter drops that trailing empty
+  // piece — an empty line must never reach the check, since `path.resolve(root, '')` is
+  // the root itself, which always exists.
+  const printedPaths = output.split('\n').filter((line) => line !== '');
+  for (const printed of printedPaths) {
+    if (directoryExists(path.resolve(root, printed))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

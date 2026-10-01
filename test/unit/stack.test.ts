@@ -6,8 +6,9 @@
  * Layer: test, unit (plan §9.1 layer 1; Vitest, no git, no VS Code). Depends on:
  * src/core/stack.ts, test/helpers/fakeGit.ts. What real git does with real branches — an
  * amended or squash-merged bottom layer, a linked worktree — needs a repository and lives
- * in test/git/stack.git.test.ts. Plan: §10.1 item 5, §5 rows "Current branch", "Stack
- * members", "Layer order", "Layer SHA", §8 E3/E5/E6/E16/E17, §9.4.
+ * in test/git/stack.git.test.ts; a real paused rebase in test/git/rebase.git.test.ts. Plan:
+ * §10.1 items 5 and 13a, §5 rows "Current branch", "Stack members", "Layer order", "Layer
+ * SHA", "Rebase in progress", §8 E3/E5/E6/E12/E16/E17/E19, §9.4.
  */
 
 // see primer §1 (import / export)
@@ -21,14 +22,26 @@ import { FakeGitRunner } from '../helpers/fakeGit';
 const ROOT = '/work/app';
 const TRUNK = 'origin/main';
 
-// The two commands computeStack runs once, as the fake keys them (args joined by spaces).
+// The three commands computeStack runs once, as the fake keys them (args joined by spaces).
 // see primer §12 (template strings)
 const HEAD_KEY = 'symbolic-ref --quiet HEAD';
+const REBASE_KEY = 'rev-parse --git-path rebase-merge --git-path rebase-apply';
 const MEMBERS_KEY = `for-each-ref --format=%(refname:lstrip=2) refs/heads --merged HEAD --no-merged ${TRUNK}`;
 
-// The same two, as the argument lists computeStack must pass to the runner.
+// The same three, as the argument lists computeStack must pass to the runner.
 const HEAD_ARGS = ['symbolic-ref', '--quiet', 'HEAD'];
+const REBASE_ARGS = ['rev-parse', '--git-path', 'rebase-merge', '--git-path', 'rebase-apply'];
 const MEMBERS_ARGS = ['for-each-ref', '--format=%(refname:lstrip=2)', 'refs/heads', '--merged', 'HEAD', '--no-merged', TRUNK];
+
+// What `rev-parse --git-path` prints in an ordinary repository — one path per name asked,
+// relative to the working directory — whether or not a rebase is paused: the paths are the
+// same either way, and whether the directories exist is the `directoryExists` stand-in's
+// answer below, never the disk's.
+const REBASE_PATHS = '.git/rebase-merge\n.git/rebase-apply\n';
+
+/** The directory check computeStack takes: in these tests always "no", so nothing is looked up on disk (the fake runner cannot fake a directory). */
+// see primer §33 (function types) and §5 (arrow functions)
+const NO_REBASE_DIRECTORIES = (): boolean => false;
 
 // Trunk's SHA is asked for by the name detectTrunk gave (`origin/main`); each branch's by
 // its full ref (`refs/heads/<name>`), so a tag sharing the name can never answer instead.
@@ -67,6 +80,7 @@ function threeLayerStack(): FakeGitRunner {
   return new FakeGitRunner(
     new Map([
       [HEAD_KEY, 'refs/heads/retry-metrics\n'],
+      [REBASE_KEY, REBASE_PATHS],
       [MEMBERS_KEY, 'add-retries\napi-refactor\nretry-metrics\n'],
       [countKey('api-refactor'), '1\n'],
       [countKey('add-retries'), '2\n'],
@@ -89,6 +103,7 @@ function twoBranchesOnOneCommit(): FakeGitRunner {
   return new FakeGitRunner(
     new Map([
       [HEAD_KEY, 'refs/heads/add-retries\n'],
+      [REBASE_KEY, REBASE_PATHS],
       [MEMBERS_KEY, 'add-retries\napi-refactor-backup\napi-refactor\n'],
       [countKey('api-refactor'), '1\n'],
       [countKey('api-refactor-backup'), '1\n'],
@@ -109,7 +124,7 @@ describe('computeStack', () => {
       const git = threeLayerStack();
 
       // act
-      const state = await computeStack(git, ROOT, TRUNK);
+      const state = await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert
       // see primer §25 (arrays: map)
@@ -122,7 +137,7 @@ describe('computeStack', () => {
       const git = threeLayerStack();
 
       // act
-      const state = await computeStack(git, ROOT, TRUNK);
+      const state = await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert: 1, 2, 3 — numbers. The strings '1', '2', '3' would fail this comparison.
       const counts = state.layers.map((layer) => layer.commitCount);
@@ -134,7 +149,7 @@ describe('computeStack', () => {
       const git = threeLayerStack();
 
       // act
-      const state = await computeStack(git, ROOT, TRUNK);
+      const state = await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert
       const bottom = state.layers[0];
@@ -147,7 +162,7 @@ describe('computeStack', () => {
       const git = threeLayerStack();
 
       // act
-      const state = await computeStack(git, ROOT, TRUNK);
+      const state = await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert: the middle layer sits on the bottom one, the top on the middle
       const parents = state.layers.map((layer) => layer.parent);
@@ -161,7 +176,7 @@ describe('computeStack', () => {
       const git = threeLayerStack();
 
       // act
-      const state = await computeStack(git, ROOT, TRUNK);
+      const state = await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert
       const shas = state.layers.map((layer) => layer.sha);
@@ -173,7 +188,7 @@ describe('computeStack', () => {
       const git = twoBranchesOnOneCommit();
 
       // act
-      const state = await computeStack(git, ROOT, TRUNK);
+      const state = await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert: both listed, adjacent, `api-refactor` first
       const names = state.layers.map((layer) => layer.name);
@@ -185,7 +200,7 @@ describe('computeStack', () => {
       const git = twoBranchesOnOneCommit();
 
       // act
-      const state = await computeStack(git, ROOT, TRUNK);
+      const state = await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert: the backup's parent is the original, and parentSha equals its own sha —
       // nothing between them, which is the "second has 0 files vs first" of E6; the layer
@@ -203,7 +218,7 @@ describe('computeStack', () => {
       const git = threeLayerStack();
 
       // act
-      const state = await computeStack(git, ROOT, TRUNK);
+      const state = await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert
       expect(state.head).toBe('retry-metrics');
@@ -214,7 +229,7 @@ describe('computeStack', () => {
       const git = threeLayerStack();
 
       // act
-      const state = await computeStack(git, ROOT, TRUNK);
+      const state = await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert
       const current = state.layers.map((layer) => layer.isCurrent);
@@ -227,6 +242,7 @@ describe('computeStack', () => {
       const git = new FakeGitRunner(
         new Map([
           [HEAD_KEY, 'refs/heads/add-retries\n'],
+          [REBASE_KEY, REBASE_PATHS],
           [MEMBERS_KEY, 'add-retries\napi-refactor\n'],
           [countKey('api-refactor'), '1\n'],
           [countKey('add-retries'), '2\n'],
@@ -237,7 +253,7 @@ describe('computeStack', () => {
       );
 
       // act
-      const state = await computeStack(git, ROOT, TRUNK);
+      const state = await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert
       expect(state.head).toBe('add-retries');
@@ -251,7 +267,7 @@ describe('computeStack', () => {
       git.answerIn(ROOT, HEAD_ARGS, DETACHED);
 
       // act
-      const state = await computeStack(git, ROOT, TRUNK);
+      const state = await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert
       expect(state.head).toBeNull();
@@ -263,7 +279,7 @@ describe('computeStack', () => {
       git.answerIn(ROOT, HEAD_ARGS, DETACHED);
 
       // act
-      const state = await computeStack(git, ROOT, TRUNK);
+      const state = await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert
       const names = state.layers.map((layer) => layer.name);
@@ -282,7 +298,7 @@ describe('computeStack', () => {
       git.answerIn(ROOT, HEAD_ARGS, 'refs/remotes/origin/main\n');
 
       // act
-      const state = await computeStack(git, ROOT, TRUNK);
+      const state = await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert
       expect(state.head).toBeNull();
@@ -296,12 +312,13 @@ describe('computeStack', () => {
       const git = new FakeGitRunner(
         new Map([
           [HEAD_KEY, 'refs/heads/main\n'],
+          [REBASE_KEY, REBASE_PATHS],
           [MEMBERS_KEY, ''],
         ]),
       );
 
       // act
-      const state = await computeStack(git, ROOT, TRUNK);
+      const state = await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert: head is still reported — the tree's "Not on a stack" node can name it
       expect(state.layers).toEqual([]);
@@ -313,16 +330,18 @@ describe('computeStack', () => {
       const git = new FakeGitRunner(
         new Map([
           [HEAD_KEY, 'refs/heads/main\n'],
+          [REBASE_KEY, REBASE_PATHS],
           [MEMBERS_KEY, ''],
         ]),
       );
 
       // act
-      await computeStack(git, ROOT, TRUNK);
+      await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
-      // assert
+      // assert: HEAD, the rebase check, the members — and then nothing
       expect(git.calls).toEqual([
         { args: HEAD_ARGS, cwd: ROOT },
+        { args: REBASE_ARGS, cwd: ROOT },
         { args: MEMBERS_ARGS, cwd: ROOT },
       ]);
     });
@@ -334,26 +353,27 @@ describe('computeStack', () => {
       const git = threeLayerStack();
 
       // act
-      await computeStack(git, ROOT, TRUNK);
+      await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert: `refs/heads` (local branches only), `--merged HEAD` (ancestors of HEAD —
       // a branch off trunk that HEAD does not contain fails this), `--no-merged <trunk>`
       // (drop what trunk already has). The exact argv is the whole of E16.
-      expect(git.calls[1]).toEqual({ args: MEMBERS_ARGS, cwd: ROOT });
+      expect(git.calls[2]).toEqual({ args: MEMBERS_ARGS, cwd: ROOT });
     });
 
-    it('runs HEAD, then the members, then a count and a SHA per member, then the trunk SHA — all in the root', async () => {
+    it('runs HEAD, then the rebase check, then the members, then a count and a SHA per member, then the trunk SHA — all in the root', async () => {
       // arrange
       const git = threeLayerStack();
 
       // act
-      await computeStack(git, ROOT, TRUNK);
+      await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert: members are measured in the order git listed them (the sort comes after),
       // each by its full ref — a bare `add-retries` would mean a tag of that name, if one
       // existed — and trunk by the name detectTrunk gave
       expect(git.calls).toEqual([
         { args: HEAD_ARGS, cwd: ROOT },
+        { args: REBASE_ARGS, cwd: ROOT },
         { args: MEMBERS_ARGS, cwd: ROOT },
         { args: ['rev-list', '--count', 'origin/main..refs/heads/add-retries'], cwd: ROOT },
         { args: ['rev-parse', 'refs/heads/add-retries'], cwd: ROOT },
@@ -370,11 +390,118 @@ describe('computeStack', () => {
       const git = threeLayerStack();
 
       // act
-      const state = await computeStack(git, ROOT, TRUNK);
+      const state = await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert: the tree reads both from here, so they travel with the layers
       expect(state.root).toBe(ROOT);
       expect(state.trunk).toBe(TRUNK);
+    });
+  });
+
+  describe('rebase in progress (E12)', () => {
+    it('reports no rebase when neither directory git names exists', async () => {
+      // arrange: the stand-in says "no" for every path
+      const git = threeLayerStack();
+
+      // act
+      const state = await computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
+
+      // assert
+      expect(state.rebaseInProgress).toBe(false);
+    });
+
+    it('resolves each relative path git printed against the root before checking it', async () => {
+      // arrange: a stand-in that records what it was asked about
+      const git = threeLayerStack();
+      const checked: string[] = [];
+      const recording = (candidate: string): boolean => {
+        checked.push(candidate);
+        return false;
+      };
+
+      // act
+      await computeStack(git, ROOT, TRUNK, recording);
+
+      // assert: git's relative answers made absolute against the root the command ran in
+      // — the real runner runs it there (the command itself, and its place in the
+      // sequence, are pinned by the command-sequence tests above)
+      expect(checked).toEqual(['/work/app/.git/rebase-merge', '/work/app/.git/rebase-apply']);
+    });
+
+    it('reports a rebase when the rebase-merge directory exists — the merge backend: a conflict stop, edit, break, a failed exec', async () => {
+      // arrange
+      const git = threeLayerStack();
+      const mergeDirectoryExists = (candidate: string): boolean => candidate === '/work/app/.git/rebase-merge';
+
+      // act
+      const state = await computeStack(git, ROOT, TRUNK, mergeDirectoryExists);
+
+      // assert
+      expect(state.rebaseInProgress).toBe(true);
+    });
+
+    it('reports a rebase when the rebase-apply directory exists — the apply backend, and git am', async () => {
+      // arrange
+      const git = threeLayerStack();
+      const applyDirectoryExists = (candidate: string): boolean => candidate === '/work/app/.git/rebase-apply';
+
+      // act
+      const state = await computeStack(git, ROOT, TRUNK, applyDirectoryExists);
+
+      // assert
+      expect(state.rebaseInProgress).toBe(true);
+    });
+
+    it('keeps an absolute path as git printed it — a linked worktree keeps its rebase state under .git/worktrees/<name>/ (E19)', async () => {
+      // arrange: inside a linked worktree `rev-parse --git-path` prints absolute paths into
+      // the main repository's .git; resolving an absolute path against the root changes nothing
+      const git = threeLayerStack();
+      git.answerIn(ROOT, REBASE_ARGS, '/elsewhere/main/.git/worktrees/app/rebase-merge\n/elsewhere/main/.git/worktrees/app/rebase-apply\n');
+      const checked: string[] = [];
+      const recording = (candidate: string): boolean => {
+        checked.push(candidate);
+        return false;
+      };
+
+      // act
+      await computeStack(git, ROOT, TRUNK, recording);
+
+      // assert
+      expect(checked).toEqual(['/elsewhere/main/.git/worktrees/app/rebase-merge', '/elsewhere/main/.git/worktrees/app/rebase-apply']);
+    });
+
+    it('still lists every layer and marks none current while a paused rebase holds HEAD detached (E3 alongside E12)', async () => {
+      // arrange: every rebase pause point but `git am` detaches HEAD
+      const git = threeLayerStack();
+      git.answerIn(ROOT, HEAD_ARGS, DETACHED);
+      const mergeDirectoryExists = (candidate: string): boolean => candidate === '/work/app/.git/rebase-merge';
+
+      // act
+      const state = await computeStack(git, ROOT, TRUNK, mergeDirectoryExists);
+
+      // assert
+      expect(state.head).toBeNull();
+      expect(state.rebaseInProgress).toBe(true);
+      expect(state.layers.map((layer) => layer.name)).toEqual(['api-refactor', 'add-retries', 'retry-metrics']);
+      expect(state.layers.map((layer) => layer.isCurrent)).toEqual([false, false, false]);
+    });
+
+    it('rejects when rev-parse --git-path fails — the rebase check is a `run`, not a `tryRun`', async () => {
+      // arrange: `rev-parse --git-path` succeeds in every repository state, so a failure is
+      // git itself failing, which must surface (E17), never read as "no rebase"
+      const failure = new Error('fatal: not a git repository');
+      const git = new FakeGitRunner(
+        new Map<string, string | Error>([
+          [HEAD_KEY, 'refs/heads/retry-metrics\n'],
+          [REBASE_KEY, failure],
+        ]),
+      );
+
+      // act
+      const result = computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
+
+      // assert
+      await expect(result).rejects.toBe(failure);
     });
   });
 
@@ -385,7 +512,7 @@ describe('computeStack', () => {
       const git = new FakeGitRunner(new Map());
 
       // act
-      const result = computeStack(git, ROOT, TRUNK);
+      const result = computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert
       await expect(result).rejects.toThrow('no canned output');
@@ -399,12 +526,13 @@ describe('computeStack', () => {
       const git = new FakeGitRunner(
         new Map<string, string | Error>([
           [HEAD_KEY, 'refs/heads/retry-metrics\n'],
+          [REBASE_KEY, REBASE_PATHS],
           [MEMBERS_KEY, failure],
         ]),
       );
 
       // act
-      const result = computeStack(git, ROOT, TRUNK);
+      const result = computeStack(git, ROOT, TRUNK, NO_REBASE_DIRECTORIES);
 
       // assert: the very same error the runner threw
       await expect(result).rejects.toBe(failure);
