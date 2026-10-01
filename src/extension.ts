@@ -226,11 +226,12 @@ async function loadRepoStates(output: vscode.OutputChannel, gitExtension: GitExt
     const trunk = await detectTrunk(git, root, { configured: settings.trunk, remote: settings.remote });
     if (trunk === null) {
       output.appendLine(`${root}: no trunk found (set prCascade.trunk)`);
-      // Nothing can be measured without a trunk, so no stack is computed and HEAD is not
-      // looked up either: `head: null` here is the "not computed" case core/model.ts
-      // names next to "detached", and nothing draws `head` while `trunk` is null — the
-      // tree shows only the E4 message for this state.
-      states.push({ root, trunk: null, head: null, layers: [] });
+      // Nothing can be measured without a trunk, so no stack is computed, and neither HEAD
+      // nor the rebase directories are looked up: `head: null` and `rebaseInProgress: false`
+      // here are the "not computed" case core/model.ts names next to "detached" and
+      // "paused", and nothing draws either while `trunk` is null — the tree shows only the
+      // E4 message for this state.
+      states.push({ root, trunk: null, head: null, rebaseInProgress: false, layers: [] });
       continue;
     }
     const state = await computeStack(git, root, trunk);

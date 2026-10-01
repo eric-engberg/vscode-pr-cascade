@@ -944,7 +944,8 @@ separate integer type, and `3` and `3.0` are the same value.
 
 ## 28. The Sync variants of Node's functions
 
-*First seen in `src/core/git.ts` (`existsSync`); throughout `test/helpers/fixture.ts`.*
+*First seen in `src/core/git.ts` (`statSync`, `accessSync`); `existsSync` and `path.resolve`
+in `src/core/stack.ts` (M4 item 13a); throughout `test/helpers/fixture.ts`.*
 
 ```ts
 import { execFileSync } from 'node:child_process';
@@ -965,8 +966,9 @@ error message). Each `Sync` function is the same operation as its non-`Sync` twi
 the same arguments, so nothing new has to be learned per call.
 
 The extension itself never blocks — VS Code's whole window would freeze for the duration
-— so `src/` uses the `Sync` form only for `statSync` and `accessSync` in `core/git.ts`
-(`describeDirectoryProblem`), where the answer is instant. The Promise-returning half of
+— so `src/` uses the `Sync` form only where the answer is instant: `statSync` and
+`accessSync` in `core/git.ts` (`describeDirectoryProblem`), and one `existsSync` in
+`core/stack.ts` (is git's rebase directory there?). The Promise-returning half of
 `node:fs` gets its own section when discovery starts reading directories (§39). The fixture builder is setup code: it runs some twenty git commands in
 a fixed order and nothing else is waiting, so the `Sync` forms make it a plain list of
 steps with no `async`, no `await`, and no Promise to hand back. That is also what lets PR
@@ -982,7 +984,9 @@ are set — `encoding` (text rather than raw bytes) and `stdio` (close stdin so 
 can wait for input) are the two that matter. A few more of the same kind appear in the
 fixture and its test: `fs.rmSync(dir, { recursive: true, force: true })` is `rm -rf`;
 `fs.statSync(p).isFile()` is `test -f`; `path.resolve(base, p)` makes a relative path
-absolute (`realpath -m`), `path.dirname(p)` is `dirname`, and `path.basename(p)` is
+absolute against `base` and returns an absolute `p` unchanged (`realpath -m`) —
+`core/stack.ts` leans on both halves for git's two kinds of `--git-path` answer;
+`path.dirname(p)` is `dirname`, and `path.basename(p)` is
 `basename` — the last piece of a path, which `src/vscode/tree.ts` uses for a row's label
 (`RepoNode` since PR 6, `FileNode` since PR 11). Three more in
 `test/git/changes.git.test.ts` (PR 10): `fs.mkdirSync(p, { recursive: true })` is
@@ -1189,6 +1193,14 @@ their own, because the compiler takes them from the parameter the arrow is passe
 (§3), and which closes over `output` exactly as the first loader does. The content
 provider (`src/vscode/content.ts`, PR 15) takes its reader, `(root: string, ref: string,
 relPath: string) => Promise<string>`, by the same route.
+
+A function type can also be a parameter *with a default* (§13): `computeStack` in
+`src/core/stack.ts` (M4 item 13a) ends with `directoryExists: (candidate: string) => boolean
+= existsSync`. The type says what shape the function must have; the default says which one
+is used when the caller passes nothing — Node's own `existsSync`, which fits the shape.
+Production (`src/extension.ts`) passes nothing; the unit tests pass `() => false` or a
+recording arrow, so they can say "the directory is there" without a disk, the same reason
+the function takes a `GitRunner` rather than spawning git itself.
 
 ## 34. A union of classes, narrowed with instanceof
 
@@ -2197,8 +2209,11 @@ keeps `layer.` in front of both for that reason. The style rule (plan §11.1) is
 
 It works on any object — an interface value like the `StackDiffLocation` above, a class
 instance like the `FileNode` — and on function parameters (`function draw({ root, file }:
-FileNode)`), and there is an array form (`const [first, second] = list`), neither of which
-this codebase uses yet.
+FileNode)`), which this codebase does not use yet. There is also an array form, by position
+instead of by name: `const [patch] = fs.readdirSync(patchDir)` in
+`test/git/rebase.git.test.ts` (M4 item 13a) takes the one file `format-patch -o` wrote,
+where `readdirSync(patchDir)[0]` would say the same thing less clearly — the shell's
+`set -- "$dir"/*; patch=$1`.
 
 ## 55. `vscode.Uri.from`, and where percent-encoding happens
 

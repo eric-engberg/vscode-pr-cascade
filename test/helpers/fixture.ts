@@ -6,7 +6,8 @@
  * Layer: test helper (plan §9.1 layer 2, §9.3); hermetic on its own — the git environment
  * is built into `git()`, not the test runner — so it works outside Vitest too. Depends on:
  * Node built-ins only, nothing under src/. Depended on by: test/git/stack.git.test.ts,
- * .vscode-test.mjs (its compiled copy under out/), scripts/fixture.ts. Plan: §9.3, Appendix A.
+ * test/git/rebase.git.test.ts, .vscode-test.mjs (its compiled copy under out/),
+ * scripts/fixture.ts. Plan: §9.3, Appendix A.
  */
 
 // see primer §1 (import / export) and §28 (the Sync variants of Node's functions): they
