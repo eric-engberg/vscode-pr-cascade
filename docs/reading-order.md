@@ -312,7 +312,9 @@ the repository root; its §13 is the running log of decisions and deviations mad
     run `prCascade.openDiff` with the node itself as the argument, primer §52),
     `RepoNode` (one per repository, only when the workspace holds several — plan §6) and
     `MessageNode` (the sentences: no repository, no trunk (E4), not on a stack (E5), git
-    failed (E17), the Git extension unusable (E82) — at the top, or under a layer). Then
+    failed (E17), the Git extension unusable (E82) — at the top, or under a layer — and,
+    since M4 item 13b, the two that stand *above* the layers: "Rebase in progress — resolve
+    it first" (E12, a warning) and "Detached HEAD" (E3)). Then
     `StackTreeProvider`, the `TreeDataProvider` VS Code asks for rows: read the class
     comment for why it is handed *functions* that load the states and the files rather
     than the data itself, the doc comment on `filesByCommitPair` for the cache — keyed on
@@ -324,7 +326,11 @@ the repository root; its §13 is the running log of decisions and deviations mad
     row — an error row, or since M4 a *warning* row for a `GitUnavailableError` (E82: a
     state to fix, not a failure); `filesForLayer` is where a layer git cannot list becomes
     one error row under it instead of a broken tree. `nodesForRepo` at the bottom is where
-    the layers are turned top-first.
+    the layers are turned top-first, and where the one row above them is chosen: the rebase
+    row when a rebase is paused, else the detached row when HEAD is on no branch — never
+    both, since every rebase pause point but `git am` detaches HEAD, and the rebase row is
+    the one that says what to do — then the E5 row or the layers; E4 alone
+    when there is no trunk.
 27. **`src/vscode/content.ts`** — the first of M3's two VS Code files, and the smaller:
     `StackDiffContentProvider`, the object VS Code asks for the text behind a
     `stackdiff:` URI. Read the class comment for what a content provider is and why the
@@ -382,8 +388,13 @@ the repository root; its §13 is the running log of decisions and deviations mad
     when `gitPath` is wrong and there *was* a refresh (E17), its message naming the two
     SHAs the view hands git — read `layerNode` and `filesUnderLayer` at the top for how a
     row is opened from a test.
-    Last, the one-row messages, each test putting the fixture or a setting into the state
-    and undoing it in `finally`: HEAD on trunk (E5), a configured trunk that does not exist
+    Then the two rows above the layers (M4 item 13b), each test putting the repository into
+    the state and undoing it in `finally`: HEAD detached by `checkout --detach` — "Detached
+    HEAD" above the three layers, none of them current — and a rebase paused by
+    `rebase -x false main` — "Rebase in progress — resolve it first" above the one layer git
+    still finds below the pause, and no detached row; `rebase --abort` restores. Last, the
+    one-row messages, each test putting the fixture or a setting into the state and undoing
+    it in `finally`: HEAD on trunk (E5), a configured trunk that does not exist
     (E4), a `gitPath` that does not exist (E17 — the row carries `RealGitRunner`'s own
     message, and since M4 the command it names is trunk detection's, the first git command
     of ours now that the Git extension finds the repositories).
@@ -508,7 +519,8 @@ the repository root; its §13 is the running log of decisions and deviations mad
   signal, the git executable, the E82 rows; `git.d.ts` beside it is that extension's own
   API declaration, copied), `config.ts` (settings → plain values),
   `tree.ts` (the Stack view: the layers, and under each the files it changes, cached per
-  pair of commits; a click on a file runs `prCascade.openDiff`), `content.ts` (the
+  pair of commits; a click on a file runs `prCascade.openDiff`; the row above the layers
+  when a rebase is paused or HEAD is detached), `content.ts` (the
   `stackdiff:` content provider: the text behind one side of a diff, through a reader it
   is handed) and `commands.ts` (`openDiff`: two `stackdiff:` URIs and the built-in
   `vscode.diff`, or the file itself for a binary). Later milestones add terminals and the
