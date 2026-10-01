@@ -262,6 +262,12 @@ Two small things that appear alongside it:
   — and only annotates with `StackTreeProvider`). Same meaning, one import line per module;
   the whole-line form is for a line that is types only.
 
+The type before `[]` can itself be a shape written out on the spot — `{ text: string; note:
+string }[]` (the `notForgeUrls` table in `test/unit/forge.test.ts`, M5 item 16) is an array of
+objects with those two fields, the same inline object type §59's union members are made of, used where
+a shape appears once; name it with `interface` when a second place needs it. The excess-property
+check above applies to each row, so a misspelled key in a table is a compile error.
+
 An interface can also `extends` another interface. The first example here,
 `PrCascadeSettings extends DiscoveryOptions` in `src/vscode/config.ts`, left with
 `core/discovery.ts` in M4 (item 12a); the live ones are in `src/vscode/gitApi.ts`:
@@ -274,7 +280,11 @@ fits — the Git extension's real object can be handed over wherever a `GitApi` 
 and so can a test's small object literal (§61) — and a field added to the parent must be
 supplied by whatever claims to be the child, or it will not compile. This is not §13's
 `extends` on a class: nothing is inherited at run time, the interface simply lists the
-parent's fields as its own.
+parent's fields as its own. Since M5 (item 16) there is a plain one between two of our own
+core shapes: `RemoteRepository extends HostAddress` in `src/core/forge.ts` is a `HostAddress`
+(`host`, `port`) plus `owner` and `repo`, `Forge extends RemoteRepository` adds `kind` and
+`recognizedByGitSpice`, and `detectForge` builds a `Forge` by spreading (§16) a
+`RemoteRepository` and the two extra fields into one literal.
 
 ## 10. Union types
 
@@ -437,6 +447,13 @@ cannot be edited in place through the type. A plain `string[]` is accepted where
 `readonly string[]` is asked for (giving up rights is always fine), never the other way
 round; so the Git extension's own mutable `repositories` array fits `GitApi`, and so does a
 test stand-in's.
+
+The same promise exists for a Map (§19): `ReadonlyMap<K, V>` has `get`, `has`, `size` and
+`for … of`, and no `set` or `delete`. `GIT_SPICE_DEFAULT_HOSTS` and `ForgeConfig.hosts` in
+`src/core/forge.ts` (M5, item 16) are declared that way — the first is a fixed table nothing may
+edit; for the second the parser fills a plain `Map` and hands it over as a `ReadonlyMap`, which
+is the same "giving up rights" direction as the arrays above, and nothing that reads a
+`ForgeConfig` can change it afterwards.
 
 ## 15. new Promise
 
@@ -651,6 +668,36 @@ digits, from start to end" — `'12'` matches, `'12x'` and `''` do not. The patt
 module-level `const` (§4) rather than written inline at the call, so it is built once
 and has a name that says what it recognises.
 
+`pattern.exec(text)` is the other method, and the first use in `src/` is `SCP_LIKE` in
+`src/core/forge.ts` (M5, item 16):
+
+```ts
+const SCP_LIKE = /^(?:[^@/]+@)?([^@:/[]{2,}):(.+)$/;
+
+const match = SCP_LIKE.exec(text);
+if (match === null) {
+  return null;
+}
+const path = repositoryPath(match[2]);
+if (path === null) {
+  return null;
+}
+return { host: match[1], port: '', ...path };
+```
+
+Where `test` answers yes or no, `exec` answers with *what matched*, or `null` when nothing
+did — so `if (match === null)` is the narrowing (§8), and past it `match` is a match. Plain
+parentheses **capture**: the text each pair matched is `match[1]`, `match[2]`, … in order
+(`match[0]` is the whole match), typed as `string` under this project's settings. `(?:…)` is a
+group that does *not* capture — here it only holds the optional user together, so the host is
+still group 1 — and `?` after a group means "zero or one of it". `[^@:/[]` is a *negated*
+class, any single character except those four; `{2,}` is "two or more" where `+` is "one or
+more". `match[2]` goes to `repositoryPath`, whose answer is checked for `null` before the spread
+(§16) merges it in. The same `exec`/`match[1]` form already appeared in `test/unit/release.test.ts` (M4,
+item 15) to read the version out of a CHANGELOG heading, before this section said what it
+was. `CONFIG_LINE` in the same file, `/^([^ ]+) (.+)$/`, splits a `key value` line at its
+first space the same way.
+
 ## 21. Set
 
 *First seen in `src/core/discovery.ts` — a file M4 (item 12a) deleted when VS Code's built-in
@@ -756,6 +803,24 @@ Strings carry their own methods, called with a dot like a method on any object:
 - `repeat(n)` — the string `n` times over: `'0'.repeat(40)` is forty zeros, a
   40-character SHA no object has (`printf '0%.0s' {1..40}`). `test/git/git.git.test.ts`
   builds its 2 MB argument with it, and `test/git/changes.git.test.ts` (PR 10) its bad SHA.
+- `toLowerCase()` — a copy in lower case. `src/core/forge.ts` (M5, item 16) uses it three ways.
+  `ghEnv` lower-cases a hostname for gh, which normalises hostnames itself; `guessKind` compares
+  a host with the extension's own table without regard to case, a hostname being
+  case-insensitive by definition; and `hostnameAsTyped` lower-cases both a URL's text and the
+  hostname the `URL` class returned to find where the hostname sits in the text — the class
+  lower-cases a hostname only for the *special* schemes (http, https, ws, wss, ftp, file —
+  §69), and git-spice compares hostnames exactly as typed, so the spelling has to be put back.
+- `indexOf(text)` — the position at which `text` first occurs, counted from 0, or `-1` when it
+  does not occur at all (so `if (index === -1)` is the "not found" check); a second argument
+  says where to start looking (`indexOf('/', authorityStart)`). `lastIndexOf(text, before)` is
+  its mirror: the *last* occurrence that starts at or before position `before`, searching
+  backwards. With `slice(start, end)` either cuts that occurrence out:
+  `text.slice(index, index + hostname.length)` is how `hostnameAsTyped` recovers the hostname's
+  spelling, searching backwards from the end of the URL's authority so a user that repeats the
+  host is skipped.
+- `includes(text)` — true when the string *contains* that text anywhere (the array method of the
+  same name, §25, asks the same of a list). `text.includes('://')` is how `parseRemoteUrl` tells
+  a URL with a scheme from git's scp-like `host:path` form.
 
 None of them change the string they are called on — a string, once made, never changes;
 each method returns a new one. That is why the code writes `printedRoot =
@@ -1979,6 +2044,15 @@ write the interface out where it would only save typing.
 It is declared with `type`, not `interface`: §10 said `type` can name *any* type, and
 `Pick<…>` is an expression that produces a type, not a list of fields written out.
 
+In `src/core/forge.ts` (M5, item 16) `Pick` is a *return* type twice. `repositoryPath` returns
+`Pick<RemoteRepository, 'owner' | 'repo'> | null` — the two fields a URL path can supply;
+`parseRemoteUrl` adds the `host` and `port` from the URL (or the scp-like form's `host:`) and
+spreads (§16) the pair in beside them. `classifyHost` returns `Pick<Forge, 'kind' |
+'recognizedByGitSpice'>` — the two fields of a `Forge` that come from the address (host and
+port) and the configuration, not the path, while the other four come from the URL — and `detectForge` spreads both halves into one `Forge`. Writing
+either two-field type out by hand would say the same thing twice; `Pick` says "these two of
+that type's fields" and follows any rename.
+
 ## 50. `JSON.stringify` and `JSON.parse`
 
 *First seen in `src/core/uri.ts` (`encodeStackDiff`, `parseJsonQuery`).*
@@ -2437,6 +2511,15 @@ enough — one field varies, so a nullable field (§10) is the lighter tool. Whe
 fields vary *together*, as the outcome of a handshake does, the tagged union is the right
 one. The `readonly` on each field (§14) says a connection, once made, is a fact.
 
+The first tagged union in `src/core` is `ForgeDetection` in `src/core/forge.ts` (M5, item 16):
+`no-remote` (E25), `unparseable` with the URL (E21), or `forge` with a `Forge` — three
+outcomes that need three different messages, which a `Forge | null` could not tell apart. Two
+things to notice. The `forge` member *nests* a `Forge`, whose own `kind` is the forge kind, rather
+than flattening its six fields next to the tag: a reader writes `detection.kind === 'forge'`
+and then `detection.forge.kind === 'github'`, and the `Forge` can be passed on whole to whatever
+needs one. And every member carries `remote`, the one fact all three messages need, so the
+result can be turned into a message without the caller remembering what it asked for.
+
 ## 60. Another extension's API: `extensions.getExtension`, `activate()`, `exports`, `Thenable`, and a vendored `.d.ts`
 
 *First seen in `src/vscode/gitApi.ts` (`realGitExtensionHost`, `GitExtensionAdapter`) and
@@ -2783,3 +2866,43 @@ the time — plan §13.4's rule for every test hook from here on. The fields are
 the return is a conditional expression (§48) between two literals, and a test narrows each
 optional field with `assert.ok(api.statusBar)` (§8) before using it. The two members plan
 §9.1 fixed, `provider` and `refresh`, stay unconditional.
+
+## 69. `new URL(…)`: letting Node take a URL apart
+
+*First seen in `src/core/forge.ts` (`tryUrl`, `parseRemoteUrl`, `parseForgeConfig`).*
+
+```ts
+function tryUrl(text: string): URL | null {
+  try {
+    return new URL(text);
+  } catch {
+    return null;
+  }
+}
+
+const parsed = tryUrl('ssh://git@ghes.corp.com:2222/org/repo.git');
+// parsed.protocol === 'ssh:'   parsed.hostname === 'ghes.corp.com'   parsed.port === '2222'
+// parsed.username === 'git'    parsed.pathname === '/org/repo.git'
+```
+
+`URL` is a class (§13) that is simply there, like `JSON` (§50) — a global, nothing to import.
+`new URL(text)` parses the text by the same rules a browser uses (the WHATWG URL standard,
+which Node follows) and gives an object with one field per part: `protocol` (with its colon),
+`hostname`, `port` (a string, `''` when none), `username`, `password`, `pathname`, `search`
+(the `?…` query) and `hash` (the `#…` fragment). `host` is hostname *and* port together, which
+is why the code reads `hostname`. The class name doubles as the type of what it makes —
+`URL | null` in `tryUrl`'s signature is the same `Class | null` as `GitError | null` would be.
+
+It throws a `TypeError` for text that is not a URL — `/Users/me/origin.git`, `''`,
+`ssh://github.com:org/repo.git` (letters where a port should be) — hence the `try`/`catch`
+(§18) that turns the one exception in the file into a `null`. Two traps the code works
+around. First, the hostname is lower-cased for the *special* schemes (`http:`, `https:`,
+`ws:`, `wss:`, `ftp:`, `file:`) and left alone for the rest: `new URL('https://GitHub.com/x/y').hostname`
+is `github.com` while `new URL('ssh://git@GitHub.com/x/y').hostname` is `GitHub.com`. git-spice
+compares a hostname exactly as the remote spells it, so `parseRemoteUrl` puts the spelling
+back (`hostnameAsTyped`: find the lower-cased hostname in the lower-cased text, cut the
+original out — §23). Second, `github.com:org/repo.git` —
+git's scp-like form — *is* a URL to this class, with the scheme `github.com:` and the path
+`org/repo.git`, so the scp regular expression (§20) is asked first, and `new URL` only sees
+text that contains `://`. A `file:` URL parses fine but is always a local path to git, so it is
+refused by its `protocol`.

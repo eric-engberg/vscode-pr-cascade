@@ -16,7 +16,8 @@ language as it's built. That drives two hard rules:
    sitting (guideline: ≤ 300 lines of non-test code). Build them with **git-spice** (`gs stack submit`) — the
    tool this extension wraps — so he reviews bottom-up with correct bases and learns the backend by
    using it (the extension's own GitHub flow: `gs stack submit` then `gh stack link`, §7.13.4). Never merge a PR yourself; he
-   reviews and merges. Don't start the next milestone's stack until the current one is merged.
+   reviews and merges. Don't start the next milestone's stack until the current one is merged (waived once, by
+   Ric, 2026-10-01: M5's first two PRs were stacked on the unmerged M4 stack at his request — §13.4).
    The PR sequence is spelled out in §10.1; the PR body template is in §10.2.
 2. **Comment for a reader, not a maintainer.** Style rules in §11.1. Every file starts with a
    header that says what it's for and where it sits in the architecture; every exported function
@@ -214,8 +215,10 @@ src/vscode/prplan.ts     prcascade-prplan document, CodeLens, keybinding, worksp
 src/core/backend.ts      StackBackend interface (§4.4) + readiness probe (§7.13.1).
 src/core/backends/gitspice.ts   the git-spice implementation (§7.13).
 src/core/gsLog.ts        parse `gs log short/long --json` line stream (pure; schema in §7.13.2).
-src/core/forge.ts        parseRemoteUrl() → {host, owner, repo} from ssh / scp-like / https forms, forge kind
-                         (github/gitlab/bitbucket/gitea/forgejo/azure/unknown), ghEnv(host) (pure).
+src/core/forge.ts        parseRemoteUrl() → {host, owner, repo} | null from ssh / scp-like / https forms;
+                         parseForgeConfig() + classifyHost() → kind (github/gitlab/bitbucket/gitea/forgejo/
+                         azuredevops/unknown) + recognizedByGitSpice; detectForge(git, root, remote) →
+                         ForgeDetection (no-remote | unparseable | forge); ghEnv(host) → {GH_HOST}. M5 item 16, D54.
 src/core/ghstatus.ts     gh auth status / waitForLogin polling (§7.5) (pure over a runner + timers).
 src/core/prs.ts          §7.7 planner: layers + status map → ordered operations (pure).
 src/core/prstatus.ts     §7.8 status tiers: gs JSON + optional gh extras → per-layer status (pure).
@@ -687,10 +690,19 @@ Build with `vscode.Uri.from({...})`, not string concatenation. `decode(uri)` is 
 url  = git remote get-url <prCascade.remote>          (default origin)
 host = parseRemoteUrl(url).host                        pure function in core/forge.ts
 ```
-`parseRemoteUrl` must handle all of: `git@github.com:org/repo.git`, `ssh://git@ghes.corp.com:2222/org/repo.git`,
-`https://github.com/org/repo`, `https://user@ghes.corp.com/org/repo.git`, trailing-slash and no-`.git`
-variants. Returns `{ host, owner, repo }` or `null` (no remote / unparseable → PR features disabled with
-a clear node, everything else still works).
+`parseRemoteUrl` must handle all of: `git@github.com:org/repo.git`, `github.com:org/repo.git`,
+`ssh://git@ghes.corp.com:2222/org/repo.git`, `https://github.com/org/repo`,
+`https://user@ghes.corp.com/org/repo.git`, trailing-slash and no-`.git` variants. Returns `{ host, owner, repo }`
+or `null` (no remote / unparseable → PR features disabled with a clear node, everything else still works).
+*As built (M5 item 16, D54):* `host` is the hostname exactly as the remote spells it — no user, and no port,
+which is kept apart as `port` (git-spice compares it when a configured URL names one; GH_HOST wants a
+hostname, and gh lower-cases it itself); the spelling is kept because git-spice compares hosts as text; `owner`
+is the whole path between host and repository (`group/sub` on GitLab; Azure's raw path until M11); a local path
+and any `file:` URL are `null`. The composed reader `detectForge(git,
+root, remote)` tells no-remote (E25) from unparseable (E21) from a forge of unknown or unrecognised kind
+(E60/E70) — the tagged union `ForgeDetection`, whose `forge` member also carries the `ForgeConfig` that decided
+the kind, so item 17's `Readiness` can say *why* git-spice will not match (a rejected `spice.forge.kind`, a url key
+that displaced a default). `git remote get-url` has already applied `url.<base>.insteadOf`.
 
 **Invoking `gh`:** always `cwd = repo root` and `env.GH_HOST = host`. `gh` would usually infer the host
 from the remote on its own, but setting `GH_HOST` makes multi-remote repos deterministic.
@@ -739,9 +751,29 @@ combination of repos from either host open in the same workspace (E22).
 ### 7.6 Forge detection and `gs auth` (all forges)
 
 **Forge kind + host (`core/forge.ts`, pure over the remote URL):** `github` (github.com, `*.ghe.com`,
-any host with `spice.forge.github.url` set), `gitlab`, `bitbucket` (cloud vs DC by host), `gitea`,
-`forgejo` (codeberg.org default), `azuredevops`, or `unknown`. git-spice detects the forge itself from
-the same URL; the extension's copy exists for messaging, auth guidance, and the native-link decision.
+any host with `spice.forge.github.url` set), `gitlab`, `bitbucket` (one kind in v1; cloud vs DC is
+`host === 'bitbucket.org'`, unread before M11), `gitea` (self-hosted only: git-spice 0.31.2 has no default
+gitea host — `spice.forge.gitea.url`), `forgejo` (codeberg.org default), `azuredevops` (the extension's
+classification for E75 only — git-spice 0.31.2 has no Azure forge; its ids are `bitbucket, forgejo, gitea,
+github, gitlab`), or `unknown`. git-spice detects the forge itself from the same URL; the extension's copy
+exists for messaging, auth guidance, and the native-link decision, and it mirrors git-spice's matching rules
+(every one verified with 0.31.2, M5 item 16; `gitSpiceMatches` in core/forge.ts): a `spice.forge.kind` git-spice
+rejects (anything but `bitbucket, forgejo, gitea, github, gitlab`, case-sensitively) stops it resolving *any*
+forge; a valid one wins outright, even over github.com (its answer for ssh aliases), except that a remote must still
+match that kind's own url key when one is set (`unsupported URL: … does not match configured forge URL`); otherwise each of its five
+forges has one base host — the `spice.forge.<kind>.url` when set, **else** its default (github.com, gitlab.com,
+bitbucket.org, codeberg.org; gitea has none), so a url key *replaces* that kind's default and a github.com
+remote beside a company GHES url is "no forge found" — and the remote matches a forge when its host is that
+base or a subdomain of it (`ssh.github.com`, `ghes.corp.com` under `corp.com`; not a bare suffix), spelled the
+same (`GitHub.com` is no match), with the same port when the base names one; a url value that is not a URL
+still displaces the default and matches nothing. git-spice walks its forges in
+unspecified order, so where two match (two url keys on one host, a url key naming another forge's default) its
+pick is random; the extension takes the first in id order and the host counts as recognised either way.
+`*.ghe.com` → github is the extension's own guess — git-spice matches it only once `spice.forge.github.url`
+names the host, spelled as the remote spells it, which is E70's offer; `Forge.recognizedByGitSpice` records
+the difference. The overrides are read once per detection with `git config --get-regexp '^spice\.forge\.'`
+(exit 1 and no output when none is set); the `GITHUB_URL`/… and `GIT_SPICE_FORGE_KIND` environment variables
+git-spice also honours are not read (item 18 decides).
 Non-standard hosts: the user sets `spice.forge.<kind>.url` (README documents it; the extension offers
 to run `git config spice.forge.github.url https://<host>` when it sees a GitHub-looking host that `gs`
 didn't recognize — E70).
@@ -755,14 +787,21 @@ running `gs auth login`. `gs` prompts for the method; the README says what to pi
 | GitLab.com | OAuth. Self-hosted: `glab` token or PAT (OAuth needs an admin-registered app). |
 | Bitbucket Cloud | Git Credential Manager (OAuth) or API token. |
 | Bitbucket DC, Gitea, Forgejo | API token (only option). |
-| Azure DevOps | Azure CLI or PAT. |
+| Azure DevOps | Not a git-spice 0.31.2 forge (§13.4 2026-10-01 (d)); when M11 adds it: Azure CLI or PAT. |
 The extension polls `gs auth status` every 3 s for up to 5 min after opening the terminal, then
 refreshes and re-runs the pending action (same shape as §7.5's `gh` flow). Tokens live in the OS
 keychain; the extension never reads them.
 
-**Repo initialization:** `gs log short --json` fails until `gs repo init` has run. The readiness probe
-(§7.13.1) detects this and offers `gs repo init --trunk <trunk> --remote <remote>` (terminal, so any
-prompt is visible). Trunk comes from §5 detection.
+**Repo initialization:** the readiness probe (§7.13.1) detects an uninitialized repository and offers
+`gs repo init --trunk <trunk> --remote <remote>` (terminal, so any prompt is visible). Trunk comes from §5
+detection. *Corrected 2026-10-01 (measured while designing items 16–17, for item 18 — §13.4):* this used to say
+`gs log short --json` fails until `gs repo init` has run; with git-spice 0.31.2 it is **not a check at all**:
+with one remote or none it **initializes the repository itself** (stderr `INF Repository not initialized.
+Initializing.` … `INF Initialized repository trunk=main`, exit 0, `refs/spice/data` created); with two or more
+remotes under `--no-prompt` — or any non-tty stdin — it exits 1 (`auto-initialize: guess upstream remote: prompt
+for remote: not allowed to prompt for input`) and initializes nothing, whatever `branch.<trunk>.remote` or
+`spice.remote` say. Either way the probe must never run `gs log` as its initialization check; item 18 picks a side-effect-free check (the `refs/spice/data` ref's
+*existence*, through `git rev-parse --verify`, is one — reading the ref's *contents* stays forbidden, §3).
 
 ### 7.7 "Create PRs for Stack" algorithm (M7)
 
@@ -950,7 +989,10 @@ and never try to reopen or amend a merged CR.
 
 Source: https://github.com/abhinav/git-spice — `brew install git-spice` (also apt/scoop/binary/`go install`).
 Facts verified 2026-09-17 from the docs (CLI reference, config, auth, limits, JSON, changelog v0.31.2):
-- Global flags: `--[no-]prompt` (**always `--no-prompt` from the extension**), `-C <dir>`, `-v`.
+- Global flags: `--[no-]prompt` (**always `--no-prompt` from the extension**), `-C <dir>` (**never from the
+  extension**: 0.31.2 reads `spice.forge.*` from the directory it was started in, not from `<dir>` — a
+  repository-local `spice.forge.github.url` is ignored under `-C` and honoured with `cwd` = the repository;
+  verified 2026-10-01, §13.4), `-v`.
 - State in `refs/spice/data` (declared internal — **never read it**). Tracking: `gs repo init`, then
   `gs branch track --base <parent>`, `gs downstack track`, `gs branch untrack`.
 - Read model: `gs log short --json`, `gs log long --json` (§7.13.2). Also `gs review list --json`.
@@ -973,11 +1015,20 @@ Facts verified 2026-09-17 from the docs (CLI reference, config, auth, limits, JS
 #### 7.13.1 Readiness probe (`readiness()`, memoized per repo, re-run on refresh after failure)
 ```
 1. gs on PATH (or prCascade.gsPath) and `gs version --short` ≥ 0.31   else "Install git-spice" offer
+   (also try the `git-spice` name — §13.1)
    → terminal `brew install git-spice` (macOS) / link to install docs; decline remembered per workspace
-2. `gs log short --json` exit 0                                          else, if not initialized:
+2. repository initialized — a check with no side effects (item 18; **not** `gs log`, which on 0.31.2
+   initializes an uninitialized repository itself with 0–1 remotes, or dies with "not allowed
+   to prompt for input" with 2+ — §7.6, §13.4)                            else:
    → "Initialize git-spice for this repo?" → terminal `gs repo init --trunk <trunk> --remote <remote>`
-3. `gs auth status` exit 0                                               else login flow (§7.6)
-4. forge kind from core/forge.ts is `github` or `gitlab` (v1)              else CR features disabled, tree works (E75)
+3. forge from core/forge.ts `detectForge` (M5 item 16)                     else E25 (no remote) / E21 (unparseable URL) /
+   is `github` or `gitlab` (v1) and recognised by git-spice (which       E60–E70 (unknown or unrecognised host: name the
+   `Forge.recognizedByGitSpice` says — a rejected `spice.forge.kind`,     `spice.forge.*` key — or the rejected kind —
+   a displaced default, a spelling git-spice will not match)             to set) / E75 (other forges: CR
+                                                                          features disabled, tree works)
+4. `gs auth status --forge <kind>` exit 0                                else login flow (§7.6)
+   (forge before auth, and `--forge` given, because bare `gs auth status` exits 1 for "no remote set" and for
+   "No Forge specified" before it ever reports login state — verified 0.31.2, 2026-10-01, §13.4)
 5. on `github`: `gh` ≥ 2.90 + gh-stack extension present                  else CR creation disabled until installed (E62b)
 ```
 Env for every `gs` call: `NO_COLOR=1`, `LC_ALL=C`, `GIT_OPTIONAL_LOCKS=0`. Setting `prCascade.gsPath`.
@@ -1006,7 +1057,7 @@ commits?: [{ sha, subject }]                           // gs log long only
 | `moveOnto(L,B)` | `gs branch onto <B> --branch <L> --restack upstack`, then `gs stack submit --update-only` | terminal |
 | `insertBelow` | §7.12 | terminal |
 | `createPRs` | §7.7 (`gs branch submit --branch … --title … --body … --[no-]draft`) | execFile |
-| `setDraft` | `gs branch submit --branch <L> --update-only --draft|--no-draft` | execFile |
+| `setDraft` | `gs branch submit --branch <L> --update-only --draft\|--no-draft` | execFile |
 | `mergeBottom` | `gs branch merge --branch <bottom> --method <m>` (method: `prCascade.mergeMethod`; `repo` = forge default when known, else prompt) | terminal |
 | `rebaseState` | git's `rebase-merge`/`rebase-apply` dirs, plus however gs records a paused op (**verify in M5**) → hint `gs rebase continue` | — |
 
@@ -1281,11 +1332,11 @@ tests assert them exactly (pending item 7b's rule), so the §7.14.1 block only p
 | E18 | Large layer (1000+ files) | `-z` parsing handles it; tree renders (VS Code virtualizes). `maxBuffer` sufficient. |
 | E19 | Worktree checkout (`.git` is a file) | `--git-path` used for rebase detection — **kept in M4**: the Git extension's `state.rebaseCommit` reads `<root>/.git/REBASE_HEAD` literally and is undefined in a linked worktree (verified 2026-09-26, §13.4). Discovery works: a worktree opened as a workspace folder is an ordinary `Repository` to the Git extension. |
 | E20 | Window regains focus after external git activity | View refreshes within the debounce window. **Mechanism from M4 (§7.14.2):** the Git extension's watcher saw the change, waited for focus, ran `git status`, fired `state.onDidChange`; we debounce and recompute. Holds only with `git.autorefresh` on (default) and a repository under `git.statusLimit`; a ref-only change is not seen (E83). Test: subscribe to `provider.onDidChangeTreeData` (the event a tree provider fires to make VS Code re-ask `getChildren`; `vscode/tree.ts` already exposes it) before the external commit; commit; `await repository.status()` — the same event without the focus wait; await that one tree-change event (the debounced handler's `refresh()`); then `getChildren()`. The test never calls the exported `refresh` or `prCascade.refresh` itself, so a missing `state.onDidChange` subscription fails it by timeout — reading the tree straight after `status()` would prove nothing, since `getChildren()` re-runs the pipeline on every call. |
-| E21 | Remote URL in each supported form (§7.5) | `parseRemoteUrl` returns the right host/owner/repo; unparseable → `null`, PR features disabled, tree still works. |
+| E21 | Remote URL in each supported form (§7.5) | `parseRemoteUrl` returns the right host/owner/repo; unparseable → `null`, PR features disabled, tree still works. `detectForge` reports it as `unparseable` with the URL kept for the node (D54). |
 | E22 | Workspace contains a github.com repo and a `*.ghe.com` (or other Enterprise) repo | Each repo's `gh` calls carry its own `GH_HOST`; auth status evaluated per host. |
 | E23 | `gh` not authenticated for a repo's host | Tree renders fully; layer description shows the hint; any `gh` action shows the "Log in" prompt → terminal runs `gh auth login --hostname <host> --web …` → extension polls `gh auth status` and, on success, refreshes and re-runs the original action. Second click while pending only focuses the terminal. Timeout gives up silently. |
 | E24 | `gh` not installed | Tree, diffs and push still work; on GitHub repos CR creation is disabled until installed (E62b); on GitLab nothing is affected. |
-| E25 | Repo has no remote | Layers/diffs work; trunk falls back to local `main`/`master`; PR + push disabled with a message. |
+| E25 | Repo has no remote | Layers/diffs work; trunk falls back to local `main`/`master`; PR + push disabled with a message. `detectForge` → `no-remote` (D54). |
 | E26 | Stack of 3, none have PRs, "Create PRs" | Push once; three `gs branch submit` calls in bottom→top order (bases `main`, `layer1`, `layer2` come from tracking); on GitHub one `gh stack link` with all three; notification "3 pull requests created". |
 | E27 | Stack of 3, middle layer already has a PR | Only two creates; existing one untouched; order still bottom→top. |
 | E28 | Existing PR has the wrong base (e.g. still targets a merged/deleted branch) | Not recreated; listed in the "Fix N bases?" confirm; `gs stack submit --update-only` re-asserts bases only after confirm. |
@@ -1319,18 +1370,18 @@ tests assert them exactly (pending item 7b's rule), so the §7.14.1 block only p
 | E57 | `gs log --json` with a malformed line / unknown fields / stderr noise | Good lines parsed, bad line reported once, unknown fields ignored; non-zero exit → enrich degrades to "no stack info", tree still renders. |
 | E58 | gs restack/sync/onto pauses on conflicts | Banner "git-spice operation paused — resolve, `git add`, then `gs rebase continue`"; mutating actions disabled; cleared on next refresh after completion. |
 | E59 | Repo not initialized for git-spice | Tree works (git ancestry); CR/stack actions show the init offer; `gs repo init --trunk <detected trunk>` runs in a terminal. |
-| E60 | Forge not supported by git-spice (unknown host, no `spice.forge.*.url`) | Tree and diffs work; CR features disabled with a node naming the config key to set. |
+| E60 | Forge not supported by git-spice (unknown host, no `spice.forge.*.url`) | Tree and diffs work; CR features disabled with a node naming the config key to set. Detected as `forge.kind` `unknown` with `recognizedByGitSpice` false, the host known (D54); the node should already say "v1 supports GitHub and GitLab", since a configured bitbucket/gitea host lands in E75 next. A rejected `spice.forge.kind` (`ForgeConfig.rejectedKind`) also lands here, with its own remedy: unset the key or set one of git-spice's five ids. |
 | E61 | Plan doc with mixed `Draft:` | Each `gs branch submit` carries its own `--draft`/`--no-draft`; final states match the plan; `markReady*` uses `--update-only --no-draft`. |
 | E62 | git-spice not installed | One-time install offer; decline remembered; tree and diffs still work. |
 | E62b | GitHub repo, `gs` present but `gh`/gh-stack missing | Readiness lists exactly what to install; CR actions disabled until then; tree and diffs work. |
 | E63 | Trunk detected by §5 differs from git-spice's configured trunk | Warning node; offer `gs repo init --reset --trunk <detected>` (confirm). |
 | E64 | First mutating stack operation with `rerere.enabled` unset | One-time offer to set it (global); decline remembered in `globalState`; never set silently. |
-| E65 | Remote URL for each forge kind (github.com, `*.ghe.com`, gitlab.com, self-hosted GitLab, bitbucket.org, Bitbucket DC, gitea, codeberg.org, dev.azure.com) | `core/forge.ts` classifies correctly; unknown → `unknown`. |
+| E65 | Remote URL for each forge kind (github.com, `*.ghe.com`, gitlab.com, self-hosted GitLab, bitbucket.org, Bitbucket DC, gitea, codeberg.org, dev.azure.com) | `core/forge.ts` classifies correctly; unknown → `unknown`. Self-hosted GitLab, Bitbucket DC and gitea only through their `spice.forge.<kind>.url` (no default gitea host in 0.31.2); a subdomain of a default or configured host counts (`ssh.github.com`, `altssh.gitlab.com`); Azure classified by host but never recognised by git-spice 0.31.2 (D54). |
 | E66 | GitLab repo | Submit produces MRs targeting parent branches; GitLab's native stack UI auto-detects (nothing extra to do); status shows `!123`. |
 | E67 | Not logged in to gs for this forge | Login prompt → terminal `gs auth login`; README guidance per forge; poll → continue pending action. |
 | E68 | GitHub repo, createPRs | After the CRs exist, `gh stack link <branches bottom→top>` runs; every PR shows the native badge/map; stack number recorded. `gh` missing/old on GitHub → createPRs refuses up front with the install offer. Link failure after CRs were created → error naming the fix (`Relink Stack`). |
 | E69 | PAT-only forge (Bitbucket DC / Gitea / Forgejo) | Login guidance says so plainly; the extension never requests or stores a token. |
-| E70 | GitHub-looking host git-spice doesn't recognize | Offer `git config spice.forge.github.url https://<host>` then re-probe. |
+| E70 | GitHub-looking host git-spice doesn't recognize | Offer `git config spice.forge.github.url https://<host>` then re-probe. Detected as `forge.kind` `github` with `recognizedByGitSpice` false — the `*.ghe.com` rule is the extension's, not git-spice's; the same shape for github.com while a `spice.forge.github.url` names another host (the key replaces the default — offer `https://github.com`), or a subdomain of one, and for a spelling or port git-spice will not match. The offer must echo the remote's spelling: git-spice compares the text (D54). |
 | E71 | Bottom CR merged on GitHub with native stacks | GitHub retargets natively; `gs repo sync --restack` retargets/restacks locally to the same base; nav comments and native map agree. |
 | E72 | Insert below on GitHub, then Finish | CRs created/updated by gs, then the stack is re-linked with the new full order; the popover shows the new layer in position (verify no duplicate stack — §12 8b). |
 | E73 | `Relink Stack on GitHub` on an already-linked stack | Idempotent: no new stack, bases untouched. |
@@ -1477,7 +1528,7 @@ Every layer commits one distinct file (`a`, `b`, `c`, …) so file lists are tri
 | `ext/views.test.ts` | both providers resolve and receive the same model after `refresh` (E81); a posted command runs the registered command with the row name (fake runner records argv); a stale `seq` is ignored and a non-`prCascade.` command id is rejected (E79); hidden → visible re-posts the model |
 | `unit/gsLog.test.ts` | §7.13.2 stream parsing: full objects, minimal objects, `--cr-status` fields, unknown fields tolerated, malformed line isolated (E57), CRLF, empty output |
 | `unit/readiness.test.ts` | every branch of §7.13.1 with a fake runner (E55, E59, E62, E67); memoization; version parsing |
-| `unit/forge.test.ts` | every URL form (E21, E65): ssh, scp-like, https, ports, `user@`, no `.git`, trailing slash, garbage → null; forge kind per host; `spice.forge.*.url` override; `ghEnv()` sets `GH_HOST` |
+| `unit/forge.test.ts` | every URL form (E21, E65): ssh, scp-like (with and without a user, and the `github.com:org/repo.git` form `new URL` would misread), `git+ssh`, `git`, https, ports, `user@`, credentials, no `.git`, trailing slash, query/fragment, GitLab subgroups, Azure's three forms; `null` for a local path, `file:`, a Windows drive, a scp-like IPv6 literal, one segment, an empty segment, garbage; the host's spelling and port kept; `parseForgeConfig` (the `key value` lines as git prints them: `apiurl` and `bitbucket.kind` ignored, last value wins, a non-URL ignored, a mixed-case subsection ignored, `spice.forge.kind` of git-spice's five ids only with a rejected value reported, CRLF); `classifyHost` in its documented order (a rejected kind → kind, as git-spice does → each kind's base host, configured or default, matched as git-spice matches: subdomain yes, bare suffix no, case- and port-sensitive, a url key displacing its default → the extension's guesses → unknown), the tie-breaks pinned where git-spice itself is random, and `recognizedByGitSpice` (E60/E70's inputs); `ghEnv()` sets `GH_HOST` and nothing else (E22); `detectForge` with the fake: the two argv rows at the root, no-remote and unparseable stop after one command, `prCascade.remote` honoured, E17 rejects |
 | `ext/nativeStack.test.ts` | fake runner: `gh stack link` argv is branch names bottom→top with `GH_HOST`; stack number parsed and recorded; re-link after insert uses the full new order (E72); relink idempotent (E73); refuses createPRs on GitHub when gh/gh-stack missing (E62b); never runs on GitLab (E74) |
 | `ext/backend-gitspice.test.ts` | fake runner: exact argv + env for every §7.13.3 row; `--no-prompt` on every call; track-before-mutate ordering (E56); conflict pause → banner (E58); mixed drafts (E61); merge method selection; never reads `refs/spice/data` |
 | `git/gitspice.git.test.ts` | **real `gs` against the fixture, offline** (git-spice needs no network for local ops): `repo init`, `branch track`, `log short --json` schema, `upstack restack` after amending the bottom (patch-ids stable), `branch onto`, `branch create --below --no-commit` + commit + restack (E48/E49 graph assertions), conflict pause + `rebase continue`. Skipped with a clear message if `gs` is not installed; CI installs it. M5 item 22 adds the §13.4 (k) pin: `log short --json` (and `--cr-status`, which against a local bare origin takes the no-forge path) change no file under `.git` at any depth — mtime/inode snapshot before and after |
@@ -1490,7 +1541,7 @@ Every layer commits one distinct file (`a`, `b`, `c`, …) so file lists are tri
 | `unit/template.test.ts` | mirrors git-spice's template discovery for *display* in the plan doc (`spice.submit.template`, `.github/PULL_REQUEST_TEMPLATE*`, GitLab `.gitlab/merge_request_templates/`); when unsure the doc says "git-spice will apply the repo template" rather than guessing |
 | `ext/prplan.test.ts` | command opens a `prcascade-prplan` document with the expected sections; CodeLens present; running it calls the runner with parsed `--title` and a `--body` argument equal to the edited body; drafts persisted to `workspaceState` and restored (E40); cancel closes without calls |
 | `ext/login.test.ts` | fake terminal + fake runner: "Log in" runs `gs auth login` (and `gh auth login --hostname` for the native-link/extras path); pending action re-runs after status flips to 0; second click focuses existing terminal; never calls real `gs`/`gh` |
-| `git/remote.git.test.ts` | fixture with no remote (E25); with bare origin; two remotes with `prCascade.remote` selecting the second |
+| `git/remote.git.test.ts` | fixture with no remote (E25) → `no-remote`; the bare origin (a local path) → `unparseable` with its path; a second remote selected by `prCascade.remote`; `url.<base>.insteadOf` applied by `remote get-url`, `pushInsteadOf` not; `spice.forge.gitlab.url`, `spice.forge.github.url` and `spice.forge.kind` written by `git config` and read back through a real `--get-regexp`; `*.ghe.com` unrecognised until configured (E70), still unrecognised when the remote spells it in capitals, and github.com unrecognised while the url key names another host; a rejected `spice.forge.kind`; a remote name that does not exist → `no-remote`; the runner's environment made hermetic with `vi.stubEnv` |
 | `git/stack.git.test.ts` | real 3-layer fixture: layers, order, parents, counts; E3, E5, E6, E14, E15, E16, E19 |
 | `git/changes.git.test.ts` | real diffs: E7, E8, E9, E10, E11, E18 (generate 1500 files) |
 | `git/rebase.git.test.ts` | E12 detection via `--git-path`; worktree variant (E19) — stays in M4: the Git extension cannot see a rebase in a linked worktree (§7.14); add the pause points its `REBASE_HEAD` misses even in the main worktree — interactive `break`, a failed `exec`, `git am` — so the directory check is shown to cover them |
@@ -1556,7 +1607,8 @@ detached / no-trunk / no-stack nodes, the E82 rows, and the `<branch> · n of N`
 `ext/gitApi`, `unit/debounce`, `git/rebase`, `ext/tree` (E20, E44), `ext/statusbar`, `ext/commands` (E12).
 *Done when:* `git commit` in a terminal → alt-tab back → tree updates without clicking refresh; the fixture's
 two-folder workspace still shows one repository with the two scan settings gone.
-**→ Ship v0.1 here. Use it for a week before continuing.**
+**→ Ship v0.1 here.** (It said "use it for a week before continuing" until 2026-10-01, when Ric dropped the
+pause: he will not use the extension until it is done, so M5 follows M4 directly — §13.4.)
 
 **M5 — Backend interface + git-spice readiness + push + login flows.**
 `core/forge.ts`, `core/gsLog.ts`, the `StackBackend` interface (§4.4), readiness
@@ -1686,13 +1738,19 @@ item 12 split 2026-09-26 into 12a/12b so every later item number stays true)
     `statusBar` and `treeView` returned under `ExtensionMode.Test` only.)
 15. `v0.1.0`: packaging (`vsce`), README for users (gains the `git.*` settings that decide which repositories
     appear, and the E83 note that a ref moved from a terminal needs the refresh button), CHANGELOG, release
-    workflow attaching the `.vsix`. *Use it for a week before M5.* (D53: version 0.1.0 in the PR, the tag is
+    workflow attaching the `.vsix`. ~~*Use it for a week before M5.*~~ (pause dropped 2026-10-01, §13.4) (D53: version 0.1.0 in the PR, the tag is
     Ric's after merging; `release.yml` on a pushed `v*` tag, `npm test` only, the preinstalled `gh` attaches
     the `.vsix`; `npm run package` in ci.yml; no icon, publisher `local`; `unit/release` pins the facts.)
 
 **M5 stack — "the backend exists and can push"**
 16. `core/forge`: `parseRemoteUrl` + forge kind + `ghEnv`. First **library decision** (`hosted-git-info`
-    vs regexes). Tests: `unit/forge` (E21, E65), `git/remote.git` (E25).
+    vs regexes). Tests: `unit/forge` (E21, E65), `git/remote.git` (E25). (D54: hand-rolled over WHATWG `URL` plus
+    one scp regex — `hosted-git-info` fails E21's and E65's own URLs; `detectForge(git, root, remote)` →
+    `ForgeDetection` {no-remote | unparseable | forge}; `Forge.recognizedByGitSpice` for E60/E70, from a mirror
+    of git-spice's matching (`gitSpiceMatches`: kind first, one base host per forge — url key else default —
+    equal or subdomain, as spelled, same port if configured; a rejected `spice.forge.kind` disables all); `host`
+    as the remote spells it with `port` apart; `ghEnv` = `{ GH_HOST }`; no src/vscode change — the messages land
+    with items 19–20.)
 17. `core/backend` interface + `Readiness` type + `core/gsLog` parser. Library decision (`zod` vs
     type guards). Tests: `unit/gsLog` (E57).
 18. `backends/gitspice` readiness: `gs version` (library decision: `semver`), init detection, `gs auth
@@ -1897,7 +1955,7 @@ Rules:
 - Comment density target: roughly one comment line per 3–5 code lines in `core`, denser around git
   semantics; less in boilerplate (`package.json` contributions, obvious adapters).
 
-`package.json` runtime dependencies: few, chosen per §11.3 (expected: `execa`, `hosted-git-info`, `semver`, `zod`); everything else hand-rolled. Dev dependencies are not shipped. Dev: `typescript`, `esbuild`, `vitest`,
+`package.json` runtime dependencies: few, chosen per §11.3 (candidates: `execa`, `semver`, `zod`; `hosted-git-info` was measured in PR 16 and hand-rolled instead — D54); everything else hand-rolled. Dev dependencies are not shipped. Dev: `typescript`, `esbuild`, `vitest`,
 `@vitest/coverage-v8`, `@types/vscode`, `@types/node`, `@vscode/test-cli`, `@vscode/test-electron`,
 `mocha`, `@types/mocha`, `eslint`, `@typescript-eslint/*`, `@vscode/vsce`.
 
@@ -2010,7 +2068,7 @@ extension without libraries is expected to be ~150 KB.
 | Need | Library | Instead of | Notes |
 |---|---|---|---|
 | Spawn `git`/`gs`/`gh` with argv, env, cancellation, good errors | `execa` | raw `child_process.execFile` wrapper | ESM-only; esbuild bundles it into the CJS output — confirm in the adopting PR |
-| Parse remote URLs into host/owner/repo for GitHub/GitLab/Bitbucket (`core/forge.ts`) | `hosted-git-info` (npm's own) | hand-written regexes for ssh / scp-like / https forms | Exactly the edge-case-heavy case; keep our tests (E21, E65) as the acceptance bar |
+| Parse remote URLs into host/owner/repo for GitHub/GitLab/Bitbucket (`core/forge.ts`) | `hosted-git-info` (npm's own) | hand-written regexes for ssh / scp-like / https forms | Exactly the edge-case-heavy case; keep our tests (E21, E65) as the acceptance bar. **Declined 2026-10-01 (PR 16, D54):** 10.1.1's `fromUrl()` knows only github.com / gitlab.com / bitbucket.org (plus gist and sourcehut) and returns `undefined` for E21's and E65's own URLs — `ssh://git@ghes.corp.com:2222/…`, `https://user@ghes.corp.com/…`, self-hosted GitLab, codeberg, dev.azure.com, even `github.com:org/repo.git`; 30 KB minified with its `lru-cache` dependency. Hand-rolled over Node's WHATWG `URL` class plus one scp regex, 3.3 KB minified (`esbuild --bundle --minify`). |
 | Compare `gh` ≥ 2.90.0, `gs` ≥ 0.31 | `semver` | string splitting | Tiny, standard |
 | Validate `gs log --json` and `gh … --json` shapes (`core/gsLog.ts`, PR status) | `zod` | hand-written type guards | Schemas double as readable documentation of the JSON for the reader; `.passthrough()` implements "tolerate unknown fields" (E57) |
 | Debounce (`core/debounce.ts`) | — hand-roll | `lodash.debounce` | 10 lines |
@@ -2083,7 +2141,7 @@ want the dependency declared in package.json instead).
 7. **git-spice exit codes and paused-operation detection** — undocumented; determine empirically in
    PR 22 and encode in the contract tests. Also verify `spice.forge.github.url=https://<company>.ghe.com`
    resolves the data-residency API URL (else set `apiUrl`).
-8. **Library decisions** (§11.3, §10.2): `hosted-git-info` (PR 16), `zod` (PR 17), `semver` (PR 18),
+8. **Library decisions** (§11.3, §10.2): `hosted-git-info` (PR 16 — decided: hand-roll, D54), `zod` (PR 17), `semver` (PR 18),
    `execa` vs a hand-rolled `execFile` wrapper (PR 21 — measure the 12-dependency cost). Each decided
    in its adopting PR with the full library-decision section; hand-roll is a legitimate outcome.
 9. **A gitlab.com scratch project** for the GitLab e2e — he needs an account; confirm before M7.
@@ -2303,6 +2361,7 @@ marks several commits `edit` (verified to work; note the todo list contains `upd
 | D51 | M4 PR 13b | Row precedence in `nodesForRepo`: one row above the layers — "Rebase in progress — resolve it first" (warning) while `rebaseInProgress`, else "Detached HEAD" (info) while `head` is null — then the E5 row or the layers; E4 alone when `trunk` is null. A paused `git am` reads "Rebase in progress" too. `MessageNode`'s `contextValue` stays empty. | §7.1.0 fixes the texts but names neither icons nor an order. Every rebase pause point but `git am` detaches HEAD (git rebases on a detached HEAD on both backends — probed on git 2.50.1; `test/git/rebase.git.test.ts` pins `head === null` at the merge backend's conflict stop, `exec` and `break`, and `head` still on its branch during `am`), so two rows would say one thing twice, and the rebase row is the one that says what to do. Warning / info per D46's vocabulary: a rebase is a state the user must resolve (and M5 disables mutating commands in it, E12); a detached HEAD breaks nothing and the view still does its job (E3). The `viewItem` context values of §7.2.1, and the context key M5's `enablement` rule needs for a paused rebase, come with the commands that need them. |
 | D52 | M4 PR 14 | The status bar is fed by a second provider event, `onDidLoadStates` — the states `topLevelNodes` loaded, `[]` on a failed load or no repository — and hidden on `[]` or while `prCascade.statusBar` is false (read per refresh, like every setting; not live). With several repositories it describes the first in §6 order and carries that root in its tooltip; `name` is "PR Cascade Stack", the item id `prCascade.stack`, Left / 100. E44 reads `2 of 2`, not `2 of 3`. The view is created with `createTreeView`; `refresh()` runs `getChildren()` itself while `treeView.visible` is false, and `activate()` runs it once at startup unguarded — VS Code reports visibility asynchronously, so the property always reads false there (one duplicate load per window when the view is visible at startup). Two loads can overlap, so the provider numbers them (`loads`) and only the newest speaks to the status bar. `activate()` returns `statusBar` and `treeView` only under `ExtensionMode.Test`; the hidden-view run has a live test through `treeView`. | §7.1.0's "same refresh cycle" means the one place a refresh's states exist, `topLevelNodes`; §7.14.3's "hidden in all five states" is exactly "the load rejected", classified once in the catch that already draws the row. HEAD-only membership (`--merged HEAD`, §12 item 2) makes `2 of 3` unattainable in v0.1. Ric's layout is the many-repository case, so hiding the item there would hide the feature; the active-editor rule is M6's. VS Code asks a hidden view for nothing, so without the run of our own the item would go stale the moment the Source Control pane is collapsed, which contradicts §13.4's reason for `onStartupFinished`. The Test-mode hook is the §13.4 2026-09-19 note's own mechanism; an unconditional member would rewrite that decision. |
 | D53 | M4 PR 15 | v0.1.0 ships with publisher `local` (id `local.vscode-pr-cascade`) and without an icon: §11.3 lists one, but the only icon the plan names is M6's container SVG (§7.11), which vsce refuses as a manifest `icon`. The version is bumped in the PR (package.json and both lock lines); the `v0.1.0` tag is Ric's, pushed after the stack merges. `release.yml` runs on a pushed `v*` tag: the tag must equal `v<version>` and CHANGELOG.md must have that section; `npm test` but not `test:ext`; `npm run package`; the preinstalled `gh` creates the release with the `.vsix` and the CHANGELOG section as notes — no third-party action. `npm run package` joins ci.yml. CHANGELOG.md in Keep a Changelog form, no E-numbers or PR numbers (vsce turns ` #N` into issue links). The README is rewritten for users, with the developer material under one `Development` heading at the end rather than in a separate file. `unit/release.test.ts` pins version / CHANGELOG / engines on every `npm test`. Size: about 90 added lines of code and config (release.yml, ci.yml, .vscodeignore, package.json, the lock) and about 180 of prose (README, CHANGELOG.md, plan, reading order, primer) — inside the §0 guideline on D45's count, and inside it even with prose counted. | Marketplace publishing is §11.2's "later", and a publisher change later would change the extension id. A tag pushed with the workflow token starts no run, so the tag is a human step; the tagged commit is a `main` commit CI already ran on both OSes, so the release job repeats only the cheap suite. One new file and no new action keep the PR one idea. §10.1 asks every PR for tests, and the two facts the workflow guards are worth failing a push over, not only a tag. §11's skeleton lists README.md and docs/ and no contributor file. |
+| D54 | M5 PR 16 | `core/forge.ts` hand-rolled over the WHATWG `URL` class plus one scp regex (`SCP_LIKE`, tried first because `github.com:org/repo.git` is a valid URL with the scheme `github.com:`; its host class excludes `@`, `:`, `/` and `[`, so an IPv6 literal is refused rather than misread); `hosted-git-info` 10.1.1 declined on function, not cost — `fromUrl()` knows only github.com / gitlab.com / bitbucket.org and returns `undefined` for `ssh://git@ghes.corp.com:2222/…`, `https://user@ghes.corp.com/…`, self-hosted GitLab, codeberg, dev.azure.com and `github.com:org/repo.git`, E21's and E65's own examples. `host` is the hostname exactly as the remote spells it (the URL class lower-cases it for the special schemes; `hostnameAsTyped` puts the spelling back, because git-spice compares hosts as text), `port` is kept apart (git-spice compares it when a configured URL names one); three disagreements with git-spice are documented and left unmirrored, all outside §7.5's list — the URL class drops a scheme's default port, reads an upper-case scheme as a URL where git-spice reads scp-like text, and re-encodes an internationalised hostname; `owner` is every path segment before the last (`group/sub` on GitLab; Azure raw until M11); `file:` refused by scheme. `detectForge(git, root, remote)` returns the tagged union `ForgeDetection` — `no-remote` / `unparseable` (a local path, the fixture's bare origin) / `forge` — instead of `Forge \| null`, each member carrying `remote`; it reads the fetch URL (`insteadOf` applied, `pushInsteadOf` not — as git-spice does). Classification mirrors git-spice 0.31.2's matching as verified (`gitSpiceMatches`, after its `remoteURLMatches`): a rejected `spice.forge.kind` (`ForgeConfig.rejectedKind`) stops it resolving any forge; a valid one wins outright, though the remote must still match that kind's own url key when one is set; otherwise each of its five forges has one base host — the url key when set (a value that is not a URL counts, as an empty host that matches nothing), **else** the default (github.com, gitlab.com, bitbucket.org, codeberg.org → forgejo; none for gitea), so a url key replaces that kind's default — and the remote matches when its host equals the base or is a subdomain of it, spelled the same, with the base's port if it names one. git-spice's forge order is unspecified (a Go map), so where two forges match the extension's id order (bitbucket, forgejo, gitea, github, gitlab) is its own tie-break and the host counts as recognised either way. `guessKind` is the extension's word for a host git-spice will not match: the default hosts and their subdomains without regard to case, `*.ghe.com` → github, dev.azure.com / ssh.dev.azure.com / `*.visualstudio.com` → azuredevops, else `unknown`; `Forge.recognizedByGitSpice` records the difference (false is E70's trigger for github — `*.ghe.com`, github.com beside a GHES url, a spelling or port git-spice rejects, a rejected kind — and E60's for unknown; always false for azuredevops — 0.31.2 has no Azure forge even with its url key). One `bitbucket` kind. Overrides come from one `git config --get-regexp '^spice\.forge\.'` (`parseForgeConfig`; exact key compare, `apiurl` ignored, last value wins, a value's trailing space kept because git-spice rejects it; the `GITHUB_URL`/`GIT_SPICE_FORGE_KIND` environment variables git-spice also honours are not read). `ghEnv(host)` returns `{ GH_HOST }` only, lower-cased as gh does; the gh runner (item 23) owns the hygiene variables. No src/vscode change; bundle delta 0 (nothing imports the file until item 20). Primer §69 (`new URL`) new; §9, §14 (`ReadonlyMap`), §20 (`exec`, groups), §23 (`toLowerCase`, `indexOf`), §49, §59 edited. Also records the §0 waiver (M5 stacked on the unmerged M4 stack at Ric's request) and the dropped "use it for a week" pause. Size: `forge.ts` 519 lines — 195 code, 300 comment, 24 blank; `unit/forge` 815 lines (133 tests), `git/remote.git` 285 lines (13). | §7.5's own URL list is the acceptance bar and the library fails it (§11.3: the cost must be proportionate to what it replaces — here it replaces nothing); E25, E21 and E60 are three messages a `null` cannot tell apart; §7.6 says the extension's copy must agree with git-spice, and the adversarial review measured git-spice's rules against the first draft and found four it missed, then three more in a second round (D54 records the mirror, not a guess); §7.5 defines GH_HOST as the hostname; §10.1's core/vscode rule. |
 
 ### 13.3 Test coverage delivered in M1 (all green on `m1/06-vscode-tree`, 2026-09-19)
 
@@ -2454,6 +2513,59 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
 - M3 stack built, reviewed and submitted 2026-09-20 (see D40–D45). After M3 merges, **M4** is next: refresh triggers, state nodes, status bar, v0.1.0 — with the activation and `capabilities` decisions already recorded above (the discovery-caching idea was superseded a week later, next bullets).
 - **M3 merged 2026-09-20** (PRs #17, #18). The same day's Q&A produced the decision below; it was recorded on
   2026-09-26 as a docs PR off `main` (#22, merged the same day), before M4 starts.
+- **M5 item 16, 2026-10-01**, branch `m5/16-core-forge` stacked on `m4/15-v0.1.0` (D54): `src/core/forge.ts`
+  (`parseRemoteUrl`, `parseForgeConfig`, `classifyHost` with `gitSpiceMatches` and `guessKind`, `detectForge`, `ghEnv`),
+  `test/unit/forge.test.ts` (133 tests — the URL table, the null table, the config lines, every E65 host, git-spice's
+  rules one by one, `detectForge` against the fake), `test/git/remote.git.test.ts` (13, real git: no remote, the bare
+  origin as a local path, `insteadOf` and `pushInsteadOf`, the `spice.forge.*` keys through a real `--get-regexp`);
+  `hosted-git-info` 10.1.1 measured with `npm run depcheck` and a scratch probe and declined on function; primer §69
+  new, §9/§14/§20/§23/§49/§59 edited; reading order items 23–25 new, 23–47 → 26–50; bundle delta 0. The adversarial
+  review measured git-spice 0.31.2's matching against the first draft and found four disagreements, all fixed and
+  pinned: a `spice.forge.<kind>.url` *replaces* that kind's default host (github.com beside a GHES url is "no forge
+  found"); a subdomain of the base host matches (`ssh.github.com`); the compare is case- and port-sensitive text
+  (`remoteURLMatches` in git-spice's `internal/forge/remote_url.go`); a rejected `spice.forge.kind` disables every
+  forge rather than falling through. Separately, git-spice's forge order is unspecified (a Go map), so the id order
+  is the extension's tie-break, not a mirror. A second round added three more rules, also measured: a url value that
+  is not a URL still displaces its kind's default and matches nothing; a `spice.forge.kind` whose own url key the
+  remote does not match is refused (`unsupported URL: … does not match configured forge URL`); a value with a
+  trailing space (`gitlab `) is rejected, so only a CRLF's `\r` is stripped from the config lines. Earlier bullets
+  below keep the reading-order item numbers of their day (23–47 are now 26–50). First M5 PR, so it also carries the §0 waiver, the dropped pause and the
+  git-spice facts below.
+- **M5 started 2026-10-01 on the unmerged M4 stack, at Ric's explicit request** ("do the next 2 PRs and throw them
+  on the stack") — §0's "don't start the next milestone's stack until the current one is merged" waived this once;
+  items 16 and 17 sit on `m4/15-v0.1.0`, so an amend to any of #23–#27 or #29 means `git-spice upstack restack` for them and a fresh
+  `gh stack link` of the pair onto stack #28. **The "use it for a week" pause is dropped** (Ric, 2026-10-01: he will not
+  use the extension until it is done) — §10's M4 line and §10.1 item 15 amended; M5 follows M4 directly.
+- **git-spice 0.31.2 facts measured while designing items 16–17 (2026-10-01), for item 18:** (a) `gs log short --json`
+  in an uninitialised repository **initialises it itself** — stderr `INF Repository not initialized. Initializing.`,
+  trunk guessed, exit 0 — so §7.6 and §7.13.1 step 2 are corrected: the probe's initialised check must have no side
+  effect, e.g. the *existence* of `refs/spice/data` (`git rev-parse --verify --quiet refs/spice/data`; its contents stay
+  unread, §3; the §7.14.2 digest already lists that ref's object name). Measured the same day: with `--no-prompt`
+  (or any non-tty stdin) and two or more remotes it exits 1 — `auto-initialize: guess upstream remote: prompt for
+  remote: not allowed to prompt for input` — and creates no `refs/spice/data`; neither `branch.<trunk>.remote` nor
+  `spice.remote` lets it guess. (b) `gs auth status` exits 1 for three different reasons — `FTL git-spice: no remote set for
+  repository`, `ERR No Forge specified, and could not guess one from the repository … please use the --forge flag`, and
+  `FTL git-spice: <forge>: not logged in` — so the forge is settled with git first (`detectForge`) and auth is asked as
+  `gs auth status --forge <kind>` (ids: `bitbucket, forgejo, gitea, github, gitlab`), which answers for any repository;
+  §7.13.1's steps 3 and 4 swapped accordingly. (c) **`gs -C <dir>` reads `spice.forge.*` from the directory gs was
+  started in, not the target**: a repository-local `spice.forge.github.url` is ignored under `-C` and honoured with
+  `cwd` = the repository — spawn gs with `cwd`, never `-C` (§7.13 corrected). (d) Default hosts gs recognises:
+  github.com, gitlab.com, bitbucket.org, codeberg.org (→ forgejo); not `*.ghe.com`, not gitea.com, not dev.azure.com
+  even with `spice.forge.azuredevops.url` set — 0.31.2 has no Azure forge, and its `--forge` ids are the five above.
+  `spice.forge.kind` wins over the host (`kind gitlab` with a github.com remote → "gitlab: not logged in"); a
+  `spice.forge.github.url https://ghes.corp.com` makes an unknown host github (E70's offer works). (e) `gs version
+  --short` prints `0.31.2`, exit 0; the trunk appears in `gs log --json` as a line with `ups` and no `down`; INF/WRN
+  lines go to stderr, never stdout. (f) git lower-cases the first and last components of a config key and keeps
+  everything between them — the subsection, `forge.github` in `spice.forge.github.url` — as typed, so
+  `spice.forge.GitHub.url` or `spice.Forge.github.url` is a different key that neither `^spice\.forge\.` nor
+  git-spice matches; (g) git-spice's matching rules — see the item 16 bullet above: one base host per forge (url
+  key, else default), equal-or-subdomain, as spelled, port when configured; a rejected `spice.forge.kind` stops
+  every forge; registry order unspecified; a url value that is not a URL (`ghes.corp.com`, `https://`) displaces the
+  default and matches nothing ("not allowed to prompt for input: please use the --forge flag" under `--no-prompt`);
+  `spice.forge.kind` plus that kind's url key makes git-spice validate the remote against the url (`construct forge
+  "github": unsupported URL: remote URL … does not match configured forge URL`), a subdomain passing; `gitlab ` with
+  a trailing space is `unknown forge: "gitlab "`; `git remote get-url` exits 2 for a missing remote
+  and applies `url.<base>.insteadOf` (verified; `pushInsteadOf` is not applied — the fetch URL decides).
 - **M4 item 15, 2026-10-01**, branch `m4/15-v0.1.0` stacked on 14 (D53): package.json and package-lock.json at
   0.1.0; CHANGELOG.md (Keep a Changelog); README rewritten for users — Install from the Releases page, What you
   see, Refresh (E83's list and §7.14.2's `git.autorefresh` / `git.statusLimit` note), the `git.*` settings with
