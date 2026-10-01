@@ -2589,6 +2589,15 @@ shutdown case quiet) and the queued functions only assign and fire. Where a reje
 possible, `await` inside a `try` (§18) is the right tool, and this codebase uses it
 everywhere else.
 
+A third spelling, for a Promise that is deliberately *not* awaited and whose outcome nobody
+needs: `void provider.getChildren();` in `src/extension.ts` (M4 item 14). The `void`
+operator evaluates what follows it and yields `undefined`; in front of a Promise it changes
+nothing at run time and says — to the reader, and to the linters that look for a forgotten
+`await` (SonarCloud's rule S9383 fails the build on a bare one) — that the omission is on
+purpose. Use it only where the Promise cannot reject, as here (the provider turns every
+failure into a row), or where a rejection has been handled with `.catch`; a bare un-awaited
+call reads as a mistake, which is the rule's point.
+
 ## 64. A debounce: one pending timer as a queue of one
 
 *First seen in `src/core/debounce.ts`; used in `src/extension.ts` (the refresh).*

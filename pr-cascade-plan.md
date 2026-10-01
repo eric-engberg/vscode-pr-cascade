@@ -2454,7 +2454,8 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
   run in `refresh()`, `prCascade.statusBar`, the `capabilities` rider; `test/ext/statusbar.test.ts` live through
   the Test-mode handle and over a stand-in item; primer §66 (the status bar item), §67 (`createTreeView` /
   `visible`), §68 (`ExtensionMode.Test`), `findIndex` in §25, §35 and §61 edited; reading order items 27 and 32
-  new, later items renumbered; E44 reworded (`2 of 2`).
+  new, later items renumbered; E44 reworded (`2 of 2`). SonarCloud on #27 (rule S9383) asked for the two
+  deliberately un-awaited loads to be marked: `void`, with its paragraph in primer §63.
 - **M4 item 13a, 2026-09-30**, branch `m4/13a-core-rebase` stacked on 12b (D50): `RepoState.rebaseInProgress`
   from one `rev-parse --git-path` call inside `computeStack`; `test/git/rebase.git.test.ts` builds the cases §9.4
   names — the conflict stop, `git am`, a failed `exec`, `break`, a linked worktree (E19) — plus the state after

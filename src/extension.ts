@@ -139,11 +139,11 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
       // refresh for then — so nobody would run the pipeline, and the status bar would keep
       // naming a branch that is gone. Run it here: the rows are discarded (VS Code asks
       // again when the view shows), the states event feeds the status bar (plan §13.4, D52).
-      // Not awaited: refresh() is called from event handlers that must return at once, and
-      // getChildren does not reject while the extension runs — the provider turns every
-      // failure into a row (only a load still in flight at shutdown can, once the Output
-      // channel is gone, and nothing listens by then).
-      provider.getChildren();
+      // Deliberately not awaited — `void` says so (primer §63): refresh() is called from
+      // event handlers that must return at once, and getChildren does not reject while the
+      // extension runs — the provider turns every failure into a row (only a load still in
+      // flight at shutdown can, once the Output channel is gone, and nothing listens by then).
+      void provider.getChildren();
     }
   }
   // The refreshes that come in bursts go through one debounce (core/debounce.ts): every
@@ -197,8 +197,8 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
   // view's visibility to the extension host asynchronously, after `createTreeView` has
   // returned, so here it reads false whether or not the view is on screen. When the view is
   // showing, its own first render loads too — the one duplicate load per window D52
-  // accepts. Not awaited, as in refresh().
-  provider.getChildren();
+  // accepts. Deliberately not awaited, as in refresh() (primer §63).
+  void provider.getChildren();
 
   output.appendLine('PR Cascade active');
   // The status bar wrapper and the view handle exist only for the tests, and this object is
