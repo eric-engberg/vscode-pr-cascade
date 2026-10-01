@@ -56,7 +56,9 @@ describe('extension activation', () => {
     const api = await extension.activate();
 
     // assert: the two things plan §9.1 requires — a provider VS Code could ask for rows,
-    // and the refresh the toolbar button ends in (after its debounce, plan §7.14.2)
+    // and the refresh the toolbar button ends in (after its debounce, plan §7.14.2). Two more
+    // members, `statusBar` and `treeView`, are there in test mode only (plan §13.4; primer
+    // §68) and are test/ext/statusbar.test.ts's business.
     assert.strictEqual(typeof api.provider.getChildren, 'function');
     assert.strictEqual(typeof api.provider.getTreeItem, 'function');
     assert.strictEqual(typeof api.refresh, 'function');

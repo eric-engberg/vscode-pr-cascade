@@ -6,10 +6,10 @@
  * points at its bundled form, dist/extension.js). Depends on: the `vscode` module,
  * core/git.ts, trunk.ts, stack.ts, changes.ts, uri.ts (the scheme name), debounce.ts (the
  * refresh), vscode/gitApi.ts (the built-in Git extension: repositories, events, the status
- * signal, the git executable), vscode/config.ts,
- * tree.ts, content.ts, commands.ts. Depended on by: VS Code itself, test/ext/* and
- * test/ext-parent/*. Plan:
- * §4.1, §6, §7.14, §9.1 (what activate returns), §10.1 items 6, M2 9, M3 11, M4 12a, 12b.
+ * signal, the git executable), vscode/config.ts, tree.ts, statusbar.ts, content.ts,
+ * commands.ts. Depended on by: VS Code itself, test/ext/* and test/ext-parent/*. Plan:
+ * §4.1, §6, §7.1.0 (the status bar), §7.14, §9.1 (what activate returns), §10.1 items 6,
+ * M2 9, M3 11, M4 12a, 12b, 14; §13.2 D52.
  */
 
 // see primer §1 (import / export), §2 (the vscode module) and §9 (`import type`)
@@ -27,7 +27,8 @@ import type { PrCascadeSettings } from './vscode/config';
 import { StackDiffContentProvider } from './vscode/content';
 import { GitExtensionAdapter, GitUnavailableError, gitExecutable, realGitExtensionHost, sortRepositoryRoots } from './vscode/gitApi';
 import type { GitApi } from './vscode/gitApi';
-import { StackTreeProvider } from './vscode/tree';
+import { StackStatusBar } from './vscode/statusbar';
+import { StackTreeProvider, type StackNode } from './vscode/tree';
 
 /**
  * How long the view waits after the last "a git status completed" event, or the last click
@@ -40,13 +41,15 @@ import { StackTreeProvider } from './vscode/tree';
 const STATUS_REFRESH_DELAY_MS = 250;
 
 /**
- * What activate() hands back. VS Code ignores it; the extension-host tests
- * (test/ext/*.test.ts) receive it from `extension.activate()` and drive the tree through
- * it — `provider.getChildren()` for the rows, `refresh()` for a redraw at once — instead
- * of reaching into the extension's insides (plan §9.1, "activate() must return
- * { provider, refresh }").
+ * What activate() hands back. VS Code ignores it, but every other extension in the window
+ * could read it; the extension-host tests (test/ext/*.test.ts) receive it from
+ * `extension.activate()` and drive the tree through it — `provider.getChildren()` for the
+ * rows, `refresh()` for a redraw at once — instead of reaching into the extension's insides
+ * (plan §9.1, "activate() must return { provider, refresh }"). Anything that exists only for
+ * the tests is added only when the extension runs under the test harness (plan §13.4;
+ * primer §68).
  */
-// see primer §9 (interface) and §33 (function types)
+// see primer §9 (interface), §33 (function types) and §11 (an optional `?` field)
 export interface ExtensionApi {
   /** The Stack view's data provider — the object VS Code asks for rows. */
   provider: StackTreeProvider;
@@ -56,6 +59,14 @@ export interface ExtensionApi {
    * test that wants the redraw now uses this handle, not the command.
    */
   refresh: () => void;
+  /**
+   * The status bar item's wrapper — present only under `ExtensionMode.Test` (plan §13.4):
+   * its text and whether it is showing are what test/ext/statusbar.test.ts asserts, and the
+   * item itself cannot be read back from VS Code.
+   */
+  statusBar?: StackStatusBar;
+  /** The Stack view itself — present only under `ExtensionMode.Test`, for the one test that hides the view and expects the item to keep up (D52). */
+  treeView?: vscode.TreeView<StackNode>;
 }
 
 /**
@@ -99,12 +110,41 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
     output,
   );
   context.subscriptions.push(provider);
-  // "prCascade" is the view id from package.json "contributes.views"; VS Code has
-  // already drawn the empty view under Source Control and now knows whom to ask for rows.
-  context.subscriptions.push(vscode.window.registerTreeDataProvider('prCascade', provider));
+  // "prCascade" is the view id from package.json "contributes.views"; VS Code has already
+  // drawn the empty view under Source Control and now knows whom to ask for rows. A
+  // `TreeView` rather than a bare registration (primer §67), because `refresh` below has to
+  // know whether the view is showing.
+  const treeView = vscode.window.createTreeView('prCascade', { treeDataProvider: provider });
+  context.subscriptions.push(treeView);
+
+  // The status bar item (plan §7.1.0) is fed by the provider: whatever a top-level load
+  // produced goes to it — the same load that draws the rows, never a second pipeline; when
+  // two loads overlap, the provider lets only the newest speak (vscode/tree.ts, `loads`).
+  // `createStatusBarItem` wants an id, a side and a priority (primer
+  // §66): left, beside the built-in Git branch item. The listener is an arrow and not a
+  // bare `statusBar.update`, because `update` reads `this` — unlike `refreshSoon.schedule`
+  // below (primer §64).
+  // see primer §35 (enum values from the VS Code API: StatusBarAlignment)
+  const statusBar = new StackStatusBar(
+    vscode.window.createStatusBarItem('prCascade.stack', vscode.StatusBarAlignment.Left, 100),
+    () => readSettings().statusBar,
+  );
+  context.subscriptions.push(statusBar);
+  context.subscriptions.push(provider.onDidLoadStates((states) => statusBar.update(states)));
 
   function refresh(): void {
     provider.refresh();
+    if (treeView.visible === false) {
+      // VS Code asks a hidden view for nothing until it is shown again — it keeps the
+      // refresh for then — so nobody would run the pipeline, and the status bar would keep
+      // naming a branch that is gone. Run it here: the rows are discarded (VS Code asks
+      // again when the view shows), the states event feeds the status bar (plan §13.4, D52).
+      // Not awaited: refresh() is called from event handlers that must return at once, and
+      // getChildren does not reject while the extension runs — the provider turns every
+      // failure into a row (only a load still in flight at shutdown can, once the Output
+      // channel is gone, and nothing listens by then).
+      provider.getChildren();
+    }
   }
   // The refreshes that come in bursts go through one debounce (core/debounce.ts): every
   // completed `git status` in any repository — the Git extension runs several in a row
@@ -150,9 +190,23 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
   // the row's node as the argument, or from the Command Palette with none.
   context.subscriptions.push(vscode.commands.registerCommand('prCascade.openDiff', openDiff));
 
+  // With the Stack view hidden at startup — a collapsed Source Control pane — VS Code asks
+  // for no rows, and the handshake with the Git extension starts only on the first load
+  // (vscode/gitApi.ts), so nothing would ever reach the status bar (plan §13.4, D52). One
+  // load now feeds it, in every window. Not guarded by `treeView.visible`: VS Code reports a
+  // view's visibility to the extension host asynchronously, after `createTreeView` has
+  // returned, so here it reads false whether or not the view is on screen. When the view is
+  // showing, its own first render loads too — the one duplicate load per window D52
+  // accepts. Not awaited, as in refresh().
+  provider.getChildren();
+
   output.appendLine('PR Cascade active');
-  // see primer §16 (object literals: shorthand keys)
-  return { provider, refresh };
+  // The status bar wrapper and the view handle exist only for the tests, and this object is
+  // readable by every extension in the window — so they are handed out only under the test
+  // harness (plan §13.4; primer §68). `{ provider, refresh }` is what plan §9.1 fixed, in
+  // every mode.
+  // see primer §16 (object literals: shorthand keys) and §48 (the conditional expression)
+  return context.extensionMode === vscode.ExtensionMode.Test ? { provider, refresh, statusBar, treeView } : { provider, refresh };
 }
 
 /**

@@ -860,6 +860,11 @@ codebase uses, all of them the same idea as a shell pipeline stage: a list goes 
   `test/ext/tree.test.ts` and `test/ext/diff.test.ts` (M3) picks the fixture's repository
   out of the workspace folders; the `undefined` half is why an `if` and a `throw` follow it
   (§8). `grep -m1`.
+- `list.findIndex(fn)` — the same search, answering with the *position* (0 for the first
+  element) or `-1` when nothing matched, where `find` would answer `undefined`.
+  `state.layers.findIndex((layer) => layer.isCurrent)` in `src/vscode/statusbar.ts` (M4
+  item 14) is the current layer's place in the stack: the position plus one is the `n` of
+  `n of N`, and `-1` is "not on a stack". `grep -n -m1`, keeping only the line number.
 - `list.flatMap(fn)` — `map`, then one level of flattening: when `fn` returns a list for
   each element, the result is one list of all their elements rather than a list of lists.
   `vscode.window.tabGroups.all.flatMap((group) => group.tabs)` (`test/ext/diff.test.ts`)
@@ -1275,7 +1280,14 @@ one reason to always write the name. It is the same job the exact-string unions 
 (`FileStatus`, `StartFailure`), which is why this codebase uses the API's enums where the
 API demands them and defines none of its own (plan §11.1). All three members are in use
 since PR 11: a `LayerNode` is `Collapsed` — it has children, its files, and starts
-folded — a `FileNode` and a `MessageNode` are `None`, a `RepoNode` is `Expanded`.
+folded — a `FileNode` and a `MessageNode` are `None`, a `RepoNode` is `Expanded`. Two more
+API enums appear later. `ConfigurationTarget.Workspace`, in the extension-host tests that
+write a setting (`test/ext/tree.test.ts`, `diff.test.ts`, `statusbar.test.ts`):
+`getConfiguration('prCascade').update(key, value, target)` takes one of `Global`, `Workspace`
+or `WorkspaceFolder` to say which settings file is written — `Workspace` lands in the
+fixture's `.code-workspace`, not the test VS Code's user settings — and `undefined` as the
+value removes the key, so the package.json default applies again. And `StatusBarAlignment.Left`,
+where `src/extension.ts` makes the status bar item (§66, M4 item 14).
 
 ## 36. export const: a shared constant object
 
@@ -2502,8 +2514,10 @@ the fake's `state` the way the real one moves. `fakeExports` does the same for `
 
 An interface field declared `readonly` (§14) is satisfied by a getter with no setter: the
 interface only promises the field can be read. Classes have the same syntax — `get x()
-{ }` in a class body — and the Git extension's source uses it heavily; this codebase's own
-classes have not needed one yet. The twin, `set name(value) { ... }`, runs on assignment;
+{ }` in a class body — and the Git extension's source uses it heavily; this codebase's first
+is `StackStatusBar.visible` (`src/vscode/statusbar.ts`, M4 item 14): the class remembers
+whether it last told its item to show or hide, and the getter is how a test reads that
+without being able to change it. The twin, `set name(value) { ... }`, runs on assignment;
 it is not used here.
 
 ## 62. Declaring a type parameter on a function: `function nextEvent<T>(…)`
@@ -2669,3 +2683,92 @@ call's deadline passed unfired), one more millisecond, another look — which is
 specification of "a quiet period counted from the last call", and distinguishes it from one
 counted from the first. (Vitest's `vi.fn()` spies would also count the calls; a plain
 `let runs = 0` counter says the same with nothing new to learn.)
+
+## 66. The status bar: `window.createStatusBarItem` and `StatusBarItem`
+
+*First seen in `src/extension.ts` (the item is made there) and `src/vscode/statusbar.ts`
+(everything done with it).*
+
+```ts
+const item = vscode.window.createStatusBarItem('prCascade.stack', vscode.StatusBarAlignment.Left, 100);
+
+item.name = 'PR Cascade Stack';
+item.command = 'prCascade.focus';
+item.text = '$(layers) retry-metrics · 3 of 3';
+item.tooltip = state.root;
+item.show();
+```
+
+`createStatusBarItem(id, alignment, priority)` adds one entry to the bar along the bottom
+of the window and hands back the object that controls it. The `id` names the entry (VS Code
+uses it to remember whether the user hid it); `alignment` is an API enum (§35) — `Left`
+puts it with the Git branch item, `Right` with the language and encoding ones; `priority`
+orders entries on one side, higher further left. Then it is all fields: `text` is what shows,
+and a `$(name)` inside it is a **codicon** — the same icon vocabulary the view's `"icon":
+"$(layers)"` in package.json uses — drawn inline; `tooltip` appears on hover; `name` is the
+label the bar's own right-click menu uses for "Hide 'PR Cascade Stack'"; `command` is the
+id of a command to run on click — here the `<viewId>.focus` command VS Code creates for
+every contributed view, so nothing of ours is registered for the click. `show()` and
+`hide()` do what they say, and `dispose()` removes the entry; it goes on
+`context.subscriptions` like everything else VS Code gave us (§32).
+
+One thing the object does *not* do is say whether it is shown: there is no `visible` field
+to read. `StackStatusBar` therefore remembers what it last told the item (`shown`) and
+exposes that as a getter (§61) — the only way a test can assert "hidden". The class takes
+the item as a parameter rather than making it, so the tests can hand it a stand-in with the
+seven members it touches (a `Pick`, §49) and read back what was set.
+
+## 67. `window.createTreeView` and a hidden view: `TreeView.visible`
+
+*First seen in `src/extension.ts` (M4 item 14), replacing `registerTreeDataProvider`.*
+
+```ts
+const treeView = vscode.window.createTreeView('prCascade', { treeDataProvider: provider });
+context.subscriptions.push(treeView);
+
+function refresh(): void {
+  provider.refresh();
+  if (treeView.visible === false) {
+    provider.getChildren();
+  }
+}
+```
+
+`registerTreeDataProvider(viewId, provider)` (PR 6) connected a provider to a view and
+handed back only a `Disposable` (§32). `createTreeView` connects the same provider and hands back
+a `TreeView` — an object about the view itself: `visible` (is it on screen right now?),
+`onDidChangeVisibility`, `reveal`, `title`, `message`. Both are legitimate; the second is
+needed the moment code has to *ask* something about the view.
+
+What it is asked here: VS Code does not call `getChildren` on a view that is not showing.
+A refresh fired while the Source Control pane is collapsed is remembered and runs when the
+view appears again — fine for the rows, which nobody can see meanwhile, but not for the
+status bar item, which is fed by the same load and would keep naming a branch that is
+gone. So `refresh()` runs the load itself while the view is hidden: the rows it produces
+are discarded (VS Code asks again when the view shows), the states go to the status bar.
+The call is not awaited — `refresh` is called from event handlers that must return at once,
+and `getChildren` never rejects (the provider turns every failure into a row).
+
+## 68. A handle for tests only: `context.extensionMode === ExtensionMode.Test`
+
+*First seen in `src/extension.ts` (the `statusBar` member of `ExtensionApi`).*
+
+```ts
+export interface ExtensionApi {
+  provider: StackTreeProvider;
+  refresh: () => void;
+  statusBar?: StackStatusBar;
+  treeView?: vscode.TreeView<StackNode>;
+}
+
+return context.extensionMode === vscode.ExtensionMode.Test ? { provider, refresh, statusBar, treeView } : { provider, refresh };
+```
+
+`ExtensionContext.extensionMode` says how the extension was started: `Production` (installed
+from a `.vsix` or the Marketplace), `Development` (F5) or `Test` (the extension-host tests,
+`npm run test:ext`). The object `activate()` returns is visible to every other extension in
+the window (§60), so anything that exists only for tests should not be in it the rest of
+the time — plan §13.4's rule for every test hook from here on. The fields are optional (§11),
+the return is a conditional expression (§48) between two literals, and a test narrows each
+optional field with `assert.ok(api.statusBar)` (§8) before using it. The two members plan
+§9.1 fixed, `provider` and `refresh`, stay unconditional.

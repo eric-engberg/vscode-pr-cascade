@@ -29,7 +29,8 @@ Milestones (each is one stack of PRs):
    by itself whenever that extension runs a `git status` — after git activity outside
    VS Code, once the window has focus again. A ref that moves on its own (`gs branch track`)
    is not seen by anyone; the Refresh button is for that. When a rebase is paused, or HEAD is
-   detached, a row above the layers says so. ← *now*
+   detached, a row above the layers says so. The status bar names the branch HEAD is on and
+   its place in the stack (`retry-metrics · 3 of 3`); click it to open the Stack view. ← *now*
 5. git-spice backend: readiness, login, push.
 6. Create PRs for the whole stack, linked as a native GitHub stack.
 7. Editable PR descriptions.
@@ -51,6 +52,7 @@ again on each refresh, so a change takes effect without reloading the window.
 | `trunk` | `""` | The ref the stack is measured against. Empty = auto-detect: the remote's default branch (`origin/HEAD`), then `origin/main`, `origin/master`, `main`, `master`. |
 | `gitPath` | `""` | The git executable. Empty = the one the built-in Git extension found (it honours `git.path`), so both run the same git; a full path only to override that. |
 | `remote` | `"origin"` | The remote whose default branch is consulted first — change it if you work on a fork. |
+| `statusBar` | `true` | Show the `<branch> · n of N` status bar item: the branch HEAD is on and its place in the stack, counted from the bottom. Click it to open the Stack view. |
 
 Which repositories the view shows is the built-in Git extension's decision, so its
 settings apply: `git.autoRepositoryDetection`, `git.repositoryScanMaxDepth` (a parent
@@ -108,7 +110,7 @@ CI (`.github/workflows/ci.yml`) runs `npm test` and `npm run test:ext` on Linux 
 src/extension.ts     entry point — wires core to VS Code
 src/core/            pure logic + git runner; no VS Code imports (enforced by lint)
 src/vscode/          adapters: config (settings → plain values), the Stack tree view, the
-                     stackdiff: content provider and the commands (openDiff)
+                     status bar item, the stackdiff: content provider and the commands (openDiff)
 test/unit, test/git  Vitest (see vitest.config.mts)
 test/helpers/        the fake git runner and the fixture builder (a real throwaway stack)
 test/ext, test/ext-parent   Mocha inside VS Code, one launch per folder (see .vscode-test.mjs)

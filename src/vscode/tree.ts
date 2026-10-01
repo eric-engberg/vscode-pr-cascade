@@ -5,10 +5,10 @@
  *
  * Layer: vscode adapter (plan §4.1). Depends on: the `vscode` module, core/model.ts (types
  * only), vscode/gitApi.ts (GitUnavailableError, the one failure drawn as a warning), Node's
- * `node:path`. Depended on by: src/extension.ts (registers the provider and hands it the two
- * loaders), vscode/commands.ts (the FileNode a file row hands its command) and
- * test/ext/tree.test.ts. Plan: §6, §7.1, §7.2 (the click), §7.14.3, §8 E3/E4/E5/E7/E10/E12/E17/E44/E82,
- * §12 item 3.
+ * `node:path`. Depended on by: src/extension.ts (creates the view over the provider, hands it
+ * the two loaders, and feeds the status bar from `onDidLoadStates`), vscode/commands.ts (the
+ * FileNode a file row hands its command) and test/ext/tree.test.ts. Plan: §6, §7.1, §7.2 (the
+ * click), §7.14.3, §8 E3/E4/E5/E7/E10/E12/E17/E44/E82, §12 item 3.
  */
 
 // see primer §1 (import / export), §2 (the vscode module) and §9 (`import type`)
@@ -224,7 +224,8 @@ export type StackNode = RepoNode | LayerNode | FileNode | MessageNode;
  * anything — it tells VS Code "the tree changed", VS Code asks for the top level again,
  * and `getChildren` calls the loader, which runs the whole pipeline (the Git extension's
  * repositories → trunk → stack) afresh; a layer's files are loaded the same way, when
- * its row is opened.
+ * its row is opened. Whatever a top-level load produced is also announced on
+ * `onDidLoadStates`, for the status bar (M4 item 14) — the same load, never a second one.
  * src/extension.ts owns both pipelines; this class only knows they exist.
  */
 // see primer §31 (generics on classes: TreeDataProvider<StackNode>), §32 (EventEmitter and
@@ -238,6 +239,24 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
    */
   private readonly changeEmitter = new vscode.EventEmitter<StackNode | undefined>();
   readonly onDidChangeTreeData: vscode.Event<StackNode | undefined>;
+
+  /**
+   * What the last top-level load produced, for whoever draws it elsewhere — the status bar
+   * (src/extension.ts, M4 item 14). Fired from topLevelNodes with the states it just
+   * loaded, or `[]` when the load failed or found no repository, so the item and the rows
+   * always come from one load (plan §7.1.0 "the same refresh cycle"; D52).
+   */
+  private readonly statesEmitter = new vscode.EventEmitter<RepoState[]>();
+  readonly onDidLoadStates: vscode.Event<RepoState[]>;
+  /**
+   * Counts the top-level loads started, and numbers each. Two can overlap — the run
+   * src/extension.ts starts while the view is hidden, beside VS Code's own ask when it
+   * shows — and the slower one may finish last; a load overtaken by a newer one keeps its
+   * rows (VS Code asked for them) but says nothing to the status bar, so the item follows
+   * the repository's latest state and never the slowest spawn. The same guard as
+   * vscode/gitApi.ts's `generation`.
+   */
+  private loads = 0;
 
   /**
    * The file lists already fetched, by the pair of commits each was computed between —
@@ -271,6 +290,7 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
     private readonly output: vscode.OutputChannel,
   ) {
     this.onDidChangeTreeData = this.changeEmitter.event;
+    this.onDidLoadStates = this.statesEmitter.event;
   }
 
   /** Redraw from scratch. What the toolbar button (`prCascade.refresh`) and every later automatic trigger (M4) call. */
@@ -307,6 +327,7 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
   /** Called by VS Code on shutdown, through context.subscriptions (src/extension.ts). */
   dispose(): void {
     this.changeEmitter.dispose();
+    this.statesEmitter.dispose();
   }
 
   /**
@@ -326,6 +347,8 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
    */
   // see primer §18 (try / catch and unknown) and §34 (instanceof on a class)
   private async topLevelNodes(): Promise<StackNode[]> {
+    this.loads += 1;
+    const load = this.loads;
     let states: RepoState[];
     try {
       states = await this.loadStates();
@@ -340,7 +363,15 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
         message = error.message;
       }
       this.output.appendLine(message);
+      // Nothing loaded: the status bar hides on `[]` (plan §7.14.3 "hidden in all five
+      // states") — unless a newer load has started meanwhile, which then speaks instead.
+      if (load === this.loads) {
+        this.statesEmitter.fire([]);
+      }
       return [new MessageNode(message, icon)];
+    }
+    if (load === this.loads) {
+      this.statesEmitter.fire(states);
     }
     if (states.length === 0) {
       return [new MessageNode('No git repository in this workspace')];
