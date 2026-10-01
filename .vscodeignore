@@ -1,7 +1,7 @@
 # .vscodeignore — what `vsce package` leaves OUT of the .vsix.
-# The .vsix ships dist/extension.js, package.json, README and LICENSE only (plan §11.3; a
-# CHANGELOG joins them in M4, plan §10.1 item 15). Sources, tests, tooling and node_modules
-# stay behind.
+# The .vsix ships five files: dist/extension.js, package.json, README.md, CHANGELOG.md and
+# LICENSE (plan §11.3; `npx vsce ls --no-dependencies` lists them). Sources, tests, tooling and
+# node_modules stay behind.
 .vscode/**
 .vscode-test/**
 .vscode-test.mjs

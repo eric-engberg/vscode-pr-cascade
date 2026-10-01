@@ -1,9 +1,11 @@
-# ci.yml — GitHub Actions: run the full test suite on every pull request and on main.
+# ci.yml — GitHub Actions: run the full test suite, and package the extension, on every pull
+# request and on main.
 #
 # Layer: tooling. Mirrors what a developer runs locally: `npm test` (typecheck, lint, unit,
-# git tests) and then the extension-host tests, on both Linux and macOS. VS Code needs a
-# display; on Linux `xvfb-run` fakes one. The VS Code download is cached so it is not
-# fetched on every run. Plan: §9.5.
+# git tests), `npm run package` (so a manifest or README problem vsce would refuse shows up
+# here, not at tag time — release.yml is the one that ships the .vsix) and then the
+# extension-host tests, on both Linux and macOS. VS Code needs a display; on Linux `xvfb-run`
+# fakes one. The VS Code download is cached so it is not fetched on every run. Plan: §9.5.
 name: CI
 
 # Pull requests cover every stacked branch; the push trigger is for main only, so a push to
@@ -38,6 +40,14 @@ jobs:
       - run: npm ci --ignore-scripts
 
       - run: npm test
+
+      # Packaging is part of every run: vsce validates the manifest (including that
+      # @types/vscode is not newer than engines.vscode) and the README's links and images, and
+      # refuses on a problem here rather than on the release tag. A missing LICENSE or
+      # `repository` is only a warning on a runner: vsce answers its own "continue? [y/N]"
+      # prompt with yes when stdout is not a terminal. The .vsix it writes is gitignored and
+      # discarded.
+      - run: npm run package
 
       # The extension-host tests download VS Code (~300 MB) into .vscode-test/; keep it
       # between runs. .vscode-test.mjs asks for 'stable', so the cache key must be the
