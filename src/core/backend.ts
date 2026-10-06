@@ -35,12 +35,13 @@ export type Readiness =
   /**
    * Every step passed. `gsPath` is the executable that answered — `gs` is Ghostscript on some
    * Macs (plan §13.1), so the probe tries `git-spice` too and later commands run whichever
-   * worked. `gsVersion` is what `gs version --short` printed, for the log.
+   * worked. `gsVersion` is the version token of `gs --version`'s banner (`git-spice 0.31.2 …`), for
+   * the log.
    */
   | { readonly kind: 'ready'; readonly gsPath: string; readonly gsVersion: string; readonly forge: Forge }
-  /** Step 1, E62: none of the executables ran — `prCascade.gsPath` when set, else `gs` then `git-spice`. `tried` lists them for the message. */
+  /** Step 1, E62: none of the executables answered `--version` as git-spice — `prCascade.gsPath` when set, else `gs` then `git-spice`. `tried` lists them for the message, Ghostscript's `gs` included. */
   | { readonly kind: 'gs-missing'; readonly tried: readonly string[] }
-  /** Step 1: `gs version --short` printed `found` (`0.30.0`), below the floor `minimum` the message quotes. */
+  /** Step 1: the `--version` banner's token `found` (`0.30.0`; `dev` for a build with no number) is below — or cannot be read against — the floor `minimum` the message quotes. */
   | { readonly kind: 'gs-too-old'; readonly gsPath: string; readonly found: string; readonly minimum: string }
   /**
    * Step 2, E59: the repository has no `refs/spice/data` — a check with no side effect, never
@@ -105,8 +106,10 @@ export interface StackBackend {
   /**
    * The §7.13.1 probe for the repository at `root`, whose forge is read from the remote
    * `remote` names (`prCascade.remote`). Memoized per root and remote until a refresh after a
-   * failure — a changed `prCascade.remote` is a new question.
-   * Never throws: every outcome is a Readiness member.
+   * failure — a changed `prCascade.remote` is a new question. Never throws for anything
+   * git-spice or the forge can be in: every such outcome is a Readiness member. It rejects
+   * only as every core function does — when git itself cannot run (E17), or the root cannot
+   * be used as a directory — faults the caller already draws for the tree (D56).
    */
   readiness(root: string, remote: string): Promise<Readiness>;
 }

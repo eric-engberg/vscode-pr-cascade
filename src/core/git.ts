@@ -1,6 +1,6 @@
 /**
- * core/git.ts — runs the real `git` executable: the one place in the codebase that spawns
- * a process.
+ * core/git.ts — runs the real `git` executable: where git is spawned. (core/command.ts, from M5
+ * item 18, spawns the other tools — git-spice, later gh — and shares three helpers from here.)
  *
  * Layer: core (no VS Code imports; plan §4.1). RealGitRunner implements the GitRunner
  * interface from core/model.ts using Node's child_process.execFile; GitError is what its
@@ -23,7 +23,7 @@ import type { GitRunner } from './model';
  * `git show` of a big file can exceed; 32 MB is the floor the plan sets (§5).
  */
 // see primer §4 (const)
-const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
+export const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 
 /**
  * Why a git command never started, or `null` when git did start (and then succeeded,
@@ -165,7 +165,7 @@ export class GitError extends Error implements GitFailure {
  * it has some.
  */
 // see primer §18 (try / catch and unknown): `instanceof Error` narrows the caught value
-function describeDirectoryProblem(cwd: string): string | null {
+export function describeDirectoryProblem(cwd: string): string | null {
   try {
     // statSync throws ENOENT when nothing is there; for a directory, the "execute"
     // permission (X_OK) means "may enter it", and accessSync throws EACCES when it is
@@ -192,9 +192,11 @@ function describeDirectoryProblem(cwd: string): string | null {
  * `error.code` is a number when git ran and exited, and a string naming Node's own reason
  * when it did not; only two of those strings mean "never started", and both point at the
  * executable — the working directory, which Node would report with the same two codes,
- * was checked by describeDirectoryProblem before git was asked to run in it.
+ * was checked by describeDirectoryProblem before git was asked to run in it. (The same two
+ * codes mean the same two things for any executable, which is why core/command.ts imports
+ * this rather than copying it.)
  */
-function classifyStartFailure(error: ExecFileException): StartFailure {
+export function classifyStartFailure(error: ExecFileException): StartFailure {
   if (error.code === 'ENOENT') {
     // Nothing at gitPath: git is not installed, or the setting has a typo.
     return 'not-found';
