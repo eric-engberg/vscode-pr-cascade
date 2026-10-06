@@ -190,17 +190,30 @@ export class GitSpiceBackend implements StackBackend {
 }
 
 /**
- * One run of the probe, uncached. A function beside the class rather than a method, as
- * core/git.ts keeps its helpers: the class holds state, this holds the steps.
+ * Step 1's answer when it is good news: the executable that answered as git-spice and the
+ * version token it printed. The other answers step 1 can give are Readiness members (`gs-missing`,
+ * `gs-too-old`), so locateGitSpice returns one or the other and the caller tells them apart by
+ * `kind` — `'located'` is not a Readiness kind.
  */
-// see primer §59 (tagged unions: building members, and narrowing `forge.kind` with `!==`)
-async function probe(git: GitRunner, commands: CommandRunner, gsPath: string, root: string, remote: string): Promise<Readiness> {
-  // Step 1: which executable is git-spice, and which version. Every name asked goes into
-  // `tried`, Ghostscript's `gs` included — it was tried, and did not answer as git-spice.
-  // see primer §48 (the conditional expression) and §22 (for ... of, and `break`)
+// see primer §59 (tagged unions: a member of our own beside Readiness's)
+interface LocatedGitSpice {
+  readonly kind: 'located';
+  readonly gsPath: string;
+  readonly gsVersion: string;
+}
+
+/**
+ * Step 1 of the probe: which executable is git-spice, and is it new enough. Every name asked
+ * goes into `tried`, Ghostscript's `gs` included — it was tried, and did not answer as
+ * git-spice. Its own function so that `probe` below reads as the four steps (and so that each
+ * stays simple enough for a reader — and for SonarCloud's complexity rule, which asked for the
+ * split).
+ */
+// see primer §48 (the conditional expression) and §22 (for ... of, and `break`)
+async function locateGitSpice(commands: CommandRunner, gsPath: string, root: string): Promise<LocatedGitSpice | Readiness> {
   const candidates = gsPath.trim() === '' ? GS_CANDIDATES : [gsPath];
   const tried: string[] = [];
-  let located: { gsPath: string; gsVersion: string } | undefined = undefined;
+  let located: LocatedGitSpice | undefined = undefined;
   for (const candidate of candidates) {
     tried.push(candidate);
     const banner = await gs(commands, candidate, ['--version'], root);
@@ -211,7 +224,7 @@ async function probe(git: GitRunner, commands: CommandRunner, gsPath: string, ro
     }
     const token = gitSpiceVersion(banner.stdout);
     if (token !== null) {
-      located = { gsPath: candidate, gsVersion: token };
+      located = { kind: 'located', gsPath: candidate, gsVersion: token };
       break;
     }
   }
@@ -223,6 +236,20 @@ async function probe(git: GitRunner, commands: CommandRunner, gsPath: string, ro
     // `null` is a token the probe cannot read — `dev`, a build with no number: git-spice, but
     // not confirmably new enough, so the honest answer is this member with the token as found.
     return { kind: 'gs-too-old', gsPath: located.gsPath, found: located.gsVersion, minimum: formatVersion(MINIMUM_GS_VERSION) };
+  }
+  return located;
+}
+
+/**
+ * One run of the probe, uncached. A function beside the class rather than a method, as
+ * core/git.ts keeps its helpers: the class holds state, this holds the steps.
+ */
+// see primer §59 (tagged unions: building members, and narrowing `forge.kind` with `!==`)
+async function probe(git: GitRunner, commands: CommandRunner, gsPath: string, root: string, remote: string): Promise<Readiness> {
+  // Step 1: see locateGitSpice. Anything but `located` is already the answer.
+  const located = await locateGitSpice(commands, gsPath, root);
+  if (located.kind !== 'located') {
+    return located;
   }
 
   // Step 2: initialised. `gs repo init` writes `refs/spice/data`; its existence is the fact,

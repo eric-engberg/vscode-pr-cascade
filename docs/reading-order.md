@@ -353,7 +353,8 @@ the repository root; its §13 is the running log of decisions and deviations mad
     readiness probe (plan §7.13.1). Read the constants first — the two names tried, the
     variables every call gets, the timeout, the version floor — then the four small version
     helpers, then `GitSpiceBackend` (the class holds the runners, the setting and the memo of
-    `ready` answers) and `probe` beside it, which is the four steps in order: find git-spice by
+    `ready` answers) and, beside it, `locateGitSpice` (step 1) and `probe` (steps 2–4) — the
+    four steps in order: find git-spice by
     what it calls itself in its `--version` banner (never by its exit code — Ghostscript's
     `gs --no-prompt --version` exits 0 and prints a bare `10.08.0`, so an exit code would take it
     for git-spice), check `refs/spice/data`
