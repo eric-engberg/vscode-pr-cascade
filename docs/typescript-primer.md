@@ -286,6 +286,12 @@ core shapes: `RemoteRepository extends HostAddress` in `src/core/forge.ts` is a 
 `recognizedByGitSpice`, and `detectForge` builds a `Forge` by spreading (§16) a
 `RemoteRepository` and the two extra fields into one literal.
 
+`src/core/backend.ts` (M5, item 17) is a module made only of `interface` and `type`
+declarations. It compiles to an empty file — there is nothing in it that runs — and the only
+import anyone writes against it is `import type { StackBackend, Readiness } from './backend'`.
+That is a normal thing for a TypeScript codebase to have: a contract in a file of its own, with
+the implementations elsewhere, and `npm run typecheck` as its only test.
+
 ## 10. Union types
 
 *First seen in `src/core/model.ts`.*
@@ -351,6 +357,18 @@ same thing with the blank filled in — `addUnrelatedStack(name: string = 'other
 default parameter (§13) — so callers may omit the argument and the method always has one.
 `FixtureOptions` is an interface made entirely of optional fields, which is what lets
 `buildStack({ remote: false })` name only the one thing that differs from the default.
+
+Two decisions `src/core/gsLog.ts` (M5, item 17) makes about `?` are worth seeing side by side.
+`GsLogEntry.down?` stays optional because its absence *means* something — the line with no
+`down` is the trunk. `GsLogDown.needsRestack`, by contrast, is `boolean`, not `needsRestack?:
+boolean`, although git-spice prints it only when it is true: a flag that is either `true` or
+absent is normalised to a required field defaulting to `false`, so no reader has to write
+`?? false`. And a field that stays optional is **not assigned** when absent: the code builds
+`const entry: GsLogEntry = { name: value.name }` and adds `entry.down = …` only inside
+`if ('down' in value)`,
+so the result is `{ name: 'main' }` and not `{ name: 'main', down: undefined }` — the two are
+different objects to `toStrictEqual`, and `const` (§4) forbids reassigning `entry`, not changing
+its fields.
 
 ## 12. Template strings
 
@@ -606,6 +624,30 @@ still fail the test, but the fixture must be put back on its branch first, or ev
 after this one would start from the wrong place. That is the job of `finally`: undoing a
 change the code above it made, whether or not that code succeeded. The three can be
 combined (`try` / `catch` / `finally`), but this codebase has not needed to.
+
+Narrowing a caught value to `Error` itself rather than to one of our classes — `if (error
+instanceof Error) { … error.message … }`, with a default message when the test fails — appears
+as early as `describeDirectoryProblem` in `src/core/git.ts` (item 4). `parseGsLog` in
+`src/core/gsLog.ts` (M5, item 17) is the first place that writes the same narrowing the other
+way round, as a guard that re-throws what is not an `Error` instead of substituting a message:
+
+```ts
+} catch (error) {
+  if (!(error instanceof Error)) {
+    throw error;
+  }
+  malformed.push({ line: index + 1, problem: error.message });
+}
+```
+
+`error` is `unknown` (anything can be thrown), so `.message` cannot be read until `instanceof
+Error` has proved there is one; what fails the test is re-thrown, because nothing in that `try`
+throws anything but an `Error` and a different value would be a bug to surface, not a bad line.
+The helpers inside the `try` throw `new Error('push.ahead is not a number')` and so on — the
+message *is* the report — and `parseJsonLine` wraps `JSON.parse` in a `catch {` of its own that
+throws a fixed `new Error('not JSON')`, so the outer `catch` sees one kind of thing whatever went
+wrong. Throwing to report and catching once per line is what keeps each helper's ladder (§51)
+short: a helper says what is wrong and stops; the loop decides what that means.
 
 ## 19. Map
 
@@ -1092,6 +1134,10 @@ The same three parts count down: `for (let index = list.length - 1; index >= 0; 
 starts at the last position, keeps going while it is still a valid one (`>= 0`), and
 `index--` subtracts one. First seen in `nodesForRepo`, `src/vscode/tree.ts`, where it is
 how the layers are listed top-first without touching the array.
+
+`parseGsLog` (`src/core/gsLog.ts`, M5, item 17) counts up for a third reason: the position *is*
+data. `index + 1` is the line number a `MalformedLine` reports, so `for (let index = 0; index <
+lines.length; index++)` is the honest shape; a `for … of` would have to count beside itself.
 
 ## 30. ?? — a default for a missing value
 
@@ -2158,6 +2204,24 @@ outside becomes a typed value in one place, checked, and every later line trusts
 type. It is also what a schema library (`zod`, plan §11.3) automates once a shape is bigger
 than a couple of fields; for two, the ladder is shorter than the schema.
 
+The bigger shape arrived with `src/core/gsLog.ts` (M5, item 17): nine fields over three nested
+objects, and the measurement came out for the ladder (plan D55 — zod's default import is 454 KB
+minified, its `zod/mini` 16 KB in a dialect of its own; the ladder is some seventy lines and
+costs nothing). Three habits keep a ladder that size readable. One function per object — the
+entry's `entryFromJson`, and `downFromJson`, `changeFromJson`, `pushFromJson` for the nested
+three — each taking `unknown` and
+returning the typed shape, so no ladder is ever more than one level deep and `value.down` is
+handed to the next function rather than checked in place. Throwing an `Error` whose message
+names the field and the type it should have been (`down.name is not a string`), with one
+`catch` per line in the caller (§18). And `Array.isArray(value)` beside `typeof value !==
+'object' || value === null`, because `typeof []` is `'object'` too (§41) — without it a line
+reading `[]` would be reported as "name is not a string" instead of "not a JSON object". The
+return annotation on each helper (`: GsLogDown`) is what keeps the type and the check in step
+without a library: forget to read a *required* field and the object literal no longer compiles.
+A field the JSON may omit (`status`, which stays optional; `needsPush`, which the literal
+defaults to `false`) gets no such help — leaving its `if` out compiles: `status` is then silently
+dropped, `needsPush` silently always `false` — so those are pinned by tests, not by the compiler.
+
 ## 52. A tree row's command: `TreeItem.command` and `arguments: [this]`
 
 *First seen in `src/vscode/tree.ts` (`FileNode.toTreeItem`).*
@@ -2519,6 +2583,19 @@ than flattening its six fields next to the tag: a reader writes `detection.kind 
 and then `detection.forge.kind === 'github'`, and the `Forge` can be passed on whole to whatever
 needs one. And every member carries `remote`, the one fact all three messages need, so the
 result can be turned into a message without the caller remembering what it asked for.
+
+`Readiness` in `src/core/backend.ts` (M5, item 17) is the largest: ten members, one for `ready`
+and one for each step of plan §7.13.1's probe that can fail, listed in probe order because the
+first failure is the answer. Why a union and not `{ ready: boolean; problems: Problem[] }`:
+that shape allows `ready: true` with problems and `ready: false` with none, and every reader
+would have to decide which problem comes first; the union has one member, and its payload is
+what the one-click fix needs — the executable that answered, the version found and the floor,
+the remote's name, the `Forge` and the `spice.forge.*` configuration that decided it — and
+nothing the caller already holds. The one step where two things can be missing at once (gh and
+its stack extension) is a list *inside* that member rather than a second member; its type,
+`readonly ('gh' | 'gh-stack')[]`, is an array whose elements are a union — the parentheses
+bind the union before the `[]`, where `'gh' | 'gh-stack'[]` would be "a string, or an array of
+strings" (§14 for `readonly` on an array).
 
 ## 60. Another extension's API: `extensions.getExtension`, `activate()`, `exports`, `Thenable`, and a vendored `.d.ts`
 
