@@ -94,6 +94,7 @@ async function showStackView(shown: boolean): Promise<void> {
   if (treeView.visible === shown) {
     return;
   }
+  // see primer §27 (`_` between digits: `5_000` is 5000)
   const changed = nextEvent(treeView.onDidChangeVisibility, 5_000);
   await vscode.commands.executeCommand(shown ? 'prCascade.focus' : 'workbench.view.explorer');
   const event = await changed;

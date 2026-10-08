@@ -472,6 +472,7 @@ describe('the Stack view', () => {
     // refresh() recomputes nothing itself, it only tells VS Code to ask again (plan §9.1) —
     // and the fixture repository as the Git extension holds it. Five seconds is twenty
     // times the debounce and leaves room for the `finally`'s own wait inside Mocha's 20 s.
+    // see primer §27 (`_` between digits: `5_000` is 5000)
     const changed = nextTreeChange(5_000);
     const api = await realGitApi(output);
     const repository = api.repositories.find((candidate) => candidate.rootUri.fsPath === repositoryRoot());

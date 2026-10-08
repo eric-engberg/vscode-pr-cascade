@@ -86,6 +86,7 @@ describe('RealCommandRunner', () => {
         executable: process.execPath,
         args: ['-e', 'process.stdin.resume(); process.stdin.on("end", () => process.exit(0))'],
         cwd: scratchDir,
+        // see primer §27 (`_` between digits: `2_000` is 2000)
         timeoutMs: 2_000,
       });
 

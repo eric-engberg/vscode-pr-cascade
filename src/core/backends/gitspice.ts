@@ -7,8 +7,9 @@
  *
  * Layer: core (no VS Code imports; plan §4.1). Depends on: core/backend.ts (the contract and
  * the answer), core/command.ts (how programs are run), core/forge.ts (detectForge),
- * core/model.ts (GitRunner). Depended on by: src/extension.ts and src/vscode/login.ts (item 19,
- * which builds one per window and turns each failing member into its one-click fix).
+ * core/model.ts (GitRunner). Depended on by: core/readinessFix.ts (item 19a, `parseVersion`),
+ * src/extension.ts and src/vscode/login.ts (item 19b, which builds one per window, calls `forget`
+ * before the setup command's look, and turns each failing member into its one-click fix).
  * Plan: §4.4, §7.6, §7.13, §7.13.1, §7.13.3, §8 E17/E22/E55/E59/E60/E62/E67/E70/E75,
  * §13.1 (`gs` is Ghostscript on a Homebrew Mac), §13.2 D56, §13.4 (git-spice 0.31.2 facts).
  */
@@ -46,6 +47,7 @@ export const GS_ENV: Record<string, string> = { NO_COLOR: '1', LC_ALL: 'C', GIT_
  * three measured on this Mac take 15–70 ms; the limit is for a tool stuck behind a keychain
  * prompt or a slow disk, which must not hang the refresh for good.
  */
+// see primer §27 (`_` between digits: `15_000` is 15000)
 export const PROBE_TIMEOUT_MS = 15_000;
 
 /** A version as the three numbers the probe compares. */
@@ -132,12 +134,12 @@ export function gitSpiceVersion(stdout: string): string | null {
 }
 
 /**
- * The git-spice backend (plan §4.4, §7.13). One per window (item 19 builds it, and builds a
+ * The git-spice backend (plan §4.4, §7.13). One per window (item 19b builds it, and builds a
  * new one when `prCascade.gsPath` changes); it holds the git runner, the command runner and
  * the setting, plus the memo of `ready` answers.
  *
  * What the probe never does: run `gs log` (it initialises an uninitialised repository itself,
- * plan §7.6), `gs repo init` or `gs auth login` (side effects, prompts — those are item 19's
+ * plan §7.6), `gs repo init` or `gs auth login` (side effects, prompts — those are item 19b's
  * terminals), reach the network (`auth status` reads the keychain), read `refs/spice/data`'s
  * contents (only its existence, plan §3), or run `gh` (item 23). The happy path is exactly
  * five commands — two of git-spice, three of git — and the tests pin that list.
@@ -151,7 +153,7 @@ export class GitSpiceBackend implements StackBackend {
    * The `ready` answers so far, by repository and remote (plan §7.13.1: "memoized per root
    * and remote"). Only `ready` is ever stored: a failing step is asked again on the next
    * refresh — which is how an install, `gs repo init` or `gs auth login` done meanwhile is
-   * noticed, and what lets item 19 poll `readiness()` itself after opening the terminal. The
+   * noticed, and what lets item 19b poll `readiness()` itself after opening the terminal. The
    * key joins the two values with a NUL, the one character a path cannot contain (primer §44).
    */
   private readonly readyByRepo = new Map<string, Readiness>();
@@ -189,6 +191,20 @@ export class GitSpiceBackend implements StackBackend {
       this.readyByRepo.set(key, answer);
     }
     return answer;
+  }
+
+  /**
+   * Drops the remembered `ready` for `root` and `remote`, so the next `readiness` probes again.
+   * The memo is right for an action gated on readiness — five programs per click would be
+   * wasted on a repository that was ready a minute ago — but wrong when the user asks by hand
+   * (item 19b's "Set Up git-spice"), who may just have run `gs auth logout` or `gs repo init
+   * --reset` in a terminal: that command forgets first (D57). Items 20–21 will do the same
+   * after an operation fails on login or init, then ask again. Not part of `StackBackend`
+   * (core/backend.ts) until something other than this class needs it (D55).
+   */
+  // see primer §46 (a Map as a cache: `delete`)
+  forget(root: string, remote: string): void {
+    this.readyByRepo.delete(`${root}\0${remote}`);
   }
 }
 
