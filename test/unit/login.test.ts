@@ -1166,6 +1166,18 @@ describe('chooseRepository', () => {
     // act and assert
     expect(await chooseRepository(['/w/a', '/w/b'], host)).toBeUndefined();
   });
+
+  it("asks with the caller's own question when one is given — Track Stack's (item 20b)", async () => {
+    // arrange
+    const host = fakeReadinessHost({ picks: ['a'] });
+
+    // act
+    const root = await chooseRepository(['/w/a', '/w/b'], host, 'Track the stack of which repository with git-spice?');
+
+    // assert
+    expect(root).toBe('/w/a');
+    expect(host.picked).toStrictEqual([{ labels: ['a', 'b'], placeHolder: 'Track the stack of which repository with git-spice?' }]);
+  });
 });
 
 describe('machineFacts', () => {
