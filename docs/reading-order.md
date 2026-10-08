@@ -310,7 +310,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
     comes before the auth step (bare `gs auth status` cannot be read until the forge is known —
     verified against git-spice 0.31.2), the order of the checks inside the forge step, and the
     rule for what each member carries: what its one-click fix needs, nothing the caller already
-    holds. Two names at the bottom (M5 item 19a): `Ready`, the `ready` member alone, and
+    holds. Two names after the union (M5 item 19a): `Ready`, the `ready` member alone, and
     `NotReady`, every member but it — the union cut in two by `Extract` and `Exclude` (primer
     §49), so the offers in item 40 cannot be handed `ready`. `npm run typecheck` is this file's
     test; item 33 implements `readiness`.
@@ -376,7 +376,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
     then is not again, and a failing answer is not remembered. git-spice stays faked until
     M5 item 22 gives CI one.
 36. **`src/core/shell.ts`** — the first of M5 item 19a's three files, which decide what the
-    user is told when the probe says "not ready" and what one click runs; item 19b shows it.
+    user is told when the probe says "not ready" and what one click runs; M5 item 19b shows it.
     This one turns a command, as a list of words, into one line a terminal's shell reads back
     as exactly those words: `shellQuote` leaves a plain word bare and wraps anything else in
     single quotes, with a quote inside written `'\''` (`replaceAll`, primer §23). Read the doc
@@ -394,28 +394,38 @@ the repository root; its §13 is the running log of decisions and deviations mad
     fake clock replaces only the global).
 39. **`test/unit/poll.test.ts`** — five minutes of polling in milliseconds, on Vitest's fake
     clock: exactly a hundred questions, the abort before, during and between them, a check that
-    rejects, and no listener left on the signal (primer §65 for `advanceTimersByTimeAsync` —
-    the plain `advanceTimersByTime` cannot drive a loop that awaits between timers).
+    rejects, an hour's jump of the clock that uses up nothing, the intervals refused (zero, less,
+    `NaN`, `Infinity`), and no listener left on the signal (primer §65 for
+    `advanceTimersByTimeAsync` — the plain `advanceTimersByTime` cannot drive a loop that awaits
+    between timers).
 40. **`src/core/readinessFix.ts`** — the offers: for each way the probe says "not ready", the
     sentence, its colour, at most one button and what it runs (`offerFor`), plus the line shown
     once the step passed. Read the header for the rules every sentence follows (no "PR
     Cascade:" prefix, warning only when there is something to do, never a Cancel button),
-    then the types — `TrunkBranch`, `OfferFacts`, `Fix` (a terminal command, a git command or a
-    web page), `OfferedFix`, `Offer` — then `offerFor`, which only picks (and why its chain of
-    `if`s needs no final case: primer §59), and the helpers below it, one per member. Two that
-    repay a slower read: `trunkBranchFor`, the one question asked of git before an init offer —
-    `gs repo init --trunk` wants a *local* branch, and the trunk is usually `origin/main` — and
-    `unrecognizedOffer`, which turns `forge-unrecognized`'s two fields into one of six sentences
-    (E60, E70). `FORGE_NAMES` and `TOKEN_VARIABLE` are `Record`s over unions (primer §43).
-41. **`test/unit/readinessFix.test.ts`** — every offer compared whole, so a changed word fails
-    (messages are behaviour): each `Readiness` member and its variants, then `readyMessage`, then
-    `trunkBranchFor` against the git fake — a local trunk, a remote-tracking one with and
-    without its local branch, a fork's trunk on another remote, a tag, a commit, a name git does
-    not know.
+    then the types — `TrunkBranch`, `OfferFacts` (what the sentences need beyond the probe's
+    answer: the folder, the remote, the trunk's local branch, the setting, where Homebrew is and
+    whether it has git-spice), `ConfigEntry`, `Fix` (a terminal command, some `git config` lines,
+    or a web page), `OfferedFix`, `Offer` — then `offerFor`, which only picks (and why its chain of
+    `if`s needs no final case: primer §59): three members are worded right there, the other six
+    have a helper below. Three repay a slower read: `trunkBranchFor`, the one question asked of
+    git before an init offer — `gs repo init --trunk` wants a *local* branch, and the trunk is
+    usually `origin/main`; `gsTooOldOffer`, for how a Homebrew install is told from the others
+    now that every official package is named `git-spice`; and `unrecognizedOffer` with
+    `githubUrls` below it, which turn `forge-unrecognized`'s two fields into one of six
+    sentences (E60, E70) — and name the forge's API as well as its URL, because git-spice
+    guesses `<url>/api` for any GitHub url but exactly `https://github.com` (wrong for `*.ghe.com`)
+    and a stale `apiUrl` from elsewhere would otherwise apply. `FORGE_NAMES` and
+    `TOKEN_VARIABLE` are `Record`s over unions (primer §43).
+41. **`test/unit/readinessFix.test.ts`** — the offers as a specification: the first case of each
+    member compares the whole offer, so a changed word fails (messages are behaviour), and the
+    cases after it pin the field they are about — each `Readiness` member and its variants, then
+    `readyMessage`, then `trunkBranchFor` against the git fake — a local trunk, a remote-tracking
+    one with and without its local branch, a fork's trunk on another remote, a tag, a commit, a
+    name git does not know.
 42. **`test/git/trunkBranch.git.test.ts`** — the same question asked of real git, once per
-    kind of trunk — `origin/HEAD` and an ambiguous name included — because what
-    `--symbolic-full-name` prints for each is exactly the kind of detail another git version
-    could change.
+    kind of trunk — `origin/HEAD`, an ambiguous name and one that looks like an option included —
+    because what `--symbolic-full-name` prints for each is exactly the kind of detail another git
+    version could change.
 43. **`src/vscode/config.ts`** — the first file in `src/vscode/`: the four `prCascade.*`
     settings — three strings and the `statusBar` boolean (item 47) — read out of VS Code
     into a plain object (`PrCascadeSettings`). Read it for

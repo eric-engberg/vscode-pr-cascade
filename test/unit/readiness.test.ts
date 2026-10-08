@@ -567,7 +567,7 @@ describe('GitSpiceBackend.readiness', () => {
         expect(call.env).toStrictEqual({ NO_COLOR: '1', LC_ALL: 'C', GIT_OPTIONAL_LOCKS: '0' });
         expect(call.cwd).toBe(ROOT);
         // The literal, not the constant: the plan says 15 seconds, and a constant compared with
-        // itself would pass at any value.
+        // itself would pass at any value. (See primer §27 for the `_` in `15_000`.)
         expect(call.timeoutMs).toBe(15_000);
       }
     });

@@ -58,7 +58,8 @@ export type Readiness =
   /**
    * Step 3, E60 when `forge.kind` is `unknown` (the message names `spice.forge.<kind>.url` and
    * `spice.forge.kind`); E70 when it is `github` or `gitlab` and `recognizedByGitSpice` is false,
-   * and the offer is `git config spice.forge.<kind>.url https://<host>`, spelled as the remote
+   * and the offer is `git config spice.forge.<kind>.url https://<host>` (with its `apiUrl` beside
+   * it — core/readinessFix.ts says why), spelled as the remote
    * spells it. By the host alone that happens for `*.ghe.com` (github only — the extension's
    * guess), for a default host while its own url key names another host (github.com beside a
    * GHES url: the key displaces the default), and for a spelling or port git-spice will not
@@ -67,12 +68,13 @@ export type Readiness =
    * state detectForge read (`ForgeDetection`'s `forge` member carries it): `config.rejectedKind`
    * is the refused kind when that is the cause (remedy: unset it, or set one of the five ids).
    * For E70 (`forge.kind` is github or gitlab) `config.hosts.get(forge.kind)` is the url key that
-   * displaced the default or whose spelling the remote misses — name it and its value before
-   * offering a new one. For E60 (`forge.kind` is `unknown`) that lookup finds nothing, since
-   * `hosts` is keyed by git-spice's five ids: the key already set with the wrong port or spelling,
-   * if any, is the `config.hosts` entry whose host the remote's host equals or ends in — search by
-   * host, not by kind — and when there is none the plain E60 offer applies. `gs auth status
-   * --forge <kind>` catches none of these, so this step must.
+   * displaced the default or whose spelling the remote misses — the offer names it and its value
+   * before offering a new one. As built (item 19a, core/readinessFix.ts): a rejected kind, E60
+   * (`forge.kind` `unknown` — whose plain sentence names both url keys and `spice.forge.kind`;
+   * no search of `config.hosts` by host for a key set with the wrong port or spelling), and a
+   * valid `spice.forge.kind` whose own url key the remote misses are sentences with no button;
+   * only E70 proper gets the `git config` offer. `gs auth status --forge <kind>` catches none of
+   * these, so this step must.
    */
   | { readonly kind: 'forge-unrecognized'; readonly forge: Forge; readonly config: ForgeConfig }
   /** Step 3, E75: bitbucket, gitea, forgejo or azuredevops — the tree works, CR actions say "v1 supports GitHub and GitLab". */
@@ -84,7 +86,7 @@ export type Readiness =
    * things can be missing at once, so `missing` is a list, never empty. `ghVersion` is null when
    * gh was not found at all; a gh that is present but too old is `missing: ['gh']` with its version
    * here and the floor in `ghMinimum`, so the message can quote both. Produced from item 23; item
-   * 19 already draws it. Push and the local gs operations still work in this state (E24, E62b):
+   * 19a words it already (core/readinessFix.ts), and 19b shows it. Push and the local gs operations still work in this state (E24, E62b):
    * only CR creation waits for gh.
    */
   | { readonly kind: 'gh-missing'; readonly forge: Forge; readonly missing: readonly ('gh' | 'gh-stack')[]; readonly ghVersion: string | null; readonly ghMinimum: string };

@@ -6,8 +6,9 @@
  *
  * Layer: core (no VS Code imports; plan §4.1). Depends on: core/model.ts (GitRunner) and
  * Node's global URL class. Depended on by: core/backend.ts (a Readiness carries a Forge),
- * core/backends/gitspice.ts (item 18, the readiness probe), src/vscode/login.ts and the tree
- * (items 19–20: the E21/E25/E60/E70/E75 messages), core/ghstatus.ts (item 23, ghEnv).
+ * core/backends/gitspice.ts (item 18, the readiness probe), core/readinessFix.ts (item 19a: the
+ * E21/E25/E60/E70/E75 sentences read a Forge and a ForgeConfig), core/ghstatus.ts (item 23,
+ * ghEnv).
  * Plan: §4.2, §7.5, §7.6, §8 E21/E22/E25/E60/E65/E70/E75, §9.4, §13.2 D54.
  */
 

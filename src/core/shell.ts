@@ -32,9 +32,12 @@ const BARE_WORD = /^[A-Za-z0-9_./:=@%+,-]+$/;
  * quotes, a backslash-escaped quote, open them again), which the shell glues back into the
  * one word. The empty string is `''`, so it still counts as an argument.
  *
- * For sh, bash and zsh on macOS and Linux, the platforms CI runs. fish reads `\'` inside its
- * own quotes differently, so a word containing a single quote would arrive changed there
- * (rare in a branch name); Windows shells quote differently again and are out of scope.
+ * For sh, bash and zsh on macOS and Linux, the platforms CI runs. fish also reads the `'\''`
+ * form correctly, but inside its single quotes it treats `\\` and `\'` as escapes, so a word with
+ * a backslash in it may arrive changed there — never a branch name (git forbids `\` in one),
+ * possibly a path. A tab cannot be typed into an interactive shell
+ * at all, quoted or not — its line editor takes it as completion — but no branch name can hold one
+ * either. Windows shells quote differently again and are out of scope.
  */
 // see primer §23 (string methods: `startsWith`, `replaceAll`) and §12 (template strings)
 export function shellQuote(word: string): string {
@@ -46,8 +49,8 @@ export function shellQuote(word: string): string {
 
 /**
  * `argv` as one line for a terminal: each word through shellQuote, joined by one space —
- * `['git-spice', 'repo', 'init', '--trunk', 'my branch']` becomes `git-spice repo init
- * --trunk 'my branch'`.
+ * `['/Applications/Dev Tools/git-spice', 'auth', 'login']` becomes `'/Applications/Dev
+ * Tools/git-spice' auth login`.
  */
 // see primer §25 (arrays: `map` and `join`) and §14 (`readonly` on an array type)
 export function shellCommandLine(argv: readonly string[]): string {

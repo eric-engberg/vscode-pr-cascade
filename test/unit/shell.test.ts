@@ -2,8 +2,8 @@
  * test/unit/shell.test.ts — shell quoting as a specification: which words go to the shell as
  * they are, which are wrapped in single quotes, and how a quote inside a word survives. Every
  * command line a terminal of ours runs (item 19b: `gs repo init`, `gs auth login`, `brew
- * install`) is built by these two functions, so a branch name with a space, a `$` or a quote
- * reaches git-spice as one argument, unexpanded.
+ * install`) is built by these two functions, so a path with a space, or a branch name with a `$`
+ * or a quote, reaches git-spice as one argument, unexpanded.
  *
  * Layer: test, unit (plan §9.1 layer 1; Vitest, no shell, no VS Code). Depends on:
  * src/core/shell.ts. Depended on by: nothing. Plan: §7.5 step 2, §7.6, §7.13.1, §10.1 item 19a,
@@ -18,7 +18,8 @@ import { shellCommandLine, shellQuote } from '../../src/core/shell';
 describe('shellQuote', () => {
   describe('words the shell reads back as they are — left bare', () => {
     // see primer §25 (arrays) and §22 (for ... of): one test per word, named after it
-    for (const word of ['main', '/opt/homebrew/bin/git-spice', 'feat/FWRK-1434', 'origin/main', '--forge=github', 'a=b', 'v0.31.2', 'user@host:2222', '50%', 'a+b,c']) {
+    for (const word of ['main', '/opt/homebrew/bin/git-spice', 'feat/FWRK-1434', 'my_branch', 'origin/main', '--forge=github', 'a=b', 'v0.31.2', 'user@host:2222', '50%', 'a+b,c']) {
+      // see primer §12 (template strings)
       it(`leaves ${word} unquoted`, () => {
         // act
         const quoted = shellQuote(word);
@@ -30,9 +31,21 @@ describe('shellQuote', () => {
   });
 
   describe('words the shell would change — wrapped in single quotes', () => {
-    it('quotes a word with a space, so it stays one argument', () => {
-      expect(shellQuote('my branch')).toBe("'my branch'");
+    it('quotes a word with a space, so it stays one argument — a path such as an app bundle\'s', () => {
+      expect(shellQuote('/Applications/Dev Tools/git-spice')).toBe("'/Applications/Dev Tools/git-spice'");
     });
+
+    // Characters a shell gives a meaning to that the bare list must never admit: home (`~`),
+    // comments (`#`), globs (`?`, `[…]`), brace lists, escapes, subshells, redirection, `^`
+    // (history in zsh with some options), and the two that would end or split the line typed into
+    // a terminal — a tab (completion) and a newline (Enter).
+    // see primer §44 (escape sequences: `\\`, `\t`, `\n`)
+    for (const word of ['~', '~user', '#x', 'a?', '[a]', '{a,b}', 'a\\b', '(x)', 'a>b', '^x', 'a\tb', 'a\nb']) {
+      // see primer §50 (`JSON.stringify`: the title shows a tab or a newline as \t or \n)
+      it(`quotes ${JSON.stringify(word)}`, () => {
+        expect(shellQuote(word)).toBe(`'${word}'`);
+      });
+    }
 
     it('quotes a `$`, so the shell does not expand a variable', () => {
       expect(shellQuote('$HOME')).toBe("'$HOME'");
@@ -89,10 +102,10 @@ describe('shellQuote', () => {
 describe('shellCommandLine', () => {
   it('joins the words with one space, quoting only those that need it', () => {
     // act
-    const line = shellCommandLine(['git-spice', 'repo', 'init', '--trunk', 'my branch', '--remote', 'origin']);
+    const line = shellCommandLine(['command', 'git-spice', 'repo', 'init', '--trunk', "it's", '--remote', 'origin']);
 
-    // assert
-    expect(line).toBe("git-spice repo init --trunk 'my branch' --remote origin");
+    // assert: git allows a quote in a branch name (not a space)
+    expect(line).toBe("command git-spice repo init --trunk 'it'\\''s' --remote origin");
   });
 
   it('quotes an executable path with a space in it', () => {

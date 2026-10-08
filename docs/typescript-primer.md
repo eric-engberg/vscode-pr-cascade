@@ -524,8 +524,8 @@ Two smaller uses arrive with `src/core/poll.ts` (M5, item 19a). `sleep` has noth
 fail, so its function takes only `resolve` and never rejects (§71). And `test/unit/poll.test.ts`
 builds a question that is answered *later*, by the test: the function given to `new Promise`
 stores `resolve` in a variable outside it (`answer = resolve`), and the test calls `answer(true)`
-when it wants the question answered — the one way to hold a Promise open on purpose and settle it
-at a moment of the test's choosing.
+when it wants the question answered — the usual way to hold a Promise open on purpose and settle
+it at a moment of the test's choosing.
 
 ## 16. Object literals: shorthand and spread
 
@@ -1110,10 +1110,12 @@ digits and nothing else, so unlike the `rev-list` case above there is no `NaN` t
 against. The three numbers are then compared *as numbers* in `isAtLeast` — `0.9.99` is below
 `0.31.0`, where comparing the two as text would put it after.
 
-A number written in the code may have underscores between its digits, which the compiler drops:
+A number written in the code may have underscores between its digits, which JavaScript ignores:
 `15_000` is `15000`. They are there for the reader, as `15,000` would be in prose (a comma means
-something else in code). First used for `PROBE_TIMEOUT_MS` in `src/core/backends/gitspice.ts`
-(M5, item 18), and for `DEFAULT_POLL`'s `3_000` and `300_000` in `src/core/poll.ts` (item 19a).
+something else in code). First met, in reading order, in `test/unit/command.test.ts`
+(`timeoutMs: 15_000`, M5 item 18); then `PROBE_TIMEOUT_MS` in `src/core/backends/gitspice.ts`,
+`DEFAULT_POLL`'s `3_000` and `300_000` in `src/core/poll.ts` (item 19a), and — earlier by date,
+later in reading order — the `5_000` deadlines of the M4 extension-host tests.
 
 ## 28. The Sync variants of Node's functions
 
@@ -1714,7 +1716,10 @@ are not optional.
 `if` has returned, the compiler knows `value` is a `number`. `Number.isInteger(value)`
 asks "a whole number?" — §27 said `number` is the only numeric type and `3` and `3.0` the
 same value, so whether a value is an integer is a run-time question, and this is the
-function that asks it (it also answers no to `NaN` and `Infinity`). It returns a plain
+function that asks it (it also answers no to `NaN` and `Infinity`; its sibling `Number.isFinite`,
+first used in `src/core/poll.ts`, M5 item 19a, asks only that — "a real number, not `NaN` and not
+`±Infinity`" — and `Number.NaN` and `Number.POSITIVE_INFINITY` are how a test spells those two). It
+returns a plain
 boolean, hence `=== false` rather than `!`, as §24 says the codebase writes it. `value <
 -1` is the floor package.json declares as `minimum`, checked again here because VS Code's
 Settings editor underlines a value that breaks a declared `minimum` and stores it anyway.
@@ -1867,7 +1872,8 @@ compiler checks for completeness: `FORGE_NAMES: Record<ForgeKind, string>` in
 `src/core/readinessFix.ts` (M5, item 19a) must have one entry for each of the seven forge kinds
 — a kind added to `ForgeKind` (core/forge.ts) is a compile error there until it has a name — and
 `TOKEN_VARIABLE: Record<'github' | 'gitlab', string>` exactly the two forges v1 serves. Reading
-it, `FORGE_NAMES[forge.kind]`, needs no `undefined` check, since every key is guaranteed.
+it, `FORGE_NAMES[forge.kind]`, the value is really there for every key — the compiler made sure of
+it when the table was written, which a `Record<string, string>` could not.
 
 ## 44. Escape sequences in string literals: `\0`
 
@@ -1887,7 +1893,10 @@ tab; `'\''`, a quote inside single quotes; and `'\0'`, the **NUL byte** — char
 zero, the byte C uses to end a string, and so the one byte a file name can never contain.
 That last fact is why `git diff -z` (plan §5) separates its fields with it, and why
 `parseNameStatus` can cut on it and trust every piece to be a whole path. (A backslash
-meant as itself is doubled, `'\\'`; no string in this codebase needs one yet.)
+meant as itself is doubled, `'\\'`: first in a test title of `test/git/changes.git.test.ts`
+(`with\\ttab.bin`, so the title shows `\t` as two characters rather than a tab), then in `src/`
+the `'^spice\\.forge\\.'` of `core/forge.ts` — a regular expression handed to git as a string,
+so its `\.` needs the backslash written twice — and the `"'\\''"` of `core/shell.ts`, §23.)
 The spellings are bash's `$'\n'`, `$'\t'`, `$'\0'` — with one difference: bash cannot
 *hold* a NUL in a variable (which is why shell scripts reach for `xargs -0` and
 `tr '\0' '\n'`), while a JavaScript string holds it like any other character:
@@ -1953,7 +1962,7 @@ shows the message under the layer. Because a `throw` is how an `async` function'
 rejects (§7), the test for it is a plain `expect(() => parseNameStatus(output)).toThrow(...)`
 on the synchronous function and `rejects` on the asynchronous one.
 
-## 46. A cache: a Map keyed by two values joined into one string, and `clear`
+## 46. A cache: a Map keyed by two values joined into one string, `clear` and `delete`
 
 *First seen in `src/vscode/tree.ts` (`StackTreeProvider.filesByCommitPair`, `filesForLayer`,
 `refresh`).*
@@ -2147,7 +2156,7 @@ expression" here means the whole `condition ? a : b`. It is unrelated to *condit
 (`T extends U ? X : Y`), a type-level construct the style rules (plan §11.1) keep out of this
 codebase.
 
-## 49. `Pick<T, K>`: some of another type's fields
+## 49. `Pick<T, K>`: some of another type's fields — and `Extract` / `Exclude` for a union's members
 
 *First seen in `src/core/uri.ts` (`StackDiffQuery`).*
 
@@ -2707,9 +2716,9 @@ what guarantees `--forge` is only ever asked about a kind v1 serves (§45). It w
 without the narrowing — the argument list takes any string — so this is the compiler following
 the logic, not enforcing it.
 
-`src/core/readinessFix.ts` (M5, item 19a) adds three more unions — `TrunkBranch` (four answers to
-"which local branch is the trunk"), `Fix` (what a button runs: a terminal command, a git command,
-or a web page) and `Offer` — and two patterns. A value that is either *something* or *nothing* is
+`src/core/readinessFix.ts` (M5, item 19a) adds two more unions — `TrunkBranch` (four answers to
+"which local branch is the trunk") and `Fix` (what a button runs: a terminal command, some `git
+config` lines, or a web page) — and two patterns. A value that is either *something* or *nothing* is
 a nullable field, not a member: `Offer.fix` is `OfferedFix | null`, because "no button" carries
 no data of its own. And completeness without a `switch`: `offerFor` takes `NotReady` (§49) and
 tests `readiness.kind` against eight values, each `if` returning, so after the eighth the
@@ -2935,7 +2944,7 @@ and the Refresh button; `{ dispose: () => refreshSoon.cancel() }` on `context.su
 is an object literal standing in for a `Disposable` (§9: anything with a `dispose` method
 fits).
 
-## 65. Faking the clock in a test: `vi.useFakeTimers` and `vi.advanceTimersByTime`
+## 65. Faking the clock in a test: `vi.useFakeTimers` and `vi.advanceTimersByTime` (and its `Async` form)
 
 *First seen in `test/unit/debounce.test.ts`.*
 
@@ -3147,6 +3156,9 @@ Plan §11.1 asks for the idiomatic spelling once the construct has its section; 
 
 ```ts
 export async function waitUntil(check: () => Promise<boolean>, timing: PollTiming, signal?: AbortSignal): Promise<PollOutcome> {
+  if (!Number.isFinite(timing.intervalMs) || timing.intervalMs <= 0) {
+    throw new Error(`waitUntil: intervalMs must be a positive, finite number of milliseconds, got ${timing.intervalMs}`);
+  }
   let waited = 0;
   while (waited < timing.timeoutMs) {
     await sleep(timing.intervalMs, signal);
@@ -3182,7 +3194,8 @@ Stopping work that runs in the background takes two objects, the same pair in No
 browser. An **`AbortController`** is kept by whoever may want to stop the work; its `signal`, an
 **`AbortSignal`**, is handed to the work. `controller.abort()` sets `signal.aborted` to `true` —
 once, for good — and fires an `abort` event on the signal. The work can look at `signal.aborted`
-when it suits it, or subscribe to the event to be told at once; `waitUntil` does both. (In shell
+when it suits it, or subscribe to the event to be told at once: `waitUntil` reads `aborted`
+between questions, and its `sleep` subscribes. (In shell
 terms the controller is the `kill` and the signal the `trap`.) Node's own functions take a signal
 the same way — `execFile(…, { signal })`, `fetch(url, { signal })` — which is why plan §7.5 wrote
 one into the poll's signature, and why the parameter is optional (`?`, §11): a caller that never
@@ -3207,8 +3220,10 @@ each sleep that left its listener on it would add one more.
 `finish` mentions `timer` one line before `timer` exists. A `const` cannot be *read* before its
 line has run — that is an error at run time — but a function written earlier may name it, as long
 as the function is not *called* until after. `finish` is only called by the timer, or by an
-abort, and neither can happen while `sleep` is still running: JavaScript does one thing at a
-time, and an event waits until the function running now has returned.
+abort, and neither can happen while `sleep` is still running: a timer's callback waits until the
+code running now has finished (JavaScript does one thing at a time), and `abort()` — which runs
+its listeners at once, inside the call — can only be called by other code, which cannot run until
+`sleep` has returned.
 
 **Why the global `setTimeout`.** Node also has `node:timers/promises`, whose `setTimeout(ms,
 undefined, { signal })` is a ready-made abortable sleep. It is not used, because Vitest's fake
@@ -3217,7 +3232,9 @@ polling in milliseconds and counts every question, and a sleep imported from els
 wait in real time.
 
 **A loop counted in milliseconds.** `waited += timing.intervalMs` rather than reading the clock
-(`Date.now() - started`): exact under fake timers, and a laptop that sleeps through the wait
-does not wake up to find it used up — the user may still be in the middle of the login. The
-`while` (§38) asks before it sleeps whether there is time left, so a timeout shorter than one
-interval still asks once.
+(`Date.now() - started`): a laptop that sleeps through the wait does not wake up to find it used
+up — the user may still be in the middle of the login (the test moves the fake clock an hour,
+`vi.setSystemTime`, to pin it). The `while` (§38) asks before it sleeps whether there is time
+left, so a timeout shorter than one interval still asks once. An interval of zero or less would
+never add up to the timeout and would ask without pause, so `waitUntil` refuses one — and `NaN`
+or `Infinity` — before it asks anything (`Number.isFinite`, §41).

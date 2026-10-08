@@ -7,8 +7,8 @@
  *
  * Layer: test, git integration (plan §9.1 layer 2; Vitest, real git in a throwaway directory,
  * no git-spice, no VS Code). Depends on: src/core/readinessFix.ts, src/core/git.ts,
- * test/helpers/fixture.ts. Plan: §7.13.1 (the init offer's `--trunk`), §8 E59, §10.1 item 19a,
- * §13.2 D57.
+ * test/helpers/fixture.ts. Depended on by: nothing. Plan: §7.13.1 (the init offer's `--trunk`),
+ * §8 E59, §10.1 item 19a, §13.2 D57.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -63,6 +63,7 @@ describe('trunkBranchFor (real git)', () => {
   it('is not-a-branch for a tag', async () => {
     // arrange
     fixture.git(['tag', 'v1', 'main']);
+    // see primer §18 (try / finally: the tag goes again even if the assertion fails)
     try {
       // act
       const answer = await trunkBranchFor(git, fixture.dir, 'v1');
@@ -97,6 +98,13 @@ describe('trunkBranchFor (real git)', () => {
     } finally {
       fixture.git(['branch', '-D', 'origin/main']);
     }
+  });
+
+  it('answers not-a-branch for a trunk that looks like an option (`--all`)', async () => {
+    // git refuses `--all` under `--verify` with or without `--end-of-options` (exit 1, checked on
+    // git 2.50), so this cannot show `--end-of-options` at work — it is defence in depth, pinned
+    // by the exact arguments test/unit/readinessFix.test.ts expects. What this pins is the answer.
+    expect(await trunkBranchFor(git, fixture.dir, '--all')).toStrictEqual({ kind: 'not-a-branch', trunk: '--all' });
   });
 
   it('is not-a-branch for a name git does not know', async () => {

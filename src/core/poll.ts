@@ -37,18 +37,25 @@ export type PollOutcome = 'done' | 'timeout' | 'aborted';
  *
  * Three rules, each pinned by a test. It never asks before the first interval: the caller has
  * only just started the fix, and the probe that led to it has just run. Time is counted in
- * intervals waited — `waited += intervalMs` — never read from the clock: the answer to "how
- * long have we waited" is then exact under fake timers, and a machine that sleeps for an hour
- * with VS Code open wakes up with the same number of questions left, not none (the user may
- * still be in the middle of the login). And an abort is noticed between questions — a sleep in
- * progress is cut short (`sleep` below) — but a question already being asked is answered first,
- * and a yes counts.
+ * intervals waited — `waited += intervalMs` — never read from the clock, so a machine that sleeps
+ * for an hour with VS Code open wakes up with the same number of questions left, not none (the
+ * user may still be in the middle of the login). And an abort is noticed between questions — a
+ * sleep in progress is cut short (`sleep` below) — but a question already being asked is answered
+ * first, and a yes counts. Because only the sleeps are counted, the whole wait runs a little
+ * longer than `timeoutMs`: each question's own time comes on top (a probe is about 100 ms).
  *
- * It rejects only when `check` rejects: a probe that cannot run git (E17) is not something
- * waiting longer would fix, and the caller already reports such a failure.
+ * It rejects when `check` rejects — a probe that cannot run git (E17) is not something waiting
+ * longer would fix, and the caller already reports such a failure — and, before asking
+ * anything, for an interval that is not a positive, finite number of milliseconds: zero or less
+ * would ask without pause (each question spawns programs) and never reach the timeout.
  */
-// see primer §71 (AbortSignal, and a loop counted in milliseconds), §38 (while loops) and §6 (async / await)
+// see primer §71 (AbortSignal, and a loop counted in milliseconds), §38 (while loops), §6 (async / await),
+// §33 (function types: `check`), §11 (the optional `signal?`) and §41 (`Number.isFinite`)
 export async function waitUntil(check: () => Promise<boolean>, timing: PollTiming, signal?: AbortSignal): Promise<PollOutcome> {
+  if (!Number.isFinite(timing.intervalMs) || timing.intervalMs <= 0) {
+    // see primer §18 (throw), §12 (template strings): in an `async` function a throw is a rejection
+    throw new Error(`waitUntil: intervalMs must be a positive, finite number of milliseconds, got ${timing.intervalMs}`);
+  }
   let waited = 0;
   while (waited < timing.timeoutMs) {
     await sleep(timing.intervalMs, signal);
@@ -79,6 +86,7 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     }
     // `finish` is written before `timer` exists, but only ever runs after: from the timer
     // itself, or from an abort that can only come once this function has returned.
+    // see primer §5 (arrow functions)
     const finish = (): void => {
       clearTimeout(timer);
       signal?.removeEventListener('abort', finish);

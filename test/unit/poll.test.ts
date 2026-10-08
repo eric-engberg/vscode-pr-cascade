@@ -9,7 +9,7 @@
  * §9.4 (`waitForLogin` … "stops polling when aborted"), §10.1 item 19a, §13.2 D57.
  */
 
-// see primer §1 (import / export)
+// see primer §1 (import / export) and §9 (`import type`)
 import { getEventListeners } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_POLL, sleep, waitUntil } from '../../src/core/poll';
@@ -25,7 +25,7 @@ interface ScriptedCheck {
   readonly calls: number;
 }
 
-// see primer §61 (a getter in an object literal) and §30 (`??`)
+// see primer §61 (a getter in an object literal), §30 (`??`), §5 (arrow functions) and §6 (`async`)
 function scripted(answers: boolean[]): ScriptedCheck {
   let calls = 0;
   return {
@@ -65,6 +65,7 @@ afterEach(() => {
 // see primer §5 (arrow functions) and §6 (async / await)
 describe('waitUntil (plan §7.5 step 3)', () => {
   it('waits every 3 s for up to 5 min by default', () => {
+    // see primer §27 (`_` between digits: `3_000` is 3000)
     expect(DEFAULT_POLL).toStrictEqual({ intervalMs: 3_000, timeoutMs: 300_000 });
   });
 
@@ -142,6 +143,34 @@ describe('waitUntil (plan §7.5 step 3)', () => {
     expect(answers.calls).toBe(1);
   });
 
+  it('counts the wait in intervals, not by the clock: a laptop that slept for an hour still has its questions left', async () => {
+    // arrange
+    const answers = scripted([false]);
+    const wait = watch(waitUntil(answers.check, DEFAULT_POLL));
+
+    // act: the clock jumps an hour (the lid was closed), then one interval passes
+    vi.setSystemTime(Date.now() + 3_600_000);
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    // assert: one question so far, and still waiting — not timed out
+    expect({ outcome: wait.outcome, calls: answers.calls }).toStrictEqual({ outcome: 'pending', calls: 1 });
+  });
+
+  // see primer §25 (arrays) and §22 (for ... of): one test per bad interval
+  for (const intervalMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    it(`refuses an interval of ${intervalMs} ms, which would ask without pause or never ask at all`, async () => {
+      // arrange
+      const answers = scripted([false]);
+
+      // act
+      const wait = waitUntil(answers.check, { intervalMs, timeoutMs: 1_000 });
+
+      // assert: rejected before any question
+      await expect(wait).rejects.toThrow(`waitUntil: intervalMs must be a positive, finite number of milliseconds, got ${intervalMs}`);
+      expect(answers.calls).toBe(0);
+    });
+  }
+
   it('stops at once, asking nothing, when the signal was aborted before it began', async () => {
     // arrange
     const answers = scripted([true]);
@@ -149,11 +178,12 @@ describe('waitUntil (plan §7.5 step 3)', () => {
     const controller = new AbortController();
     controller.abort();
 
-    // act: no time passes at all
-    const outcome = await waitUntil(answers.check, DEFAULT_POLL, controller.signal);
+    // act: no time passes — only the callbacks already due run
+    const wait = watch(waitUntil(answers.check, DEFAULT_POLL, controller.signal));
+    await vi.advanceTimersByTimeAsync(0);
 
     // assert
-    expect(outcome).toBe('aborted');
+    expect(wait.outcome).toBe('aborted');
     expect(answers.calls).toBe(0);
   });
 
@@ -277,22 +307,31 @@ describe('sleep', () => {
     controller.abort();
 
     // act
-    await sleep(60_000, controller.signal);
+    let woke = false;
+    void sleep(60_000, controller.signal).then(() => {
+      woke = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
 
     // assert
+    expect(woke).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
   });
 
   it('clears its timer when the signal aborts first', async () => {
     // arrange
     const controller = new AbortController();
-    const slept = sleep(60_000, controller.signal);
+    let woke = false;
+    void sleep(60_000, controller.signal).then(() => {
+      woke = true;
+    });
 
     // act
     controller.abort();
-    await slept;
+    await vi.advanceTimersByTimeAsync(0);
 
-    // assert: the fake clock holds no timer — clearTimeout ran
+    // assert: woken with no time passed, and the fake clock holds no timer — clearTimeout ran
+    expect(woke).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
   });
 });

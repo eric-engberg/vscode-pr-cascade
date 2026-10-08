@@ -23,6 +23,7 @@ const VERSION_REQUEST: CommandRequest = {
   args: ['--no-prompt', '--version'],
   cwd: '/work/app',
   env: { NO_COLOR: '1' },
+  // see primer §27 (`_` between digits: `15_000` is 15000)
   timeoutMs: 15_000,
 };
 
