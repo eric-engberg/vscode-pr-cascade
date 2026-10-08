@@ -387,7 +387,8 @@ function unrecognizedOffer(forge: Forge, config: ForgeConfig, repo: string): Off
     { key: apiKey, value: apiUrl },
   ];
   let reason = `git-spice will not match ${host} as ${name} until ${key} names it.`;
-  if (configured !== undefined && configured.host === '') {
+  // see primer §70 (`?.`: an unset key is `undefined`, and `undefined === ''` is false)
+  if (configured?.host === '') {
     reason = `${key} is not a URL, so git-spice matches nothing as ${name}.`;
   } else if (configured !== undefined) {
     reason = `${key} names ${addressText(configured)}, so git-spice no longer matches ${host} as ${name}.`;
