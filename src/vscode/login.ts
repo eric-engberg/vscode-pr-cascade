@@ -207,63 +207,78 @@ export class ReadinessFlows implements Disposable {
    * action runs outside any flight: it is not a fix, and a slow push must not block a second
    * repository's login.
    */
-  // see primer §6 (async / await), §29 (a counted for loop), §22 (`continue`), §59 (narrowing on
-  // `kind`), §18 (try / finally) and §12 (template strings)
+  // see primer §6 (async / await), §29 (a counted for loop) and §12 (template strings)
   async ensureReady(request: ReadyRequest): Promise<ReadyOutcome> {
     for (let pass = 0; pass < MAX_STEPS; pass += 1) {
-      if (this.disposed) {
-        return 'gave-up';
+      const outcome = await this.onePass(request);
+      if (outcome !== 'next') {
+        return outcome;
       }
-      const answer = await request.probe();
-      if (this.disposed) {
-        return 'gave-up';
-      }
-      if (answer.kind === 'ready') {
-        await request.action(answer);
-        return 'acted';
-      }
-      const offer = offerFor(answer, await this.factsFor(request, answer));
-      if (offer.fix === null) {
-        // Shown and not awaited: the promise settles only when the notification is closed, and
-        // nothing here waits for that (the rule of vscode/commands.ts's messages).
-        void this.deps.host.prompt(offer.severity, offer.message, []);
-        return 'not-ready';
-      }
-      const chosen = await this.deps.host.prompt(offer.severity, offer.message, [offer.fix.button]);
-      if (this.disposed) {
-        return 'gave-up';
-      }
-      if (chosen === undefined) {
-        return 'not-ready';
-      }
-      // The click claims the repository — checked and set with no `await` in between, so two
-      // clicks cannot both get past here.
-      const running = this.flights.get(request.root);
-      if (running !== undefined) {
-        this.bringForward(running);
-        return 'in-flight';
-      }
-      const flight: Flight = { terminal: undefined, url: undefined, wait: undefined };
-      this.flights.set(request.root, flight);
-      // Declared before the `try` so the lines after the `finally` can read it; assigned inside.
-      let result: FixResult;
-      try {
-        result = await this.fixIfStillNeeded(request, answer, offer.fix.action, flight);
-      } finally {
-        this.flights.delete(request.root);
-      }
-      if (this.disposed || result === 'failed') {
-        return 'gave-up';
-      }
-      if (result === 'changed') {
-        // The step was done some other way while the notification was open: offer afresh.
-        continue;
-      }
-      this.refresh();
-      void this.deps.host.prompt('information', offer.fix.done, []);
     }
     this.say(`${request.root}: readiness did not settle after ${MAX_STEPS} passes`);
     return 'gave-up';
+  }
+
+  /**
+   * One pass of `ensureReady`: probe, offer, and on the click the fix — `'next'` when the fix
+   * took, or the step had changed by the time of the click, so another pass is wanted; else how
+   * the question ended. Its own method so that `ensureReady` reads as the loop and its guard (and
+   * so each stays simple enough for a reader — and for SonarCloud's complexity rule, which asked
+   * for the split).
+   */
+  // see primer §59 (narrowing on `kind`), §10 (a union of exact strings, one more beside ReadyOutcome's)
+  // and §18 (try / finally)
+  private async onePass(request: ReadyRequest): Promise<ReadyOutcome | 'next'> {
+    if (this.disposed) {
+      return 'gave-up';
+    }
+    const answer = await request.probe();
+    if (this.disposed) {
+      return 'gave-up';
+    }
+    if (answer.kind === 'ready') {
+      await request.action(answer);
+      return 'acted';
+    }
+    const offer = offerFor(answer, await this.factsFor(request, answer));
+    if (offer.fix === null) {
+      // Shown and not awaited: the promise settles only when the notification is closed, and
+      // nothing here waits for that (the rule of vscode/commands.ts's messages).
+      void this.deps.host.prompt(offer.severity, offer.message, []);
+      return 'not-ready';
+    }
+    const chosen = await this.deps.host.prompt(offer.severity, offer.message, [offer.fix.button]);
+    if (this.disposed) {
+      return 'gave-up';
+    }
+    if (chosen === undefined) {
+      return 'not-ready';
+    }
+    // The click claims the repository — checked and set with no `await` in between, so two
+    // clicks cannot both get past here.
+    const running = this.flights.get(request.root);
+    if (running !== undefined) {
+      this.bringForward(running);
+      return 'in-flight';
+    }
+    const flight: Flight = { terminal: undefined, url: undefined, wait: undefined };
+    this.flights.set(request.root, flight);
+    // Declared before the `try` so the lines after the `finally` can read it; assigned inside.
+    let result: FixResult;
+    try {
+      result = await this.fixIfStillNeeded(request, answer, offer.fix.action, flight);
+    } finally {
+      this.flights.delete(request.root);
+    }
+    if (this.disposed || result === 'failed') {
+      return 'gave-up';
+    }
+    if (result === 'passed') {
+      this.refresh();
+      void this.deps.host.prompt('information', offer.fix.done, []);
+    }
+    // 'changed': the step was done some other way while the notification was open — offer afresh.
+    return 'next';
   }
 
   /** Called by VS Code when the window closes (context.subscriptions): every wait stops at once. */

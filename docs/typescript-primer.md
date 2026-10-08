@@ -1070,7 +1070,9 @@ Which of these change the array they are called on: `push`, `pop`, `shift` (§38
 (§26) do; `filter`, `map`, `slice`, `join`, `includes`, `find` and `flatMap` never do — they
 return something new and leave the original as it was, the same rule as for strings in §23.
 
-Three more from M5 item 19b, none of them changing the array: `list.indexOf(value)` — the
+`push` takes any number of values and adds them in order: `context.subscriptions.push(flows,
+vscode.commands.registerCommand(…))` in `src/extension.ts` (M5, item 19b) adds two. Three more
+from M5 item 19b, none of them changing the array: `list.indexOf(value)` — the
 position of the first element equal to `value`, or `-1` (the string method of the same name,
 §23, does the same for text); `chooseRepository` in `src/vscode/login.ts` finds the root that
 goes with the label picked from it. And `list.every(fn)` / `list.some(fn)` — true when `fn` is

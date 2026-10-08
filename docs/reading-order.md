@@ -565,7 +565,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
     repository, claimed at the click and never while a notification is open — then
     `ReadinessHost` (everything asked of VS Code, as one object: notifications with buttons,
     the quick pick, the browser, terminals, the disk — primer §73), `ReadyRequest` and
-    `ReadyOutcome`, then `ReadinessFlows.ensureReady`: the loop of probe → offer (item 40) →
+    `ReadyOutcome`, then `ReadinessFlows.ensureReady` and its `onePass`: the loop of probe → offer (item 40) →
     click → a look again (`fixIfStillNeeded`: the step may have been done meanwhile, and a second
     `gs repo init` would replace the trunk) → fix → wait → refresh → done line, until ready and
     the action runs. `runFix` for the three kinds of fix (a page the user will not let VS Code

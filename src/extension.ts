@@ -252,8 +252,11 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
   // disposed with the window, which stops every wait at once. "PR Cascade: Set Up git-spice" in
   // the Command Palette is its first caller (D58); items 20–21 will gate their actions on it.
   const flows = new ReadinessFlows(readinessDeps, refresh, (line) => output.appendLine(line));
-  context.subscriptions.push(flows);
-  context.subscriptions.push(vscode.commands.registerCommand('prCascade.setUpGitSpice', () => setUpGitSpice(gitExtension, flows)));
+  // `push` takes several at once (primer §25): the flows, and the command that runs them.
+  context.subscriptions.push(
+    flows,
+    vscode.commands.registerCommand('prCascade.setUpGitSpice', () => setUpGitSpice(gitExtension, flows)),
+  );
 
   // With the Stack view hidden at startup — a collapsed Source Control pane — VS Code asks
   // for no rows, and the handshake with the Git extension starts only on the first load
@@ -459,10 +462,11 @@ async function loadFileAtRef(
 let backend: { key: string; commands: CommandRunner; instance: GitSpiceBackend } | undefined;
 
 /** The backend for this git and this setting — the one kept, or a new one when either, or the runner, changed. */
-// see primer §44 (`\0` as a separator) and §12 (template strings)
+// see primer §44 (`\0` as a separator), §12 (template strings) and §70 (`?.`: none built yet reads
+// `undefined`, which is never the key — and once that test is false, `backend` is there)
 function backendFor(git: RealGitRunner, executable: string, gsPath: string): GitSpiceBackend {
   const key = `${executable}\0${gsPath}`;
-  if (backend === undefined || backend.key !== key || backend.commands !== readinessDeps.commands) {
+  if (backend?.key !== key || backend.commands !== readinessDeps.commands) {
     backend = { key, commands: readinessDeps.commands, instance: new GitSpiceBackend(git, readinessDeps.commands, gsPath) };
   }
   return backend.instance;
