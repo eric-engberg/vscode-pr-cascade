@@ -7,8 +7,9 @@
  *
  * Layer: core (no VS Code imports; plan §4.1). Depends on: core/backend.ts (the contract and
  * the answer), core/command.ts (how programs are run), core/forge.ts (detectForge),
- * core/model.ts (GitRunner). Depended on by: src/extension.ts and src/vscode/login.ts (item 19,
- * which builds one per window and turns each failing member into its one-click fix).
+ * core/model.ts (GitRunner). Depended on by: src/extension.ts and src/vscode/login.ts (item 19b,
+ * which builds one per window, calls `forget` before the setup command's look, and turns each
+ * failing member into its one-click fix — core/readinessFix.ts, item 19a).
  * Plan: §4.4, §7.6, §7.13, §7.13.1, §7.13.3, §8 E17/E22/E55/E59/E60/E62/E67/E70/E75,
  * §13.1 (`gs` is Ghostscript on a Homebrew Mac), §13.2 D56, §13.4 (git-spice 0.31.2 facts).
  */
@@ -189,6 +190,20 @@ export class GitSpiceBackend implements StackBackend {
       this.readyByRepo.set(key, answer);
     }
     return answer;
+  }
+
+  /**
+   * Drops the remembered `ready` for `root` and `remote`, so the next `readiness` probes again.
+   * The memo is right for an action gated on readiness — five programs per click would be
+   * wasted on a repository that was ready a minute ago — but wrong when the user asks by hand
+   * (item 19b's "Set Up git-spice"), who may just have run `gs auth logout` or `gs repo init
+   * --reset` in a terminal: that command forgets first (D57). Items 20–21 will do the same
+   * after an operation fails on login or init, then ask again. Not part of `StackBackend`
+   * (core/backend.ts) until something other than this class needs it (D55).
+   */
+  // see primer §46 (a Map as a cache: `delete`)
+  forget(root: string, remote: string): void {
+    this.readyByRepo.delete(`${root}\0${remote}`);
   }
 }
 

@@ -631,6 +631,52 @@ describe('GitSpiceBackend.readiness', () => {
       expect(after.kind).toBe('ready');
     });
 
+    it('forgets a remembered ready when told to — the next question probes again, and finds a logout', async () => {
+      // arrange: ready and remembered; then the user runs `gs auth logout` in a terminal
+      const results = new Map<string, CommandResult>([
+        [versionKey('git-spice'), exited(0, BANNER)],
+        [authKey('git-spice', 'github'), LOGGED_IN],
+      ]);
+      const commands = new FakeCommandRunner(results);
+      const backend = new GitSpiceBackend(gitFor(), commands);
+      const remembered = await backend.readiness(ROOT, 'origin');
+      results.set(authKey('git-spice', 'github'), NOT_LOGGED_IN);
+
+      // act: what the setup command does before it asks (item 19b, D57)
+      backend.forget(ROOT, 'origin');
+      const after = await backend.readiness(ROOT, 'origin');
+
+      // assert: the memo would have said ready; asked again, the probe ran all its programs again
+      expect(remembered.kind).toBe('ready');
+      expect(after.kind).toBe('not-logged-in');
+      expect(commands.calls.length).toBe(4);
+    });
+
+    it('forgets only the repository and remote it is told — another remote stays remembered', async () => {
+      // arrange
+      const git = new FakeGitRunner(
+        new Map<string, string | Error>([
+          [REF_KEY, SHA],
+          [GET_URL_KEY, 'git@github.com:org/repo.git\n'],
+          ['remote get-url upstream', 'git@github.com:org/upstream.git\n'],
+          [CONFIG_KEY, MISSING],
+        ]),
+      );
+      const commands = commandsFor();
+      const backend = new GitSpiceBackend(git, commands);
+      const origin = await backend.readiness(ROOT, 'origin');
+      await backend.readiness(ROOT, 'upstream');
+      const programsRun = commands.calls.length;
+
+      // act
+      backend.forget(ROOT, 'upstream');
+      const originAgain = await backend.readiness(ROOT, 'origin');
+
+      // assert: origin answered from memory — the same object, nothing run
+      expect(originAgain).toBe(origin);
+      expect(commands.calls.length).toBe(programsRun);
+    });
+
     it('treats another remote of the same repository as a new question', async () => {
       // arrange
       const git = new FakeGitRunner(

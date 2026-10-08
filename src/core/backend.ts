@@ -4,10 +4,11 @@
  * test.
  *
  * Layer: core (plan §4.1). Depends on: core/forge.ts (Forge, ForgeConfig). Depended on by:
- * core/backends/gitspice.ts (item 18, the first implementation), src/vscode/login.ts and
- * src/extension.ts (items 19–20). Plan: §4.4 (the target shape — this file declares what the
- * next PR implements and grows with each one, D55), §7.13.1 (the probe), §7.13.3 (what each
- * member runs), §8 E21/E25/E55/E59/E60/E62/E62b/E67/E70/E75.
+ * core/backends/gitspice.ts (item 18, the first implementation), core/readinessFix.ts (item 19a:
+ * `Ready`, `NotReady`), src/vscode/login.ts and src/extension.ts (items 19b–20). Plan: §4.4 (the
+ * target shape — this file declares what the next PR implements and grows with each one, D55),
+ * §7.13.1 (the probe), §7.13.3 (what each member runs), §8 E21/E25/E55/E59/E60/E62/E62b/E67/
+ * E70/E75.
  */
 
 // see primer §1 (import / export) and §9 (`import type`: a types-only module imports types only)
@@ -87,6 +88,21 @@ export type Readiness =
    * only CR creation waits for gh.
    */
   | { readonly kind: 'gh-missing'; readonly forge: Forge; readonly missing: readonly ('gh' | 'gh-stack')[]; readonly ghVersion: string | null; readonly ghMinimum: string };
+
+/**
+ * The `ready` member alone — what an action gated on readiness receives once every step passed
+ * (item 19b), and what core/readinessFix.ts's `readyMessage` words. Taken out of the union by
+ * its `kind` rather than written again, so a field added to `ready` above is a field here too.
+ */
+// see primer §49 (`Extract` and `Exclude`: members of a union picked out, or left out, by shape)
+export type Ready = Extract<Readiness, { kind: 'ready' }>;
+
+/**
+ * Every member but `ready`: the answers that have an offer (core/readinessFix.ts, `offerFor`). A
+ * function taking `NotReady` cannot be handed `ready` by mistake, and a `switch` over its `kind`
+ * is complete without a case for it.
+ */
+export type NotReady = Exclude<Readiness, Ready>;
 
 /**
  * Everything that changes a stack or talks to a forge about one goes through this (plan

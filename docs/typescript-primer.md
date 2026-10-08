@@ -520,6 +520,13 @@ code, which the code reads as `timedOut`. And it keeps what `execFile` *returns*
 `ChildProcess` handle, which `RealGitRunner` ignores — to close the program's input at once:
 `child.stdin?.end()` (§70 for the `?.`).
 
+Two smaller uses arrive with `src/core/poll.ts` (M5, item 19a). `sleep` has nothing that can
+fail, so its function takes only `resolve` and never rejects (§71). And `test/unit/poll.test.ts`
+builds a question that is answered *later*, by the test: the function given to `new Promise`
+stores `resolve` in a variable outside it (`answer = resolve`), and the test calls `answer(true)`
+when it wants the question answered — the one way to hold a Promise open on purpose and settle it
+at a moment of the test's choosing.
+
 ## 16. Object literals: shorthand and spread
 
 *First seen in `src/core/git.ts` (`RealGitRunner.run`); shorthand keys also in
@@ -899,6 +906,13 @@ Strings carry their own methods, called with a dot like a method on any object:
 - `includes(text)` — true when the string *contains* that text anywhere (the array method of the
   same name, §25, asks the same of a list). `text.includes('://')` is how `parseRemoteUrl` tells
   a URL with a scheme from git's scp-like `host:path` form.
+- `replaceAll(find, replacement)` — a copy with every occurrence of `find` replaced (`replace`,
+  without `All`, changes only the first — `sed 's/a/b/'` against `sed 's/a/b/g'`).
+  `shellQuote` in `src/core/shell.ts` (M5, item 19a) writes each single quote in a word the way a
+  shell reads one inside single quotes: `word.replaceAll("'", "'\\''")`. The first argument is
+  a string in double quotes holding one single quote; the second is the four characters `'\''`,
+  with the backslash written twice because inside a string literal a backslash starts an
+  escape (§44) — `\\` is how a string holds one.
 
 None of them change the string they are called on — a string, once made, never changes;
 each method returns a new one. That is why the code writes `printedRoot =
@@ -1095,6 +1109,11 @@ three groups a regular expression captured (§20): `Number(match[1])`. The group
 digits and nothing else, so unlike the `rev-list` case above there is no `NaN` to guard
 against. The three numbers are then compared *as numbers* in `isAtLeast` — `0.9.99` is below
 `0.31.0`, where comparing the two as text would put it after.
+
+A number written in the code may have underscores between its digits, which the compiler drops:
+`15_000` is `15000`. They are there for the reader, as `15,000` would be in prose (a comma means
+something else in code). First used for `PROBE_TIMEOUT_MS` in `src/core/backends/gitspice.ts`
+(M5, item 18), and for `DEFAULT_POLL`'s `3_000` and `300_000` in `src/core/poll.ts` (item 19a).
 
 ## 28. The Sync variants of Node's functions
 
@@ -1843,6 +1862,13 @@ what `process.env` is spread together with (§16). An `interface` with three nam
 would have said *which* variables, but an interface is not accepted where a `Record` is
 asked for, and the runner must take gh's variables (item 23) as readily as git-spice's.
 
+`K` can also be a union of exact strings (§10), and then the `Record` is a lookup table the
+compiler checks for completeness: `FORGE_NAMES: Record<ForgeKind, string>` in
+`src/core/readinessFix.ts` (M5, item 19a) must have one entry for each of the seven forge kinds
+— a kind added to `ForgeKind` (core/forge.ts) is a compile error there until it has a name — and
+`TOKEN_VARIABLE: Record<'github' | 'gitlab', string>` exactly the two forges v1 serves. Reading
+it, `FORGE_NAMES[forge.kind]`, needs no `undefined` check, since every key is guaranteed.
+
 ## 44. Escape sequences in string literals: `\0`
 
 *First seen in `src/core/changes.ts` (`FIELD_SEPARATOR`); throughout
@@ -1989,8 +2015,11 @@ The second cache is `readyByRepo` in `src/core/backends/gitspice.ts` (M5, item 1
 from `root` + `remote` (§44 for the separator) to the `Readiness` answer, consulted before the
 probe runs and written only when the answer is `ready`. A failing answer is never stored —
 the plan's "re-run on refresh after failure" — so the next refresh asks again and notices an
-install or a login that happened meanwhile. Nothing is ever cleared: a `ready` holds for the
-backend's lifetime, and a changed setting means a new backend.
+install or a login that happened meanwhile. A `ready` holds for the backend's lifetime — a
+changed setting means a new backend — except when `forget(root, remote)` (item 19a) removes that
+one entry with **`delete(key)`**, `Map`'s third writing method beside `set` and `clear`: the
+setup command asks for a fresh look before it probes (the user may just have logged out in a
+terminal), and `delete` of a key that is not there does nothing, so nothing has to check first.
 
 ## 47. Parameter properties
 
@@ -2160,6 +2189,15 @@ spreads (§16) the pair in beside them. `classifyHost` returns `Pick<Forge, 'kin
 port) and the configuration, not the path, while the other four come from the URL — and `detectForge` spreads both halves into one `Forge`. Writing
 either two-field type out by hand would say the same thing twice; `Pick` says "these two of
 that type's fields" and follows any rename.
+
+**`Extract<T, U>`** and **`Exclude<T, U>`** (first used in `src/core/backend.ts`, M5 item 19a)
+do for a *union* (§10) what `Pick` does for an object's fields. `Extract<Readiness, { kind:
+'ready' }>` keeps the members of `Readiness` that fit the shape `{ kind: 'ready' }` — the one
+`ready` member, with all of its fields — and `Exclude<Readiness, Ready>` keeps every member *but*
+those. So `Ready` and `NotReady` are the union cut in two along its tag (§59), and both follow
+`Readiness` when a member is added or changed. A function that takes `NotReady` (`offerFor` in
+`src/core/readinessFix.ts`) cannot be handed `ready` — there is no offer for being ready — and
+one that takes `Ready` has every field of the ready member with no narrowing to do.
 
 ## 50. `JSON.stringify` and `JSON.parse`
 
@@ -2669,6 +2707,17 @@ what guarantees `--forge` is only ever asked about a kind v1 serves (§45). It w
 without the narrowing — the argument list takes any string — so this is the compiler following
 the logic, not enforcing it.
 
+`src/core/readinessFix.ts` (M5, item 19a) adds three more unions — `TrunkBranch` (four answers to
+"which local branch is the trunk"), `Fix` (what a button runs: a terminal command, a git command,
+or a web page) and `Offer` — and two patterns. A value that is either *something* or *nothing* is
+a nullable field, not a member: `Offer.fix` is `OfferedFix | null`, because "no button" carries
+no data of its own. And completeness without a `switch`: `offerFor` takes `NotReady` (§49) and
+tests `readiness.kind` against eight values, each `if` returning, so after the eighth the
+compiler has narrowed `readiness` to the one member left, `gh-missing`, and the last line reads
+its `missing`, `ghVersion` and `ghMinimum` with no test at all. A member added to `Readiness`
+later lands in that last line too, which then no longer compiles — those fields are not on the
+new member — and that error is the reminder to write its offer.
+
 ## 60. Another extension's API: `extensions.getExtension`, `activate()`, `exports`, `Thenable`, and a vendored `.d.ts`
 
 *First seen in `src/vscode/gitApi.ts` (`realGitExtensionHost`, `GitExtensionAdapter`) and
@@ -2927,6 +2976,18 @@ specification of "a quiet period counted from the last call", and distinguishes 
 counted from the first. (Vitest's `vi.fn()` spies would also count the calls; a plain
 `let runs = 0` counter says the same with nothing new to learn.)
 
+**`await vi.advanceTimersByTimeAsync(ms)`** (first used in `test/unit/poll.test.ts`, M5 item 19a)
+is the same move for code that `await`s between timers. `waitUntil` (§71) sleeps, then awaits
+`check()`, then sleeps again — and the second sleep's timer does not exist until the first
+sleep's Promise has resolved and the loop has gone round. That happens in a *microtask*: the
+queue of `.then` continuations (§63) JavaScript runs as soon as the code running now returns.
+The plain `advanceTimersByTime` fires the first timer and moves the clock on in one go, before
+any continuation has run, so the clock passes the second deadline with no timer queued for it,
+and the loop seems to stop. The `Async` form lets the continuations run between timers, so a
+five-minute loop of a hundred sleeps plays out exactly as it would in real time; it returns a
+Promise, which the test awaits. **`vi.getTimerCount()`** is how many fake timers are still
+queued — 0 after an abort is the proof that `clearTimeout` ran.
+
 ## 66. The status bar: `window.createStatusBarItem` and `StatusBarItem`
 
 *First seen in `src/extension.ts` (the item is made there) and `src/vscode/statusbar.ts`
@@ -3079,3 +3140,84 @@ It pairs with `??` (§30): `??` supplies a value when something is missing, `?.`
 when something is missing. Use it where "and if it is not there, do nothing" is the whole
 intent, as here; where the missing case needs a message or a different path, write the `if`.
 Plan §11.1 asks for the idiomatic spelling once the construct has its section; this is it.
+
+## 71. A wait that can be stopped: `AbortController`, `AbortSignal`, and a sleep it cuts short
+
+*First seen in `src/core/poll.ts` (`waitUntil`, `sleep`).*
+
+```ts
+export async function waitUntil(check: () => Promise<boolean>, timing: PollTiming, signal?: AbortSignal): Promise<PollOutcome> {
+  let waited = 0;
+  while (waited < timing.timeoutMs) {
+    await sleep(timing.intervalMs, signal);
+    if (signal?.aborted === true) {
+      return 'aborted';
+    }
+    waited += timing.intervalMs;
+    if (await check()) {
+      return 'done';
+    }
+  }
+  return 'timeout';
+}
+
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted === true) {
+      resolve();
+      return;
+    }
+    const finish = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    signal?.addEventListener('abort', finish, { once: true });
+  });
+}
+```
+
+Stopping work that runs in the background takes two objects, the same pair in Node and in a
+browser. An **`AbortController`** is kept by whoever may want to stop the work; its `signal`, an
+**`AbortSignal`**, is handed to the work. `controller.abort()` sets `signal.aborted` to `true` —
+once, for good — and fires an `abort` event on the signal. The work can look at `signal.aborted`
+when it suits it, or subscribe to the event to be told at once; `waitUntil` does both. (In shell
+terms the controller is the `kill` and the signal the `trap`.) Node's own functions take a signal
+the same way — `execFile(…, { signal })`, `fetch(url, { signal })` — which is why plan §7.5 wrote
+one into the poll's signature, and why the parameter is optional (`?`, §11): a caller that never
+needs to stop the wait passes none, and `signal?.aborted === true` (§70) reads "no signal" as
+"not aborted".
+
+**Subscribing.** `signal.addEventListener('abort', finish, { once: true })` is how an
+`AbortSignal` (an *event target*, in the browser's vocabulary that Node adopted) says what §32's
+`event(listener)` says for VS Code's events: run this function when that happens. `{ once: true
+}` removes the listener after it has run once. `removeEventListener('abort', finish)` removes it
+by hand — and needs the very same function object, which is why `finish` is a named `const`
+rather than an arrow written inline in the call. The test checks that nothing is left behind
+with Node's `getEventListeners(signal, 'abort')`.
+
+**The sleep.** A Promise (§15) that a timer (§58) resolves: `setTimeout(finish, ms)` calls
+`finish` after `ms`. Nothing in a sleep can fail, so the function given to `new Promise` takes
+only `resolve`. There are two ways for it to end — the time is up, or the signal aborted — and
+both run `finish`, which undoes the other one (`clearTimeout`, `removeEventListener`) before it
+resolves. The undoing matters: one signal serves a whole wait of up to a hundred sleeps, and
+each sleep that left its listener on it would add one more.
+
+`finish` mentions `timer` one line before `timer` exists. A `const` cannot be *read* before its
+line has run — that is an error at run time — but a function written earlier may name it, as long
+as the function is not *called* until after. `finish` is only called by the timer, or by an
+abort, and neither can happen while `sleep` is still running: JavaScript does one thing at a
+time, and an event waits until the function running now has returned.
+
+**Why the global `setTimeout`.** Node also has `node:timers/promises`, whose `setTimeout(ms,
+undefined, { signal })` is a ready-made abortable sleep. It is not used, because Vitest's fake
+timers (§65) replace the *global* functions: `test/unit/poll.test.ts` plays five minutes of
+polling in milliseconds and counts every question, and a sleep imported from elsewhere would
+wait in real time.
+
+**A loop counted in milliseconds.** `waited += timing.intervalMs` rather than reading the clock
+(`Date.now() - started`): exact under fake timers, and a laptop that sleeps through the wait
+does not wake up to find it used up — the user may still be in the middle of the login. The
+`while` (§38) asks before it sleeps whether there is time left, so a timeout shorter than one
+interval still asks once.
