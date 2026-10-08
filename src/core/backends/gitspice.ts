@@ -20,15 +20,18 @@ import { detectForge } from '../forge';
 import type { GitRunner } from '../model';
 
 /**
- * The names tried, in order, when `prCascade.gsPath` is empty: git-spice's own name first —
- * it is `gs` on every install method but one — then Homebrew's, which renames the binary
- * because Ghostscript owns `gs` on most Macs (plan §13.1). On such a Mac the first name
- * costs one spawn — Ghostscript answers it with its own bare version, which the banner test
- * rejects — on every probe until `ready` is remembered (so once, or once per refresh while a
- * later step fails).
+ * The names tried, in order, when `prCascade.gsPath` is empty. `git-spice` first: it has been
+ * the program's own name since v0.24.0 (2026-02-22), and from v0.25.0 the official packages —
+ * GitHub Releases, Homebrew, the AUR — ship no `gs` at all (git-spice's CHANGELOG), so every
+ * official install new enough to pass the 0.31.0 floor answers to it. Then `gs`, the old name,
+ * which a `go install` build still gets. Asking `git-spice` first also spares a Mac with
+ * Ghostscript the spawn its `gs` would cost on every probe (plan §13.1): Ghostscript answers
+ * `--version` with its own bare version, which the banner test rejects, so it is only ever met
+ * when `git-spice` is not there. (The order was `gs` first until a review of item 19a found the
+ * rename.)
  */
 // see primer §4 (const) and §14 (readonly arrays)
-export const GS_CANDIDATES: readonly string[] = ['gs', 'git-spice'];
+export const GS_CANDIDATES: readonly string[] = ['git-spice', 'gs'];
 
 /**
  * The variables every git-spice call gets on top of the process's own (plan §7.13.1): no

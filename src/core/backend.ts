@@ -33,13 +33,13 @@ import type { Forge, ForgeConfig } from './forge';
 // see primer §59 (tagged unions, incl. `readonly ('gh' | 'gh-stack')[]`: an array of a union) and §14 (readonly)
 export type Readiness =
   /**
-   * Every step passed. `gsPath` is the executable that answered — `gs` is Ghostscript on some
-   * Macs (plan §13.1), so the probe tries `git-spice` too and later commands run whichever
-   * worked. `gsVersion` is the version token of `gs --version`'s banner (`git-spice 0.31.2 …`), for
+   * Every step passed. `gsPath` is the executable that answered — `git-spice`, the program's
+   * name since v0.24, or `gs`, the old name a `go install` build still has (and Ghostscript's on
+   * a Homebrew Mac, plan §13.1) — and later commands run whichever worked. `gsVersion` is the version token of `gs --version`'s banner (`git-spice 0.31.2 …`), for
    * the log.
    */
   | { readonly kind: 'ready'; readonly gsPath: string; readonly gsVersion: string; readonly forge: Forge }
-  /** Step 1, E62: none of the executables answered `--version` as git-spice — `prCascade.gsPath` when set, else `gs` then `git-spice`. `tried` lists them for the message, Ghostscript's `gs` included. */
+  /** Step 1, E62: none of the executables answered `--version` as git-spice — `prCascade.gsPath` when set, else `git-spice` then `gs`. `tried` lists them for the message, Ghostscript's `gs` included. */
   | { readonly kind: 'gs-missing'; readonly tried: readonly string[] }
   /** Step 1: the `--version` banner's token `found` (`0.30.0`; `dev` for a build with no number) is below — or cannot be read against — the floor `minimum` the message quotes. */
   | { readonly kind: 'gs-too-old'; readonly gsPath: string; readonly found: string; readonly minimum: string }

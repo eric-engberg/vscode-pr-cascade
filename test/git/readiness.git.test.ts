@@ -23,10 +23,10 @@ import type { Fixture } from '../helpers/fixture';
 
 const git = new RealGitRunner();
 
-/** A command fake in which `gs` is git-spice 0.31.2 — the probe never gets as far as a login check here. */
+/** A command fake in which `git-spice` is git-spice 0.31.2 — the probe never gets as far as a login check here. */
 // see primer §3 (functions and type annotations) and §19 (Map)
 function fakeGitSpice(): FakeCommandRunner {
-  return new FakeCommandRunner(new Map([['gs --no-prompt --version', exited(0, 'git-spice 0.31.2\n')]]));
+  return new FakeCommandRunner(new Map([['git-spice --no-prompt --version', exited(0, 'git-spice 0.31.2\n')]]));
 }
 
 // see primer §5 (arrow functions)
@@ -63,7 +63,7 @@ describe('GitSpiceBackend.readiness (real git)', () => {
     const answer = await backend.readiness(fixture.dir, 'origin');
 
     // assert: real git said the ref is not there; the one program run was the version banner
-    expect(answer).toStrictEqual({ kind: 'not-initialized', gsPath: 'gs' });
+    expect(answer).toStrictEqual({ kind: 'not-initialized', gsPath: 'git-spice' });
     // see primer §25 (arrays: map)
     expect(commands.calls.map((call) => call.args)).toEqual([['--no-prompt', '--version']]);
   });
@@ -97,7 +97,7 @@ describe('GitSpiceBackend.readiness (real git)', () => {
 
     // assert
     expect(before.kind).toBe('remote-unparseable');
-    expect(after).toStrictEqual({ kind: 'not-initialized', gsPath: 'gs' });
+    expect(after).toStrictEqual({ kind: 'not-initialized', gsPath: 'git-spice' });
     expect(commands.calls.length).toBe(2);
   });
 });

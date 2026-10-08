@@ -88,12 +88,12 @@ interface Canned {
   result: CommandResult;
 }
 
-/** A command fake where `gs` is git-spice 0.31.2 and logged in to GitHub, with answers replaced or added. */
+/** A command fake where `git-spice` is git-spice 0.31.2 and logged in to GitHub, with answers replaced or added. */
 // see primer §31 (type arguments on `new Map`) and §22 (for ... of)
 function commandsFor(entries: Canned[] = []): FakeCommandRunner {
   const results = new Map<string, CommandResult>([
-    [versionKey('gs'), exited(0, BANNER)],
-    [authKey('gs', 'github'), LOGGED_IN],
+    [versionKey('git-spice'), exited(0, BANNER)],
+    [authKey('git-spice', 'github'), LOGGED_IN],
   ]);
   for (const entry of entries) {
     results.set(entry.key, entry.result);
@@ -107,7 +107,7 @@ const GITHUB_FORGE = { host: 'github.com', port: '', owner: 'org', repo: 'repo',
 // see primer §5 (arrow functions) and §6 (async / await)
 describe('GitSpiceBackend.readiness', () => {
   describe('step 1 — finding git-spice (E62)', () => {
-    it('is ready when `gs` answers `--version` as git-spice, asking nothing of `git-spice`', async () => {
+    it('is ready when `git-spice` answers `--version` as git-spice, asking nothing of `gs`', async () => {
       // arrange
       const commands = commandsFor();
       const backend = new GitSpiceBackend(gitFor(), commands);
@@ -116,24 +116,24 @@ describe('GitSpiceBackend.readiness', () => {
       const answer = await backend.readiness(ROOT, 'origin');
 
       // assert
-      expect(answer).toStrictEqual({ kind: 'ready', gsPath: 'gs', gsVersion: '0.31.2', forge: GITHUB_FORGE });
+      expect(answer).toStrictEqual({ kind: 'ready', gsPath: 'git-spice', gsVersion: '0.31.2', forge: GITHUB_FORGE });
       expect(commands.calls[0]).toStrictEqual({
-        executable: 'gs',
+        executable: 'git-spice',
         args: ['--no-prompt', '--version'],
         cwd: ROOT,
         env: GS_ENV,
         timeoutMs: PROBE_TIMEOUT_MS,
       });
       // see primer §25 (arrays: map)
-      expect(commands.calls.map((call) => call.executable)).not.toContain('git-spice');
+      expect(commands.calls.map((call) => call.executable)).not.toContain('gs');
     });
 
-    it('moves on to `git-spice` when `gs` is Ghostscript (the Homebrew Mac, plan §13.1)', async () => {
+    it('moves on to `gs` when there is no `git-spice` — a `go install` build keeps the old name', async () => {
       // arrange
       const commands = commandsFor([
-        { key: versionKey('gs'), result: GHOSTSCRIPT },
-        { key: versionKey('git-spice'), result: exited(0, BANNER) },
-        { key: authKey('git-spice', 'github'), result: LOGGED_IN },
+        { key: versionKey('git-spice'), result: neverStarted('not-found') },
+        { key: versionKey('gs'), result: exited(0, BANNER) },
+        { key: authKey('gs', 'github'), result: LOGGED_IN },
       ]);
       const backend = new GitSpiceBackend(gitFor(), commands);
 
@@ -141,8 +141,8 @@ describe('GitSpiceBackend.readiness', () => {
       const answer = await backend.readiness(ROOT, 'origin');
 
       // assert: the one that answered is the one later commands will run
-      expect(answer).toStrictEqual({ kind: 'ready', gsPath: 'git-spice', gsVersion: '0.31.2', forge: GITHUB_FORGE });
-      expect(commands.calls.map((call) => call.executable)).toEqual(['gs', 'git-spice', 'git-spice']);
+      expect(answer).toStrictEqual({ kind: 'ready', gsPath: 'gs', gsVersion: '0.31.2', forge: GITHUB_FORGE });
+      expect(commands.calls.map((call) => call.executable)).toEqual(['git-spice', 'gs', 'gs']);
     });
 
     // Every way a candidate can fail to answer as git-spice; each moves the probe to the next.
@@ -161,9 +161,9 @@ describe('GitSpiceBackend.readiness', () => {
       it(`tries the next name when a candidate answers with ${candidate.note}`, async () => {
         // arrange
         const commands = commandsFor([
-          { key: versionKey('gs'), result: candidate.result },
-          { key: versionKey('git-spice'), result: exited(0, BANNER) },
-          { key: authKey('git-spice', 'github'), result: LOGGED_IN },
+          { key: versionKey('git-spice'), result: candidate.result },
+          { key: versionKey('gs'), result: exited(0, BANNER) },
+          { key: authKey('gs', 'github'), result: LOGGED_IN },
         ]);
         const backend = new GitSpiceBackend(gitFor(), commands);
 
@@ -172,7 +172,7 @@ describe('GitSpiceBackend.readiness', () => {
 
         // assert
         expect(answer.kind).toBe('ready');
-        expect(commands.calls[1].executable).toBe('git-spice');
+        expect(commands.calls[1].executable).toBe('gs');
       });
     }
 
@@ -180,8 +180,8 @@ describe('GitSpiceBackend.readiness', () => {
       // arrange
       const git = gitFor();
       const commands = commandsFor([
-        { key: versionKey('gs'), result: neverStarted('not-found') },
         { key: versionKey('git-spice'), result: neverStarted('not-found') },
+        { key: versionKey('gs'), result: neverStarted('not-found') },
       ]);
       const backend = new GitSpiceBackend(git, commands);
 
@@ -189,16 +189,16 @@ describe('GitSpiceBackend.readiness', () => {
       const answer = await backend.readiness(ROOT, 'origin');
 
       // assert
-      expect(answer).toStrictEqual({ kind: 'gs-missing', tried: ['gs', 'git-spice'] });
+      expect(answer).toStrictEqual({ kind: 'gs-missing', tried: ['git-spice', 'gs'] });
       expect(commands.calls.length).toBe(2);
       expect(git.calls).toEqual([]);
     });
 
-    it('counts Ghostscript as tried — the name was asked and did not answer as git-spice', async () => {
-      // arrange
+    it('counts Ghostscript as tried — the name was asked and did not answer as git-spice (the Homebrew Mac, plan §13.1)', async () => {
+      // arrange: no git-spice at all, and `gs` is Ghostscript
       const commands = commandsFor([
-        { key: versionKey('gs'), result: GHOSTSCRIPT },
         { key: versionKey('git-spice'), result: neverStarted('not-found') },
+        { key: versionKey('gs'), result: GHOSTSCRIPT },
       ]);
       const backend = new GitSpiceBackend(gitFor(), commands);
 
@@ -206,14 +206,14 @@ describe('GitSpiceBackend.readiness', () => {
       const answer = await backend.readiness(ROOT, 'origin');
 
       // assert
-      expect(answer).toStrictEqual({ kind: 'gs-missing', tried: ['gs', 'git-spice'] });
+      expect(answer).toStrictEqual({ kind: 'gs-missing', tried: ['git-spice', 'gs'] });
     });
 
     it('tries only the configured executable when prCascade.gsPath is set', async () => {
-      // arrange: a full path; `gs` and `git-spice` are canned as missing on purpose — they
-      // must not be consulted
+      // arrange: a full path. Neither default name may be consulted: `git-spice` is canned as
+      // missing, and `gs` not at all, so asking it would throw
       const commands = commandsFor([
-        { key: versionKey('gs'), result: neverStarted('not-found') },
+        { key: versionKey('git-spice'), result: neverStarted('not-found') },
         { key: versionKey('/opt/homebrew/bin/git-spice'), result: exited(0, BANNER) },
         { key: authKey('/opt/homebrew/bin/git-spice', 'github'), result: LOGGED_IN },
       ]);
@@ -237,7 +237,7 @@ describe('GitSpiceBackend.readiness', () => {
 
       // assert
       expect(answer.kind).toBe('ready');
-      expect(commands.calls[0].executable).toBe('gs');
+      expect(commands.calls[0].executable).toBe('git-spice');
     });
 
     it('reports a configured executable that is not git-spice as gs-missing with just that name', async () => {
@@ -255,7 +255,7 @@ describe('GitSpiceBackend.readiness', () => {
 
     it('rejects, naming the root, when the directory itself cannot be used — a fault of E17\'s class, not a readiness state', async () => {
       // arrange
-      const commands = commandsFor([{ key: versionKey('gs'), result: neverStarted('unusable-directory') }]);
+      const commands = commandsFor([{ key: versionKey('git-spice'), result: neverStarted('unusable-directory') }]);
       const backend = new GitSpiceBackend(gitFor(), commands);
 
       // act
@@ -286,7 +286,7 @@ describe('GitSpiceBackend.readiness', () => {
       it(`reads \`git-spice ${row.token}\` as ${row.outcome} — ${row.note}`, async () => {
         // arrange
         const commands = commandsFor([
-          { key: versionKey('gs'), result: exited(0, `git-spice ${row.token}\n`) },
+          { key: versionKey('git-spice'), result: exited(0, `git-spice ${row.token}\n`) },
         ]);
         const backend = new GitSpiceBackend(gitFor(), commands);
 
@@ -302,7 +302,7 @@ describe('GitSpiceBackend.readiness', () => {
       // arrange
       const git = gitFor();
       const commands = commandsFor([
-        { key: versionKey('gs'), result: exited(0, 'git-spice 0.30.9\nCopyright …\n') },
+        { key: versionKey('git-spice'), result: exited(0, 'git-spice 0.30.9\nCopyright …\n') },
       ]);
       const backend = new GitSpiceBackend(git, commands);
 
@@ -310,27 +310,27 @@ describe('GitSpiceBackend.readiness', () => {
       const answer = await backend.readiness(ROOT, 'origin');
 
       // assert: and it stops there — no git command, no login check
-      expect(answer).toStrictEqual({ kind: 'gs-too-old', gsPath: 'gs', found: '0.30.9', minimum: '0.31.0' });
+      expect(answer).toStrictEqual({ kind: 'gs-too-old', gsPath: 'git-spice', found: '0.30.9', minimum: '0.31.0' });
       expect(git.calls).toEqual([]);
       expect(commands.calls.length).toBe(1);
     });
 
     it('keeps the token as printed in gsVersion — `v0.31.2` stays `v0.31.2`', async () => {
       // arrange
-      const commands = commandsFor([{ key: versionKey('gs'), result: exited(0, 'git-spice v0.31.2\n') }]);
+      const commands = commandsFor([{ key: versionKey('git-spice'), result: exited(0, 'git-spice v0.31.2\n') }]);
       const backend = new GitSpiceBackend(gitFor(), commands);
 
       // act
       const answer = await backend.readiness(ROOT, 'origin');
 
       // assert
-      expect(answer).toStrictEqual({ kind: 'ready', gsPath: 'gs', gsVersion: 'v0.31.2', forge: GITHUB_FORGE });
+      expect(answer).toStrictEqual({ kind: 'ready', gsPath: 'git-spice', gsVersion: 'v0.31.2', forge: GITHUB_FORGE });
     });
 
     it('reads a banner with CRLF line endings', async () => {
       // arrange
       const commands = commandsFor([
-        { key: versionKey('gs'), result: exited(0, 'git-spice 0.31.2\r\nCopyright …\r\n') },
+        { key: versionKey('git-spice'), result: exited(0, 'git-spice 0.31.2\r\nCopyright …\r\n') },
       ]);
       const backend = new GitSpiceBackend(gitFor(), commands);
 
@@ -354,7 +354,7 @@ describe('GitSpiceBackend.readiness', () => {
 
       // assert: the check has no side effect — `rev-parse --verify --quiet` of the ref, never
       // `gs log`, which would initialise the repository itself (plan §7.6)
-      expect(answer).toStrictEqual({ kind: 'not-initialized', gsPath: 'gs' });
+      expect(answer).toStrictEqual({ kind: 'not-initialized', gsPath: 'git-spice' });
       expect(git.calls).toEqual([{ args: ['rev-parse', '--verify', '--quiet', 'refs/spice/data'], cwd: ROOT }]);
       expect(commands.calls.length).toBe(1);
     });
@@ -472,16 +472,16 @@ describe('GitSpiceBackend.readiness', () => {
   describe('step 4 — logged in to the forge (E67)', () => {
     it('reports not-logged-in when `auth status --forge <kind>` exits non-zero, asking exactly that', async () => {
       // arrange
-      const commands = commandsFor([{ key: authKey('gs', 'github'), result: NOT_LOGGED_IN }]);
+      const commands = commandsFor([{ key: authKey('git-spice', 'github'), result: NOT_LOGGED_IN }]);
       const backend = new GitSpiceBackend(gitFor(), commands);
 
       // act
       const answer = await backend.readiness(ROOT, 'origin');
 
       // assert
-      expect(answer).toStrictEqual({ kind: 'not-logged-in', gsPath: 'gs', forge: GITHUB_FORGE });
+      expect(answer).toStrictEqual({ kind: 'not-logged-in', gsPath: 'git-spice', forge: GITHUB_FORGE });
       expect(commands.calls[1]).toStrictEqual({
-        executable: 'gs',
+        executable: 'git-spice',
         args: ['--no-prompt', 'auth', 'status', '--forge', 'github'],
         cwd: ROOT,
         env: GS_ENV,
@@ -491,7 +491,7 @@ describe('GitSpiceBackend.readiness', () => {
 
     it('asks git-spice about the kind the forge step settled on — gitlab for a gitlab.com remote', async () => {
       // arrange
-      const commands = commandsFor([{ key: authKey('gs', 'gitlab'), result: LOGGED_IN }]);
+      const commands = commandsFor([{ key: authKey('git-spice', 'gitlab'), result: LOGGED_IN }]);
       const backend = new GitSpiceBackend(gitFor({ url: 'https://gitlab.com/group/sub/repo.git\n' }), commands);
 
       // act
@@ -504,7 +504,7 @@ describe('GitSpiceBackend.readiness', () => {
 
     it('follows spice.forge.kind, as git-spice does — kind gitlab beside a github.com remote asks GitLab', async () => {
       // arrange
-      const commands = commandsFor([{ key: authKey('gs', 'gitlab'), result: LOGGED_IN }]);
+      const commands = commandsFor([{ key: authKey('git-spice', 'gitlab'), result: LOGGED_IN }]);
       const backend = new GitSpiceBackend(gitFor({ config: 'spice.forge.kind gitlab\n' }), commands);
 
       // act
@@ -517,7 +517,7 @@ describe('GitSpiceBackend.readiness', () => {
 
     it('treats a login check that never finished as not logged in — a hung keychain prompt, say', async () => {
       // act
-      const answer = await new GitSpiceBackend(gitFor(), commandsFor([{ key: authKey('gs', 'github'), result: timedOut() }])).readiness(ROOT, 'origin');
+      const answer = await new GitSpiceBackend(gitFor(), commandsFor([{ key: authKey('git-spice', 'github'), result: timedOut() }])).readiness(ROOT, 'origin');
 
       // assert
       expect(answer.kind).toBe('not-logged-in');
@@ -525,10 +525,10 @@ describe('GitSpiceBackend.readiness', () => {
 
     it('does not read stderr — any exit 0 is logged in, any other exit is not', async () => {
       // act
-      const quiet = await new GitSpiceBackend(gitFor(), commandsFor([{ key: authKey('gs', 'github'), result: exited(0) }])).readiness(ROOT, 'origin');
+      const quiet = await new GitSpiceBackend(gitFor(), commandsFor([{ key: authKey('git-spice', 'github'), result: exited(0) }])).readiness(ROOT, 'origin');
       const keychain = await new GitSpiceBackend(
         gitFor(),
-        commandsFor([{ key: authKey('gs', 'github'), result: exited(1, '', 'FTL git-spice: load authentication token: keychain locked\n') }]),
+        commandsFor([{ key: authKey('git-spice', 'github'), result: exited(1, '', 'FTL git-spice: load authentication token: keychain locked\n') }]),
       ).readiness(ROOT, 'origin');
 
       // assert
@@ -548,8 +548,8 @@ describe('GitSpiceBackend.readiness', () => {
 
       // assert
       expect(commands.calls.map((call) => `${call.executable} ${call.args.join(' ')}`)).toEqual([
-        'gs --no-prompt --version',
-        'gs --no-prompt auth status --forge github',
+        'git-spice --no-prompt --version',
+        'git-spice --no-prompt auth status --forge github',
       ]);
       expect(git.calls.map((call) => call.args.join(' '))).toEqual([REF_KEY, GET_URL_KEY, CONFIG_KEY]);
     });
@@ -595,15 +595,15 @@ describe('GitSpiceBackend.readiness', () => {
     it('does not remember a failure — the next refresh probes again, and finds the login that happened meanwhile', async () => {
       // arrange
       const results = new Map<string, CommandResult>([
-        [versionKey('gs'), exited(0, BANNER)],
-        [authKey('gs', 'github'), NOT_LOGGED_IN],
+        [versionKey('git-spice'), exited(0, BANNER)],
+        [authKey('git-spice', 'github'), NOT_LOGGED_IN],
       ]);
       const commands = new FakeCommandRunner(results);
       const backend = new GitSpiceBackend(gitFor(), commands);
       const before = await backend.readiness(ROOT, 'origin');
 
       // act: the user ran `gs auth login` in the terminal item 19 opens
-      results.set(authKey('gs', 'github'), LOGGED_IN);
+      results.set(authKey('git-spice', 'github'), LOGGED_IN);
       const after = await backend.readiness(ROOT, 'origin');
 
       // assert
@@ -615,8 +615,8 @@ describe('GitSpiceBackend.readiness', () => {
     it('does not remember gs-missing either — an install is noticed by the next refresh', async () => {
       // arrange
       const results = new Map<string, CommandResult>([
-        [versionKey('gs'), neverStarted('not-found')],
         [versionKey('git-spice'), neverStarted('not-found')],
+        [versionKey('gs'), neverStarted('not-found')],
       ]);
       const commands = new FakeCommandRunner(results);
       const backend = new GitSpiceBackend(gitFor(), commands);
@@ -658,7 +658,7 @@ describe('GitSpiceBackend.readiness', () => {
       // arrange: both repositories are github.com clones; only the first is logged in
       const git = gitFor();
       const commands = commandsFor();
-      commands.answerIn('/work/b', 'gs', ['--no-prompt', 'auth', 'status', '--forge', 'github'], NOT_LOGGED_IN);
+      commands.answerIn('/work/b', 'git-spice', ['--no-prompt', 'auth', 'status', '--forge', 'github'], NOT_LOGGED_IN);
       const backend = new GitSpiceBackend(git, commands);
 
       // act
