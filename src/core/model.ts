@@ -5,10 +5,16 @@
  * of shapes, so every other core file can import them without importing each other: the
  * GitRunner interface every git-reading module is written against, and the data model the
  * tree renders — StackLayer, RepoState, and the ChangedFile under each layer. Depends on:
- * nothing. Depended on by: every core module — core/git.ts implements GitRunner;
- * core/trunk.ts, core/stack.ts and core/changes.ts take one; core/stack.ts builds the
- * RepoState and core/changes.ts the ChangedFiles. Plan: §4.3.
+ * core/gsLog.ts, types only (`GsLogEntry`, `MalformedLine` — the local tier a layer carries
+ * from item 20a; gsLog.ts itself depends on nothing, so no cycle). Depended on by: every core
+ * module — core/git.ts implements GitRunner; core/trunk.ts, core/stack.ts and core/changes.ts
+ * take one; core/stack.ts builds the RepoState and core/changes.ts the ChangedFiles;
+ * core/backends/gitspice.ts `enrich` fills `tracking` and `enrichment` (item 20a). Plan: §4.3,
+ * §7.8, §8 E56/E57, §13.2 D59.
  */
+
+// see primer §9 (`import type`: a types-only import — model.ts stays a file of shapes)
+import type { GsLogEntry, MalformedLine } from './gsLog';
 
 /**
  * How the core logic runs git. It is an interface — a contract with no code behind it —
@@ -83,7 +89,50 @@ export interface StackLayer {
   commitCount: number;
   /** Whether HEAD is on this branch. At most one layer is current; none when HEAD is detached (E3). */
   isCurrent: boolean;
+  /**
+   * What git-spice knows about this branch (plan §7.8's local tier), set by
+   * `StackBackend.enrich` — never by computeStack, so a state fresh from the pipeline has no
+   * such key. Absent when nothing was asked or nothing came back — git-spice missing or too
+   * old, the repository not initialised, `gs log` failed (E57) — or when the answer was
+   * incomplete (a malformed line, which names no branch) and did not list this branch:
+   * unknown, and the tree draws the layer as computeStack built it. `null` when a complete
+   * answer did not list it: not tracked (E56). An entry when it did — the parser's own line
+   * (`name` repeats this layer's). An entry with no `down` is git-spice's trunk line: a local
+   * trunk branch ahead of the remote-tracking ref the stack is measured against is a layer
+   * here and the trunk there (verified 0.31.2), and `track` never touches it ("cannot track
+   * trunk branch"). Only `null` is ever tracked: a second `gs branch track` on a tracked
+   * branch silently moves its base.
+   */
+  // see primer §11 (an optional field that may also hold `null`: two different absences)
+  tracking?: GsLogEntry | null;
 }
+
+/**
+ * Which step of `enrich` said no. The first three are what "PR Cascade: Set Up git-spice"
+ * fixes; the fourth is git-spice's own failure, which it would not — the command that reads
+ * this (item 20b) adds its hint only for the first three.
+ */
+// see primer §10 (union types: exact strings as members)
+export type EnrichmentCause = 'not-initialised' | 'gs-missing' | 'gs-too-old' | 'gs-log-failed';
+
+/**
+ * How `enrich` went for one repository: what the Output channel says, never a row (E57
+ * "without touching the tree"). Two members with two different payloads, told apart by `kind`.
+ */
+// see primer §59 (tagged unions) and §14 (readonly)
+export type Enrichment =
+  /**
+   * Every layer a complete answer covers carries `tracking` — from a `gs log` run this time
+   * (`ranGsLog`) or remembered for an unchanged digest (then `malformed` is `[]`: a bad line
+   * is reported once, by the run that met it, and the answer stays incomplete in the memo).
+   */
+  | { readonly kind: 'enriched'; readonly ranGsLog: boolean; readonly malformed: readonly MalformedLine[] }
+  /**
+   * No layer carries `tracking`. `cause` is which step said no, and `reason` is one phrase:
+   * not initialised, git-spice missing or too old, or how `gs log` failed. Nothing is
+   * remembered.
+   */
+  | { readonly kind: 'not-enriched'; readonly cause: EnrichmentCause; readonly reason: string };
 
 /**
  * How one file changed between a layer and its parent, in git's own letters
@@ -144,4 +193,10 @@ export interface RepoState {
   rebaseInProgress: boolean;
   /** Bottom to top: the first element sits directly on trunk. Empty when HEAD is on trunk (E5). */
   layers: StackLayer[];
+  /**
+   * Whether and how `enrich` ran for this repository (item 20a); absent when it was not asked
+   * — no trunk, no layers — and never assigned `undefined`, so a state `enrich` did not touch
+   * is the same shape computeStack built.
+   */
+  enrichment?: Enrichment;
 }
