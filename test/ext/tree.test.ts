@@ -3,13 +3,17 @@
  * .vscode-test.mjs built: branch names top-first with counts, the current marker, SHAs in
  * tooltips only; the files under each layer (its own only, a rename, a binary, a deletion,
  * the click that runs `prCascade.openDiff`, the cache, an error row); the two rows that
- * stand above the layers (a paused rebase, a detached HEAD); the one-row messages; and the
- * refresh the view does by itself after a commit made outside VS Code (E20).
+ * stand above the layers (a paused rebase, a detached HEAD); the one-row messages; the
+ * refresh the view does by itself after a commit made outside VS Code (E20); and what
+ * git-spice knows about each layer (E56, E57; M5 item 20b) — the texts, the vocabulary, the
+ * tooltips, nothing when it is not set up, and the digest that spares a `gs log` per refresh.
  *
  * Layer: test, extension host (plan §9.1 layer 3; Mocha inside VS Code, `npm run test:ext`).
- * Depends on: the running extension (what activate() returns), the fixture workspace, and
- * the real built-in Git extension through test/ext/helpers/gitApi.ts (E20). Depended on by:
- * nothing. Plan: §6, §7.1, §7.2, §7.14.2, §8 E1b/E2/E3/E4/E5/E7/E9/E10/E12/E17/E20/E44, §9.4.
+ * Depends on: the running extension (what activate() returns), the fixture workspace, the
+ * real built-in Git extension through test/ext/helpers/gitApi.ts (E20), and
+ * test/helpers/fakeCommand.ts (a fake git-spice through the seams `activate()` returns in test
+ * mode). Depended on by: nothing. Plan: §6, §7.1, §7.2, §7.8, §7.14.2, §8
+ * E1b/E2/E3/E4/E5/E7/E9/E10/E12/E17/E20/E44/E56/E57/E59/E62, §9.4, §13.2 D60.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -19,8 +23,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { after, before, describe, it } from 'mocha';
 import * as vscode from 'vscode';
-import type { ExtensionApi } from '../../src/extension';
+import type { CommandResult } from '../../src/core/command';
+import type { ExtensionApi, ReadinessDeps } from '../../src/extension';
 import type { StackNode, StackTreeProvider } from '../../src/vscode/tree';
+import { exited, FakeCommandRunner, neverStarted } from '../helpers/fakeCommand';
 import { realGitApi } from './helpers/gitApi';
 
 // The plan Appendix A stack as the view must list it: top layer first (plan §7.1). The
@@ -34,6 +40,53 @@ const LAYERS_TOP_FIRST = ['retry-metrics', 'add-retries', 'api-refactor'];
 let provider: StackTreeProvider;
 // An output channel for the adapter the E20 test builds to reach the Git extension's API.
 let output: vscode.OutputChannel;
+// The setup flow's seams, from the handle `activate()` returns in test mode: the E56 block puts a
+// fake git-spice in `deps.commands` (a new runner is a new backend, with an empty memo) and the
+// real one back in `after`.
+let deps: ReadinessDeps;
+let real: ReadinessDeps;
+
+// The fake git-spice's keys (executable and arguments joined by spaces), as `enrich` asks them.
+const VERSION = 'git-spice --no-prompt --version';
+const GS_VERSION = 'gs --no-prompt --version';
+const LOG = 'git-spice --no-prompt log short --all --json';
+const BANNER = 'git-spice 0.31.2\nCopyright (C) Abhinav Gupta\n';
+
+// What `gs log short --all --json` would print for the fixture with its bottom two layers
+// tracked: git-spice's own trunk line, the bottom layer with a pull request, the middle one
+// needing a restack and a push; the top layer absent — not tracked. One line per JSON object.
+// see primer §12 (template strings)
+const PR_URL = 'https://example.invalid/pull/12';
+const TRUNK_LINE = '{"name":"main","ups":[{"name":"api-refactor"}]}\n';
+const BOTTOM_LINE = `{"name":"api-refactor","down":{"name":"main"},"change":{"id":"#12","url":"${PR_URL}"},"push":{"ahead":0,"behind":0}}\n`;
+const MIDDLE_LINE = '{"name":"add-retries","down":{"name":"api-refactor","needsRestack":true},"push":{"ahead":1,"behind":0,"needsPush":true}}\n';
+const FIXTURE_LINES = TRUNK_LINE + BOTTOM_LINE + MIDDLE_LINE;
+
+/** A fake git-spice that answers its banner and `gs log` with `lines`, installed in the extension's seams; returned so a test can read what it ran. */
+// see primer §19 (Map) and §31 (type arguments on `new Map`)
+function useFakeGitSpice(canned: Map<string, CommandResult>): FakeCommandRunner {
+  const runner = new FakeCommandRunner(canned);
+  deps.commands = runner;
+  return runner;
+}
+
+/** The canned answers for a git-spice that is there and prints `lines` for `gs log`. */
+function answering(lines: string): Map<string, CommandResult> {
+  return new Map<string, CommandResult>([
+    [VERSION, exited(0, BANNER)],
+    [LOG, exited(0, lines)],
+  ]);
+}
+
+/** What `gs repo init` writes, standing in for it: the ref whose existence is the initialised check (plan §7.6). */
+function initialise(): void {
+  runGit(['update-ref', 'refs/spice/data', 'HEAD']);
+}
+
+/** Undoes initialise; exit 0 even when the ref is not there, so a `finally` needs no check. */
+function uninitialise(): void {
+  runGit(['update-ref', '-d', 'refs/spice/data']);
+}
 
 /** The rows at the top of the view, drawn: what VS Code would show under "Stack". */
 // see primer §6 (async / await) and §25 (arrays: map)
@@ -153,11 +206,16 @@ describe('the Stack view', () => {
     // see primer §8 (undefined and narrowing)
     assert.ok(extension, 'the extension was not loaded');
     const api = await extension.activate();
+    assert.ok(api.readinessDeps, 'activate() returned no readinessDeps — the extension host is not in ExtensionMode.Test');
     provider = api.provider;
+    deps = api.readinessDeps;
+    // see primer §16 (object literals: spread — a copy of the fields, not the object itself)
+    real = { ...deps };
     output = vscode.window.createOutputChannel('PR Cascade tree tests');
   });
 
   after(() => {
+    deps.commands = real.commands;
     output.dispose();
   });
 
@@ -625,6 +683,178 @@ describe('the Stack view', () => {
         assert.strictEqual(items[0].iconPath.id, 'error');
       } finally {
         await configuration.update('gitPath', undefined, vscode.ConfigurationTarget.Workspace);
+      }
+    });
+  });
+
+  // Plan §7.8's local tier (M5 item 20b, D60): what `gs log short --all --json` says about each
+  // layer, drawn into the description, the contextValue and the tooltip — through a fake
+  // git-spice in the extension's seams, never the real one. Two rules every case keeps. The fake
+  // is installed *before* `refs/spice/data` is written: src/extension.ts reads the seams when a
+  // load reaches the backend, and a load VS Code started on its own could otherwise reach the
+  // real git-spice between the two steps. And every case deletes the ref and restores the runner
+  // in `finally`, so the tests above see the fixture as built.
+  describe('what git-spice knows about each layer (E56, E57)', () => {
+    before(() => {
+      // A ref a failed run left behind would make every case here start initialised.
+      uninitialise();
+    });
+
+    it('shows the pull request id, the two to-dos and `not tracked` beside the count, in that order, with `· current` last (E56)', async () => {
+      // arrange: a git-spice that tracks the bottom two layers, then the ref it would have written
+      useFakeGitSpice(answering(FIXTURE_LINES));
+      initialise();
+      try {
+        // act
+        const items = await topLevelItems();
+
+        // assert: the texts of plan §7.8, labels and icons as before (E44)
+        assert.deepStrictEqual(
+          items.map((item) => item.description),
+          ['3 commits · not tracked · current', '2 commits · needs restack · needs push', '1 commit · #12'],
+        );
+        assert.deepStrictEqual(items.map((item) => item.label), LAYERS_TOP_FIRST);
+        const iconNames: string[] = [];
+        for (const item of items) {
+          assert.ok(item.iconPath instanceof vscode.ThemeIcon, 'expected a ThemeIcon');
+          iconNames.push(item.iconPath.id);
+        }
+        assert.deepStrictEqual(iconNames, ['target', 'git-branch', 'git-branch']);
+      } finally {
+        uninitialise();
+        deps.commands = real.commands;
+      }
+    });
+
+    it('marks a layer with a pull request stackBranchWithPR, and the current one stackBranchWithPRCurrent (plan §7.2.1)', async () => {
+      // arrange: the fixture lines, then — a new fake, so a new backend with an empty memo — the
+      // top layer tracked with a pull request of its own
+      useFakeGitSpice(answering(FIXTURE_LINES));
+      initialise();
+      try {
+        // act
+        const items = await topLevelItems();
+        useFakeGitSpice(answering(`${FIXTURE_LINES}{"name":"retry-metrics","down":{"name":"add-retries"},"change":{"id":"#13","url":"https://example.invalid/pull/13"}}\n`));
+        const withTopPR = await topLevelItems();
+
+        // assert
+        assert.deepStrictEqual(
+          items.map((item) => item.contextValue),
+          ['stackBranchCurrent', 'stackBranch', 'stackBranchWithPR'],
+        );
+        assert.deepStrictEqual(
+          withTopPR.map((item) => item.contextValue),
+          ['stackBranchWithPRCurrent', 'stackBranch', 'stackBranchWithPR'],
+        );
+        assert.strictEqual(withTopPR[0].description, '3 commits · #13 · current');
+      } finally {
+        uninitialise();
+        deps.commands = real.commands;
+      }
+    });
+
+    it('adds what git-spice knows to the tooltip: the base as git-spice names it, the to-dos again, and the pull request with its link', async () => {
+      // arrange: today's two lines first (three git questions that could fail), then the fake, then the ref
+      const asBuilt = {
+        top: `retry-metrics @ ${shortShaOf('retry-metrics')}\nbase: add-retries @ ${shortShaOf('add-retries')}`,
+        middle: `add-retries @ ${shortShaOf('add-retries')}\nbase: api-refactor @ ${shortShaOf('api-refactor')}`,
+        bottom: `api-refactor @ ${shortShaOf('api-refactor')}\nbase: origin/main @ ${shortShaOf('origin/main')}`,
+      };
+      useFakeGitSpice(answering(FIXTURE_LINES));
+      initialise();
+      try {
+        // act
+        const items = await topLevelItems();
+
+        // assert: `main`, not `origin/main`, on the bottom layer's third line — git-spice's own
+        // name for the trunk; the to-dos repeated, since a narrow row cuts the description short
+        assert.strictEqual(items[0].tooltip, `${asBuilt.top}\ngit-spice: not tracked`);
+        assert.strictEqual(items[1].tooltip, `${asBuilt.middle}\ngit-spice: tracked on api-refactor · needs restack · needs push`);
+        assert.strictEqual(items[2].tooltip, `${asBuilt.bottom}\ngit-spice: tracked on main\n#12 ${PR_URL}`);
+      } finally {
+        uninitialise();
+        deps.commands = real.commands;
+      }
+    });
+
+    it('draws the rows as before, and runs no git-spice at all, while the repository is not initialised for it (E59)', async () => {
+      // arrange: a git-spice that would answer its banner — and no refs/spice/data
+      const runner = useFakeGitSpice(new Map([[VERSION, exited(0, BANNER)]]));
+      try {
+        // act
+        const items = await topLevelItems();
+
+        // assert: today's texts, two-line tooltips, zero spawns (the digest said so, plan §7.6)
+        assert.deepStrictEqual(items.map((item) => item.description), ['3 commits · current', '2 commits', '1 commit']);
+        assert.strictEqual(items[2].tooltip, `api-refactor @ ${shortShaOf('api-refactor')}\nbase: origin/main @ ${shortShaOf('origin/main')}`);
+        assert.deepStrictEqual(runner.calls, []);
+      } finally {
+        deps.commands = real.commands;
+      }
+    });
+
+    it('draws the rows as before when git-spice is missing, and when `gs log` fails (E62, E57)', async () => {
+      // arrange: neither name answers; then, with a new fake, a git-spice whose `gs log` exits 1
+      const missing = useFakeGitSpice(
+        new Map([
+          [VERSION, neverStarted('not-found')],
+          [GS_VERSION, neverStarted('not-found')],
+        ]),
+      );
+      initialise();
+      try {
+        // act
+        const withoutGitSpice = await topLevelItems();
+        useFakeGitSpice(
+          new Map([
+            [VERSION, exited(0, BANNER)],
+            [LOG, exited(1, '', 'FTL git-spice: boom\n')],
+          ]),
+        );
+        const withFailingLog = await topLevelItems();
+
+        // assert: both as built — no row added, no text changed (E57 "without touching the tree");
+        // the missing git-spice was looked for under both names and asked for no log
+        assert.deepStrictEqual(withoutGitSpice.map((item) => item.description), ['3 commits · current', '2 commits', '1 commit']);
+        assert.deepStrictEqual(
+          missing.calls.map((call) => [call.executable, ...call.args]),
+          [
+            ['git-spice', '--no-prompt', '--version'],
+            ['gs', '--no-prompt', '--version'],
+          ],
+        );
+        assert.deepStrictEqual(withFailingLog.map((item) => item.description), ['3 commits · current', '2 commits', '1 commit']);
+        assert.deepStrictEqual(withFailingLog.map((item) => item.contextValue), ['stackBranchCurrent', 'stackBranch', 'stackBranch']);
+      } finally {
+        uninitialise();
+        deps.commands = real.commands;
+      }
+    });
+
+    it('runs `gs log` once for two loads, again when refs/spice/data moved, and not at all for a checkout — the digest, live (plan §7.14.2)', async () => {
+      // arrange
+      const runner = useFakeGitSpice(answering(FIXTURE_LINES));
+      initialise();
+      const logRuns = (): number => runner.calls.filter((call) => call.args.includes('log')).length;
+      try {
+        // act and assert, step by step: two loads, one `gs log`
+        await topLevelItems();
+        await topLevelItems();
+        assert.strictEqual(logRuns(), 1);
+        // a git-spice write (what `gs branch track` does) moves the ref: one more
+        runGit(['update-ref', 'refs/spice/data', 'HEAD~1']);
+        await topLevelItems();
+        assert.strictEqual(logRuns(), 2);
+        // a checkout moves no ref the digest lists: none — and the remembered answer is applied
+        // to the two layers now under HEAD
+        runGit(['checkout', '-q', 'add-retries']);
+        const afterCheckout = await topLevelItems();
+        assert.strictEqual(logRuns(), 2);
+        assert.deepStrictEqual(afterCheckout.map((item) => item.description), ['2 commits · needs restack · needs push · current', '1 commit · #12']);
+      } finally {
+        runGit(['checkout', '-q', 'retry-metrics']);
+        uninitialise();
+        deps.commands = real.commands;
       }
     });
   });

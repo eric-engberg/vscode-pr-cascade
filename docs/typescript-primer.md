@@ -3234,6 +3234,14 @@ has run, and puts the real ones back in `after`. Handing that out in production 
 extension in the window put its own runner into ours, which is exactly what the Test-only rule
 is for.
 
+From M5 item 20b the same `commands` seam also feeds the tree: every load runs `enrich`
+(`src/core/backends/gitspice.ts`) through the window's backend, which `backendFor` builds from
+`readinessDeps.commands` — so a canned `gs log short --all --json` in a `FakeCommandRunner` reaches
+the layer rows' descriptions, and `test/ext/tree.test.ts` draws `1 commit · #12` and `2 commits ·
+needs restack · needs push` without a git-spice on the machine. The seam is read when a load *reaches* the backend, some tens of
+milliseconds in, which is why those tests install the fake before they write `refs/spice/data`:
+a load VS Code started on its own could otherwise reach the real runner in between.
+
 ## 69. `new URL(…)`: letting Node take a URL apart
 
 *First seen in `src/core/forge.ts` (`tryUrl`, `parseRemoteUrl`, `parseForgeConfig`).*
@@ -3493,3 +3501,36 @@ All three go through one `ReadinessHost` object for the same reason the terminal
 test answers the questions from a script — "the user clicks Log in" — and reads back every
 notification shown, word for word.
 
+
+## 74. A context key for menus: `executeCommand('setContext', key, value)` and a `when` clause
+
+*First seen in `src/extension.ts` (the `onDidLoadStates` listener) and `package.json` (the
+`view/title` entry for `prCascade.trackStack`).*
+
+```ts
+void vscode.commands.executeCommand('setContext', 'prCascade.hasUntracked', states.some(hasUntracked));
+```
+```json
+{ "command": "prCascade.trackStack", "when": "view == prCascade && prCascade.hasUntracked", "group": "2_stack@8" }
+```
+
+VS Code keeps a per-window dictionary of named values — **context keys** — that the `when`
+expressions in a manifest read: `view == prCascade` compares one VS Code itself sets (which view
+the menu is being drawn for), `prCascade.hasUntracked` is ours, and `&&`, `==` and `!` combine
+them. An extension writes a key through the built-in `setContext` command — the one way there is;
+no API call sets one directly — with `executeCommand` (§56), the key's name as the first argument
+and its value as the second. It returns a Thenable nobody awaits (`void`, §63): the menu
+re-evaluates its `when` on its own.
+
+Why a key and not a plain `when`: plan §7.2.1 wants "Track Stack with git-spice" in the view's `…`
+menu *only while untracked layers exist*, and a `when` can only test what a key holds. So the
+listener that already feeds the status bar after every load (M4 item 14: one load, one truth —
+§7.1.0 "the same refresh cycle") also writes the key, and the entry exists exactly while a
+repository shows a `not tracked` row. The plan's own manifest already leans on one
+(`prCascade.hasStack` on `createStackPRs`, §7.11, M7); this is the first the code sets. Name keys
+with the extension's prefix: the dictionary is shared by every extension in the window.
+
+Two things there is no API for. A key cannot be *read back*, so `test/ext/commands.test.ts` pins
+the manifest entry word for word and the command's effects, not the key's value. And a key lives
+only as long as the window: a reload starts with none, and the first load after activation writes
+it again — which is why nothing resets it on deactivation.
