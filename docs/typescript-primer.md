@@ -441,6 +441,14 @@ class when there is something to *do* or *remember*, an interface when a shape i
 - `readonly calls: GitCall[] = [];` (in the fake) — a field with an initial value, set
   when the object is created; no constructor line needed.
 
+`GitSpiceBackend` in `src/core/backends/gitspice.ts` (M5, item 18) is another class that
+`implements` an interface — `StackBackend`, whose `kind` is the exact string `'git-spice'`
+(§10). The class writes `readonly kind = 'git-spice';` with no type annotation: a `readonly`
+field initialised with a literal keeps the literal's exact type, so the compiler sees
+`'git-spice'`, not `string`, and the `implements` check passes. Drop the `readonly` and the
+field would widen to `string` — a field that could change later cannot promise one value —
+and the class would no longer satisfy the interface.
+
 ## 14. readonly
 
 *First seen in `src/core/git.ts` (`GitError`).*
@@ -496,12 +504,21 @@ its result through a **callback**: a function you hand in, which Node calls late
 own: call `resolve(value)` when the work is done, or `reject(error)` when it failed. The
 Promise settles exactly once, and whoever `await`s it gets the value or has the error
 thrown at them. This is the standard adapter between callback APIs and `await`, and
-`RealGitRunner.run` is the only place in the codebase that needs it.
+`RealGitRunner.run` was the only place in the codebase that needed it until `RealCommandRunner.run` (below).
 
 Three details: `run` is not marked `async`, because it already returns a Promise
 explicitly; the `return;` after `resolve(stdout)` matters, because the callback would
 otherwise continue into the failure branch; and both callbacks are arrow functions because
 they read `this.gitPath` — an arrow keeps the method's `this`, a `function` would not (§5).
+
+`RealCommandRunner.run` in `src/core/command.ts` (M5, item 18) is the same adapter with four
+differences: the executable comes from the request rather than the constructor, and three more. It never calls `reject`: every outcome — exit 0, exit 1, a program that was not
+there — becomes a `CommandResult` handed to `resolve`, because for its callers an exit code is
+an answer, not a failure (the file's header says why). It passes `timeout` in the options, so Node kills a
+program that runs too long; the callback then gets an error with `killed: true` and no exit
+code, which the code reads as `timedOut`. And it keeps what `execFile` *returns* — the
+`ChildProcess` handle, which `RealGitRunner` ignores — to close the program's input at once:
+`child.stdin?.end()` (§70 for the `?.`).
 
 ## 16. Object literals: shorthand and spread
 
@@ -533,6 +550,15 @@ ignore. This one uses all three ways of writing a key:
   key with the same name (later wins). The original object is untouched. It is exactly the
   shell idiom `LC_ALL=C GIT_OPTIONAL_LOCKS=0 git ...`: the child gets the parent's whole
   environment plus these two.
+
+Two spreads in one literal merge two objects, and when both have a key the later one wins:
+`{ ...process.env, ...request.env }` in `src/core/command.ts` (M5, item 18) is the caller's
+whole environment with the request's variables pinned on top, so `NO_COLOR` is set whatever
+the user's shell says and `PATH` is still the user's. `...` works inside `[ ]` too, and M5 item 18
+is its first use in `src/`: `[...request.args]` (`src/core/command.ts`) is a new array with the
+same elements — a copy, so a later change to the caller's array cannot reach the record — and
+`['--no-prompt', ...args]` (`src/core/backends/gitspice.ts`) puts a fixed element in front of
+whatever the call passed.
 
 ## 17. Narrowing with typeof
 
@@ -740,6 +766,14 @@ item 15) to read the version out of a CHANGELOG heading, before this section sai
 was. `CONFIG_LINE` in the same file, `/^([^ ]+) (.+)$/`, splits a `key value` line at its
 first space the same way.
 
+`src/core/backends/gitspice.ts` (M5, item 18) adds two patterns. `VERSION`,
+`/^v?(\d+)\.(\d+)\.(\d+)/`, reads `0.31.2` or `v0.31.2`: `v?` is an optional single
+character (where §20 above had `?` after a group), and the three captured groups are handed
+to `Number` (§27). Nothing anchors the end, so `0.32.0-dev` matches too — the suffix is
+ignored on purpose. `GIT_SPICE_BANNER`, `/^git-spice (\S+)/`, takes the word after the
+program's name from its `--version` banner: `\S` is any character that is *not* whitespace,
+so `(\S+)` is "the next word".
+
 ## 21. Set
 
 *First seen in `src/core/discovery.ts` — a file M4 (item 12a) deleted when VS Code's built-in
@@ -797,7 +831,9 @@ reassigned.
 `continue` skips the rest of the body and moves on to the next element; `break` (not used
 here) would leave the loop altogether. A `return` inside the body leaves the loop and the
 whole function at once — `detectTrunk` in `core/trunk.ts` stops at the first candidate
-that exists this way, so `break` is never needed there. An `await` inside the body is
+that exists this way, so `break` was never needed there until `probe` in
+`src/core/backends/gitspice.ts` (M5, item 18), which stops at the first name that answers as
+git-spice. An `await` inside the body is
 ordinary: the loop pauses at each git call and resumes when it answers, so the folders are
 asked one at a time, in order.
 
@@ -1054,6 +1090,12 @@ unequal to everything, itself included. Nothing here checks for it because `rev-
 rejection before any conversion happens. `number` is the only numeric type: there is no
 separate integer type, and `3` and `3.0` are the same value.
 
+`parseVersion` in `src/core/backends/gitspice.ts` (M5, item 18) calls `Number` on each of the
+three groups a regular expression captured (§20): `Number(match[1])`. The group is `(\d+)`,
+digits and nothing else, so unlike the `rev-list` case above there is no `NaN` to guard
+against. The three numbers are then compared *as numbers* in `isAtLeast` — `0.9.99` is below
+`0.31.0`, where comparing the two as text would put it after.
+
 ## 28. The Sync variants of Node's functions
 
 *First seen in `src/core/git.ts` (`statSync`, `accessSync`); `existsSync` and `path.resolve`
@@ -1160,7 +1202,8 @@ as well, because they are falsy (§24). `options.remote ?? true` keeps a caller'
 `remote: false`; `options.remote || true` would silently turn it into `true`, and the "no
 remote" fixture (E25) could never be built. `??` looks only for the two "nothing" values,
 which is what "was this option given?" means. Its sibling `?.` — "read this field only if
-the thing before the dot is present" — is not used yet and gets its section when it is.
+the thing before the dot is present" — has its section at §70, from `src/core/command.ts` (M5,
+item 18).
 
 The same idea on an optional field of an interface (§11) rather than of an options object,
 in `describeFailure` (`src/core/git.ts`):
@@ -1765,7 +1808,7 @@ assertion, not by the compiler.
 ## 43. `keyof` and `Record<K, V>`: an object with exactly another type's fields
 
 *First seen in `test/ext/scanSettings.test.ts` (deleted in M4 item 12a; the example stays, and
-no live use remains — the shape waits for the next object that mirrors an interface's fields
+no live `keyof` use remains — the shape waits for the next object that mirrors an interface's fields; `Record` itself is live again from M5 item 18, below
 by hand).*
 
 ```ts
@@ -1792,6 +1835,13 @@ const declared: Record<keyof DiscoveryOptions, unknown> = {
   'x' is missing in type ...`) and a misspelled one (`... does not exist in type ... Did
   you mean ...?`). It is the same idea as `implements` in §13: a link the compiler checks,
   instead of a copy kept up by hand.
+
+The first live `Record<string, string>` is an environment: `GS_ENV` in
+`src/core/backends/gitspice.ts` and `CommandRequest.env` in `src/core/command.ts` (M5,
+item 18) — "any keys, all strings", which is what a set of environment variables is, and
+what `process.env` is spread together with (§16). An `interface` with three named fields
+would have said *which* variables, but an interface is not accepted where a `Record` is
+asked for, and the runner must take gh's variables (item 23) as readily as git-spice's.
 
 ## 44. Escape sequences in string literals: `\0`
 
@@ -1830,6 +1880,11 @@ codebase splits on the byte and never matches it.
 The same escape works the other way round, too: `test/git/changes.git.test.ts` (PR 10)
 writes `'PNG\0not a real picture\0'` *to a file*, and the `\0`s land on disk as real NUL
 bytes — which is exactly what makes git call that file binary (E10).
+
+`\0` has a second job in `src/core/backends/gitspice.ts` (M5, item 18): the memo's key is
+`` `${root}\0${remote}` `` — two values joined into one string (§46), separated by the one
+character a file path can never contain, so a root with a newline or a tab in its name can
+never be confused with another root plus another remote.
 
 ## 45. Narrowing a `string` to an exact-string union with `===`
 
@@ -1929,6 +1984,13 @@ naming: a **cache**, "ask once, remember the answer". Four things in it.
   name the content they were computed from ("content-addressed", as git's own object
   store is) is the easy kind to get right; the hard kind is one keyed by a *name* whose
   meaning changes, and that kind this codebase avoids.
+
+The second cache is `readyByRepo` in `src/core/backends/gitspice.ts` (M5, item 18): a `Map`
+from `root` + `remote` (§44 for the separator) to the `Readiness` answer, consulted before the
+probe runs and written only when the answer is `ready`. A failing answer is never stored —
+the plan's "re-run on refresh after failure" — so the next refresh asks again and notices an
+install or a login that happened meanwhile. Nothing is ever cleared: a `ready` holds for the
+backend's lifetime, and a changed setting means a new backend.
 
 ## 47. Parameter properties
 
@@ -2597,6 +2659,16 @@ its stack extension) is a list *inside* that member rather than a second member;
 bind the union before the `[]`, where `'gh' | 'gh-stack'[]` would be "a string, or an array of
 strings" (§14 for `readonly` on an array).
 
+`probe` in `src/core/backends/gitspice.ts` (M5, item 18) is the *producing* side of
+`Readiness`: each `return { kind: 'gs-missing', tried }` is checked against the declared
+`Promise<Readiness>`, so a member with a misspelled `kind` or a missing field is a compile
+error at the `return`. It also narrows a *field* of a value step by step: after
+`if (forge.kind === 'unknown') { return … }` and `if (forge.kind !== 'github' && forge.kind
+!== 'gitlab') { return … }`, the compiler knows `forge.kind` is `'github' | 'gitlab'`, which is
+what guarantees `--forge` is only ever asked about a kind v1 serves (§45). It would compile
+without the narrowing — the argument list takes any string — so this is the compiler following
+the logic, not enforcing it.
+
 ## 60. Another extension's API: `extensions.getExtension`, `activate()`, `exports`, `Thenable`, and a vendored `.d.ts`
 
 *First seen in `src/vscode/gitApi.ts` (`realGitExtensionHost`, `GitExtensionAdapter`) and
@@ -2983,3 +3055,27 @@ git's scp-like form — *is* a URL to this class, with the scheme `github.com:` 
 `org/repo.git`, so the scp regular expression (§20) is asked first, and `new URL` only sees
 text that contains `://`. A `file:` URL parses fine but is always a local path to git, so it is
 refused by its `protocol`.
+
+## 70. `?.`: read a field, or call a method, only if the thing before the dot is there
+
+*First seen in `src/core/command.ts` (`RealCommandRunner.run`).*
+
+```ts
+const child = execFile(request.executable, [...request.args], options, (error, stdout, stderr) => { … });
+child.stdin?.end();
+```
+
+`execFile` returns a `ChildProcess`, whose `stdin` is typed `Writable | null` (§10): the
+stream the program reads its input from, or `null` for a child spawned without an input pipe
+(`stdio: 'ignore'`); `execFile` always gives one, so here the `?.` satisfies the type rather
+than a case the code can meet. `child.stdin.end()` would not compile — `end` does not exist on `null` — and §8's spelling
+is `if (child.stdin !== null) { child.stdin.end(); }`. The `?.` is that `if` in one token:
+**optional chaining**. `a?.b` reads `b` when `a` is neither `null` nor `undefined`, and is
+`undefined` otherwise, without reading anything; `a?.b()` calls `b` on the same condition and
+does nothing otherwise. The chain is also *short-circuited*: in `a?.b.c`, when `a` is missing
+the whole expression is `undefined` and `.c` is never attempted.
+
+It pairs with `??` (§30): `??` supplies a value when something is missing, `?.` skips a step
+when something is missing. Use it where "and if it is not there, do nothing" is the whole
+intent, as here; where the missing case needs a message or a different path, write the `if`.
+Plan §11.1 asks for the idiomatic spelling once the construct has its section; this is it.
