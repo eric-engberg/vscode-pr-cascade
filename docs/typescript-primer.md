@@ -292,6 +292,13 @@ import anyone writes against it is `import type { StackBackend, Readiness } from
 That is a normal thing for a TypeScript codebase to have: a contract in a file of its own, with
 the implementations elsewhere, and `npm run typecheck` as its only test.
 
+An interface that `extends` another may also *narrow* a member it inherits to a more particular
+type, as long as every value of the new type still fits the old: `FakeReadinessHost` in
+`test/helpers/fakeReadinessHost.ts` (M5, item 19b) extends `ReadinessHost` and declares its
+`terminals` as a `FakeTerminalHost` — a `TerminalHost` with recording on top — so a test can
+read `host.terminals.sent` without a check, while the flow, which only knows `ReadinessHost`,
+sees an ordinary `TerminalHost`.
+
 ## 10. Union types
 
 *First seen in `src/core/model.ts`.*
@@ -449,6 +456,16 @@ field initialised with a literal keeps the literal's exact type, so the compiler
 field would widen to `string` — a field that could change later cannot promise one value —
 and the class would no longer satisfy the interface.
 
+A class may promise *more* than the interface it implements. `FakeTerminal` in
+`test/helpers/fakeReadinessHost.ts` (M5, item 19b) implements `TerminalLike`, whose
+`creationOptions.cwd` is optional and whose `exitStatus` is `readonly`; the class makes the
+directory always there and leaves `exitStatus` writable, so the fake host's `close` can set it. Anything that expects a
+`TerminalLike` is still satisfied — a value that always has a `cwd` is one that may have one —
+and the test, which holds a `FakeTerminal`, gets the stronger promise. And a field can hold a
+function: `readonly onDidClose: Event<TerminalLike> = (listener) => { … }` is a field whose value
+is an arrow function, and because it is an arrow, `this` inside it is the instance (§5) — the
+same function written as a method would be one more thing to bind.
+
 ## 14. readonly
 
 *First seen in `src/core/git.ts` (`GitError`).*
@@ -566,6 +583,15 @@ is its first use in `src/`: `[...request.args]` (`src/core/command.ts`) is a new
 same elements — a copy, so a later change to the caller's array cannot reach the record — and
 `['--no-prompt', ...args]` (`src/core/backends/gitspice.ts`) puts a fixed element in front of
 whatever the call passed.
+
+Two more places `...` appears from M5 item 19b. In a **call**, it spreads a list into separate
+arguments: `vscode.window.showWarningMessage(message, ...buttons)` (`src/extension.ts`) passes
+each button label as its own argument, as the function wants them. The function's side of that
+is a **rest parameter**: its declaration `showWarningMessage(message: string, ...items: T[])`
+collects every argument after the first into one array, `items`. And inside `[ ]` the thing
+spread need not be an array — anything that can be walked with `for … of` will do (§22): a
+`Set`, or a `Map`'s `keys()` (§19). `[...this.flights.keys()]` (`src/vscode/login.ts`) is the
+keys of a Map as a fresh array; `[...this.listeners]` in the test fake is a Set copied into one.
 
 ## 17. Narrowing with typeof
 
@@ -713,6 +739,10 @@ value types it guesses from the first one and then rejects the second, so the te
 cans one string and one Error writes them out: `new Map<string, string | Error>([...])`
 (`test/unit/git.test.ts`, "call recording").
 
+`map.keys()` and `map.values()` hand out a Map's keys or values one at a time, in the order they
+were added; `for (const flight of this.flights.values())` in `src/vscode/login.ts` (M5, item
+19b) walks every fix that is running, and `[...map.keys()]` (§16) collects them into an array.
+
 ## 20. Regular expression literals
 
 *First seen in `test/git/git.git.test.ts`.*
@@ -812,6 +842,14 @@ type: in `test/helpers/fakeGit.ts`, `forDirectory = new Map()` assigns into a va
 the unit tests `new FakeGitRunner(new Map())` hands an empty Map to a parameter declared
 `Map<string, string | Error>`. In both the compiler takes the type from where the value is
 going, and nothing needs writing.
+
+`set.size` is how many distinct values a Set holds — a field, not a method, so no `()` — and
+`set.delete(value)` takes one out (removing values while a `for … of` walks the same Set is
+allowed; `src/vscode/login.ts` forgets closed terminals that way). A Set
+built from a list drops the repeats, which makes `new Set(names).size === names.length` the
+plain way to ask "are these all different?": `chooseRepository` in `src/vscode/login.ts` (M5,
+item 19b) asks it of the folder names it is about to offer in a quick pick, and offers the full
+paths instead when two names are the same.
 
 ## 22. for ... of, and continue
 
@@ -1032,6 +1070,14 @@ Which of these change the array they are called on: `push`, `pop`, `shift` (§38
 (§26) do; `filter`, `map`, `slice`, `join`, `includes`, `find` and `flatMap` never do — they
 return something new and leave the original as it was, the same rule as for strings in §23.
 
+Three more from M5 item 19b, none of them changing the array: `list.indexOf(value)` — the
+position of the first element equal to `value`, or `-1` (the string method of the same name,
+§23, does the same for text); `chooseRepository` in `src/vscode/login.ts` finds the root that
+goes with the label picked from it. And `list.every(fn)` / `list.some(fn)` — true when `fn` is
+true for every element, or for at least one: `test/ext/login.test.ts` asks whether no recorded
+call ran `auth login` (`every`) and whether one ran the program a setting named (`some`). An
+empty list is `every` true and `some` false.
+
 ## 26. sort and comparison functions
 
 *First seen in `src/core/stack.ts`.*
@@ -1143,7 +1189,10 @@ the same arguments, so nothing new has to be learned per call.
 The extension itself never blocks — VS Code's whole window would freeze for the duration
 — so `src/` uses the `Sync` form only where the answer is instant: `statSync` and
 `accessSync` in `core/git.ts` (`describeDirectoryProblem`), and one `existsSync` in
-`core/stack.ts` (is git's rebase directory there?). The Promise-returning half of
+`core/stack.ts` (is git's rebase directory there?) — and, from M5 item 19b, `src/extension.ts`
+hands `fs.existsSync` itself, as a function value (§33), to `machineFacts` in `src/vscode/login.ts`,
+which calls it for the places Homebrew may be, in order until one exists, then once more for the
+`git-spice` beside the `brew` it found; the test hands in a function of its own that answers from a set of paths. The Promise-returning half of
 `node:fs` gets its own section when discovery starts reading directories (§39). The fixture builder is setup code: it runs some twenty git commands in
 a fixed order and nothing else is waiting, so the `Sync` forms make it a plain list of
 steps with no `async`, no `await`, and no Promise to hand back. That is also what lets PR
@@ -1383,6 +1432,17 @@ is used when the caller passes nothing — Node's own `existsSync`, which fits t
 Production (`src/extension.ts`) passes nothing; the unit tests pass `() => false` or a
 recording arrow, so they can say "the directory is there" without a disk, the same reason
 the function takes a `GitRunner` rather than spawning git itself.
+
+A function type can sit inside a union, in parentheses so the `| undefined` does not attach to
+its return type: `((line: SentLine) => void) | undefined` in `test/helpers/fakeReadinessHost.ts`
+(M5, item 19b) is "a function taking a line, or nothing" — the test fake's one waiting caller, if
+any.
+
+A function can also *return* a function. `probeFor(gitExtension, root, remote, fresh)` in
+`src/extension.ts` (M5, item 19b) returns `async () => { … }` — the readiness probe for one
+repository, ready to be called any number of times later, by the setup flow, with no arguments:
+the four it needs are captured when `probeFor` runs (a closure, as above). Its return type says
+so: `() => Promise<Readiness>`.
 
 ## 34. A union of classes, narrowed with instanceof
 
@@ -2551,7 +2611,7 @@ and awaiting would hold the command's Promise open until the user closed the toa
 which, from a test, is never. The comment on the first one says so; a call whose result
 is dropped on purpose should say why, since a missing `await` otherwise reads as a
 mistake. Its siblings are `showWarningMessage` and `showErrorMessage`, the same call in
-a different colour.
+a different colour. With buttons, the call answers *which* one was clicked — §73.
 
 ## 57. Reading the editor from a test: `tabGroups`, tab inputs, `openTextDocument`, `afterEach`
 
@@ -2749,7 +2809,10 @@ yet and resolves with the exports, and `.exports` is the same object once it is 
 `activate()` returns a **`Thenable<T>`** — VS Code's word for "a Promise, or anything that
 can be awaited like one" (§6, §7). `await` does not care which; the test stand-ins return
 `Promise.resolve(exports)` and `Promise.reject(error)`, ready-made settled Promises, and
-those fit too.
+those fit too. Handed something that is itself a Thenable, `Promise.resolve` does not wrap it as
+a value but follows it — its Promise settles when the Thenable does — which is how
+`test/helpers/fakeReadinessHost.ts` (M5, item 19b) lets a test hold a notification open: the
+scripted answer is a Promise the test settles later.
 
 The `<GitExtension>` on `getExtension` is a claim about the exports (§31 said what a type
 argument on a call is), and the truth behind the claim is the Git extension's own
@@ -2889,6 +2952,11 @@ nothing at run time and says — to the reader, and to the linters that look for
 purpose. Use it only where the Promise cannot reject, as here (the provider turns every
 failure into a row), or where a rejection has been handled with `.catch`; a bare un-awaited
 call reads as a mistake, which is the rule's point.
+
+`.then` takes a second function too, run instead of the first when the Promise rejects:
+`flow.then(() => undefined, () => undefined)` in `test/ext/login.test.ts` (M5, item 19b) waits for
+a command to settle *either* way and throws its outcome away — the test only needs the flow to be
+over before it puts the fixture back.
 
 ## 64. A debounce: one pending timer as a queue of one
 
@@ -3086,6 +3154,15 @@ the return is a conditional expression (§48) between two literals, and a test n
 optional field with `assert.ok(api.statusBar)` (§8) before using it. The two members plan
 §9.1 fixed, `provider` and `refresh`, stay unconditional.
 
+The third test-only member, `readinessDeps` (M5 item 19b), is a different kind of hook: not
+something to read, but something to *change*. It is the very object the git-spice setup flow
+reads at every use, and from whose `commands` the window's backend is built — `{ commands,
+host, poll }` — so `test/ext/login.test.ts`
+assigns a fake git-spice runner, a fake host and a 50 ms poll to its fields after `activate()`
+has run, and puts the real ones back in `after`. Handing that out in production would let any
+extension in the window put its own runner into ours, which is exactly what the Test-only rule
+is for.
+
 ## 69. `new URL(…)`: letting Node take a URL apart
 
 *First seen in `src/core/forge.ts` (`tryUrl`, `parseRemoteUrl`, `parseForgeConfig`).*
@@ -3238,3 +3315,104 @@ up — the user may still be in the middle of the login (the test moves the fake
 left, so a timeout shorter than one interval still asks once. An interval of zero or less would
 never add up to the timeout and would ask without pause, so `waitUntil` refuses one — and `NaN`
 or `Infinity` — before it asks anything (`Number.isFinite`, §41).
+
+## 72. Terminals: `window.createTerminal`, `Terminal`, and `onDidCloseTerminal`
+
+*First seen in `src/vscode/terminal.ts` (`runInTerminal`); the real objects are handed in by
+`src/extension.ts` (`realTerminalHost`).*
+
+```ts
+const realTerminalHost: TerminalHost = {
+  terminals: () => vscode.window.terminals,
+  create: (options) => vscode.window.createTerminal({ name: options.name, cwd: options.cwd }),
+  onDidClose: vscode.window.onDidCloseTerminal,
+};
+
+const live = host
+  .terminals()
+  .find((terminal) => terminal.name === name && terminal.exitStatus === undefined && directoryOf(terminal) === cwd && usable(terminal));
+const terminal = live ?? host.create({ name, cwd });
+terminal.sendText(`${shellCommandLine(['cd', cwd])} && ${shellCommandLine(argv)}`, true);
+terminal.show();
+```
+
+A VS Code **terminal** is the panel's shell — the user's own `zsh` or `bash`, started in a
+directory — and the extension can drive one. `window.createTerminal({ name, cwd })` starts a
+new one: `name` is the label on its tab, `cwd` the directory its shell starts in. The `Terminal`
+it returns is the handle: `sendText(text, true)` types `text` into it, the `true` meaning "and
+press Enter", so it runs the command as if the user had typed it — which is the point, because
+`gs auth login` asks questions the user must answer there; `show()` brings the panel up with
+that terminal in front and the keyboard in it (`show(true)` would leave the focus where it was).
+Because the terminal is the user's shell, they may have changed directory in it since it was
+made, so the line is `cd <root> && <command>`: `&&` runs the command only if the `cd` worked. `window.terminals` is every terminal open now, the extension's and the
+user's, which is how one made earlier is found again.
+
+Two fields say what state a terminal is in. `exitStatus` is `undefined` while its shell runs and
+an object once the shell has exited — a terminal can still be on screen, finished, and typing
+into it then does nothing — so "live" is `exitStatus === undefined`. `creationOptions` is the
+options it was created with; its `cwd` is a string or a `vscode.Uri` (§55), whichever was
+passed, so `directoryOf` reads either (`typeof`, §17, and `?.`, §70).
+
+`window.onDidCloseTerminal` is an event (§32) fired with the terminal that was closed. Two
+things matter. It is fired for *every* terminal, so the listener compares the one it was given
+with the one it cares about — `closed === flight.terminal`, the very object, not its name.
+And subscribing returns a `Disposable`: the flow keeps it and calls `dispose()` in a `finally`
+(§18) once its wait is over, so a window that runs many fixes does not collect listeners for
+terminals long gone. The fake in `test/helpers/fakeReadinessHost.ts` counts its live listeners,
+and the tests check the count is back to zero.
+
+The three calls come into `terminal.ts` as one object of type `TerminalHost`, rather than
+being called there directly, for the reason `GitExtensionHost` exists (§60): a test can hand in
+a stand-in whose terminals remember every line they were sent, and `terminal.ts` itself then
+imports nothing from `vscode` but types — so Vitest can load it.
+
+## 73. Asking the user: notifications with buttons, a quick pick, and the browser
+
+*First seen in `src/extension.ts` (`realReadinessHost`); the questions are asked in
+`src/vscode/login.ts`.*
+
+```ts
+prompt: (severity, message, buttons) =>
+  severity === 'warning' ? vscode.window.showWarningMessage(message, ...buttons) : vscode.window.showInformationMessage(message, ...buttons),
+pick: (labels, placeHolder) => vscode.window.showQuickPick(labels, { placeHolder }),
+openExternal: (url) => vscode.env.openExternal(vscode.Uri.parse(url)),
+
+const chosen = await this.deps.host.prompt(offer.severity, offer.message, [offer.fix.button]);
+if (this.disposed) {
+  return 'gave-up';
+}
+if (chosen === undefined) {
+  return 'not-ready';
+}
+```
+
+§56 met `showInformationMessage(text)` as a toast. Given **buttons** — more strings after the
+message, here spread (§16) out of a list into the call — the same call shows them on the
+notification and its Thenable (§60) resolves with the **label that was clicked**, or with
+`undefined` when the notification was closed instead (its ×, or "clear" in the notification
+centre). That is the whole protocol: there is no `Cancel` to add, since closing already says no.
+Its type says the same thing: `showWarningMessage<T extends string>(message: string, ...items:
+T[]): Thenable<T | undefined>`. `T` is a type parameter (§62) with a **constraint** — `extends
+string` means "whatever is passed must be some kind of string" — and `...items` a rest
+parameter (§16), so the answer is one of the strings passed in, or `undefined`. Escape, or the
+toast timing out, only hides the notification into the notification centre: its promise stays
+pending, perhaps for good, which is why the flow holds nothing while one is open
+(`src/vscode/login.ts`'s header).
+
+The rule from §56 holds both ways. With buttons, the flow `await`s the answer — it needs it.
+Without buttons, it shows the notification and does *not* await it (`void`, §63): the promise
+would settle only when the user closed the notification, perhaps never, and the flow has
+nothing to wait for. The test fake makes a button-less notification a promise that never
+settles, so a flow that awaited one would hang its test.
+
+`window.showQuickPick(labels, { placeHolder })` is the drop-down list at the top of the window:
+it resolves with the item picked, or `undefined` on Escape; `placeHolder` is the grey prompt in
+its input box. `env.openExternal(uri)` opens a page in the user's own browser (`vscode.Uri.parse`
+turns the text of a URL into the `Uri` it wants, §55) — the install and upgrade offers when
+Homebrew cannot do them. It resolves with `false` when the page was not opened: for a site VS
+Code does not already trust, it asks the user first, and the user may say no.
+
+All three go through one `ReadinessHost` object for the same reason the terminals do (§72): a
+test answers the questions from a script — "the user clicks Log in" — and reads back every
+notification shown, word for word.
+

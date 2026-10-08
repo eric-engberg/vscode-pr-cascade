@@ -7,6 +7,16 @@ in `package.json`, and a release's tag is that version with a `v` in front.
 
 ## [Unreleased]
 
+### Added
+
+- **PR Cascade: Set Up git-spice** in the Command Palette: checks that git-spice is installed
+  and new enough, that the repository is initialised for it, that its remote is a GitHub or
+  GitLab repository git-spice recognises, and that you are logged in — and offers the fix for
+  the first thing missing (install or upgrade with Homebrew or from git-spice's install page,
+  `git-spice repo init`, the forge's `spice.forge.*` URLs, `git-spice auth login` in a
+  terminal), waits for it to take, refreshes, and goes on to the next.
+- Setting `prCascade.gsPath`: the git-spice executable, when VS Code's PATH does not find it.
+
 ## [0.1.0] - 2026-10-01
 
 The first release: the stack is visible. Creating, restacking and syncing its pull requests

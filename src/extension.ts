@@ -3,21 +3,30 @@
  * the wiring between the pure logic in src/core and the VS Code adapters in src/vscode.
  *
  * Layer: wiring (plan §4.1); the only file VS Code loads directly (package.json "main"
- * points at its bundled form, dist/extension.js). Depends on: the `vscode` module,
- * core/git.ts, trunk.ts, stack.ts, changes.ts, uri.ts (the scheme name), debounce.ts (the
- * refresh), vscode/gitApi.ts (the built-in Git extension: repositories, events, the status
- * signal, the git executable), vscode/config.ts, tree.ts, statusbar.ts, content.ts,
- * commands.ts. Depended on by: VS Code itself, test/ext/* and test/ext-parent/*. Plan:
- * §4.1, §6, §7.1.0 (the status bar), §7.14, §9.1 (what activate returns), §10.1 items 6,
- * M2 9, M3 11, M4 12a, 12b, 14; §13.2 D52.
+ * points at its bundled form, dist/extension.js). Depends on: the `vscode` module, Node's
+ * `node:fs` (`existsSync`, for where Homebrew is), core/git.ts, trunk.ts, stack.ts, changes.ts,
+ * uri.ts (the scheme name), debounce.ts (the refresh), command.ts, backends/gitspice.ts (the
+ * readiness probe), poll.ts, readinessFix.ts (`readyMessage`), vscode/gitApi.ts (the built-in Git
+ * extension: repositories, events, the status signal, the git executable), vscode/config.ts,
+ * tree.ts, statusbar.ts, content.ts, commands.ts, terminal.ts, login.ts (the git-spice setup
+ * flow). Depended on by: VS Code itself, test/ext/* and test/ext-parent/*. Plan: §4.1, §6,
+ * §7.1.0 (the status bar), §7.2 (`prCascade.setUpGitSpice`, D58), §7.13.1, §7.14, §9.1 (what
+ * activate returns), §10.1 items 6, M2 9, M3 11, M4 12a, 12b, 14, M5 19b; §13.2 D52, D58.
  */
 
 // see primer §1 (import / export), §2 (the vscode module) and §9 (`import type`)
+import * as fs from 'node:fs';
 import * as vscode from 'vscode';
+import type { Readiness } from './core/backend';
+import { GitSpiceBackend } from './core/backends/gitspice';
 import { changedFiles } from './core/changes';
+import { RealCommandRunner } from './core/command';
+import type { CommandRunner } from './core/command';
 import { debounce } from './core/debounce';
 import { RealGitRunner } from './core/git';
 import type { ChangedFile, RepoState, StackLayer } from './core/model';
+import { DEFAULT_POLL } from './core/poll';
+import { readyMessage } from './core/readinessFix';
 import { computeStack } from './core/stack';
 import { detectTrunk } from './core/trunk';
 import { STACK_DIFF_SCHEME } from './core/uri';
@@ -27,7 +36,10 @@ import type { PrCascadeSettings } from './vscode/config';
 import { StackDiffContentProvider } from './vscode/content';
 import { GitExtensionAdapter, GitUnavailableError, gitExecutable, realGitExtensionHost, sortRepositoryRoots } from './vscode/gitApi';
 import type { GitApi } from './vscode/gitApi';
+import { chooseRepository, machineFacts, ReadinessFlows } from './vscode/login';
+import type { FlowDeps, ReadinessHost, ReadyOutcome } from './vscode/login';
 import { StackStatusBar } from './vscode/statusbar';
+import type { TerminalHost } from './vscode/terminal';
 import { StackTreeProvider, type StackNode } from './vscode/tree';
 
 /**
@@ -67,7 +79,52 @@ export interface ExtensionApi {
   statusBar?: StackStatusBar;
   /** The Stack view itself — present only under `ExtensionMode.Test`, for the one test that hides the view and expects the item to keep up (D52). */
   treeView?: vscode.TreeView<StackNode>;
+  /**
+   * What the git-spice setup flow takes from outside — present only under `ExtensionMode.Test`
+   * (plan §13.4): test/ext/login.test.ts puts a FakeCommandRunner, a fake host and a short poll
+   * in its fields, and puts the real ones back afterwards. The very object the flow reads at
+   * every use, and from whose `commands` `backendFor` builds the backend — not a copy.
+   */
+  readinessDeps?: ReadinessDeps;
 }
+
+/**
+ * The setup flow's seams (vscode/login.ts, `FlowDeps`) plus the runner git-spice is run with — a
+ * new runner means a new backend (`backendFor`), which is how a test's fake git-spice is used
+ * from its first probe.
+ */
+// see primer §9 (an interface that extends another)
+export interface ReadinessDeps extends FlowDeps {
+  commands: CommandRunner;
+}
+
+/** VS Code's terminals, as vscode/terminal.ts takes them (primer §72). */
+// see primer §72 (window.terminals, createTerminal, onDidCloseTerminal)
+const realTerminalHost: TerminalHost = {
+  terminals: () => vscode.window.terminals,
+  create: (options) => vscode.window.createTerminal({ name: options.name, cwd: options.cwd }),
+  onDidClose: vscode.window.onDidCloseTerminal,
+};
+
+/** VS Code itself, as vscode/login.ts asks for it (primer §73): notifications, the quick pick, the browser, the terminals, the disk. */
+// see primer §73 (showWarningMessage with buttons, showQuickPick, env.openExternal), §16 (spread
+// into a call) and §28 (`existsSync`, handed on as a function, §33)
+const realReadinessHost: ReadinessHost = {
+  prompt: (severity, message, buttons) =>
+    severity === 'warning' ? vscode.window.showWarningMessage(message, ...buttons) : vscode.window.showInformationMessage(message, ...buttons),
+  pick: (labels, placeHolder) => vscode.window.showQuickPick(labels, { placeHolder }),
+  openExternal: (url) => vscode.env.openExternal(vscode.Uri.parse(url)),
+  terminals: realTerminalHost,
+  machine: () => machineFacts(fs.existsSync),
+};
+
+/**
+ * The one set of seams for the window — the real ones, unless a test has put fakes in (plan
+ * §13.4). Module-level because `backendFor` below reads it too; the extension is activated once
+ * per window.
+ */
+// see primer §4 (const: the binding is fixed, its fields are not) and §68 (a hook to change)
+const readinessDeps: ReadinessDeps = { commands: new RealCommandRunner(), host: realReadinessHost, poll: DEFAULT_POLL };
 
 /**
  * Called by VS Code once, when the extension is activated — after startup finishes, per
@@ -190,6 +247,14 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
   // the row's node as the argument, or from the Command Palette with none.
   context.subscriptions.push(vscode.commands.registerCommand('prCascade.openDiff', openDiff));
 
+  // The git-spice setup flow (M5 item 19b, vscode/login.ts): one per window, handed the refresh
+  // a fix of ours must be followed by (E83) and the Output channel for its give-up lines;
+  // disposed with the window, which stops every wait at once. "PR Cascade: Set Up git-spice" in
+  // the Command Palette is its first caller (D58); items 20–21 will gate their actions on it.
+  const flows = new ReadinessFlows(readinessDeps, refresh, (line) => output.appendLine(line));
+  context.subscriptions.push(flows);
+  context.subscriptions.push(vscode.commands.registerCommand('prCascade.setUpGitSpice', () => setUpGitSpice(gitExtension, flows)));
+
   // With the Stack view hidden at startup — a collapsed Source Control pane — VS Code asks
   // for no rows, and the handshake with the Git extension starts only on the first load
   // (vscode/gitApi.ts), so nothing would ever reach the status bar (plan §13.4, D52). One
@@ -201,12 +266,12 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
   void provider.getChildren();
 
   output.appendLine('PR Cascade active');
-  // The status bar wrapper and the view handle exist only for the tests, and this object is
-  // readable by every extension in the window — so they are handed out only under the test
-  // harness (plan §13.4; primer §68). `{ provider, refresh }` is what plan §9.1 fixed, in
-  // every mode.
+  // The status bar wrapper, the view handle and the setup flow's seams exist only for the tests,
+  // and this object is readable by every extension in the window — so they are handed out only
+  // under the test harness (plan §13.4; primer §68): no other extension can put a fake runner
+  // into ours. `{ provider, refresh }` is what plan §9.1 fixed, in every mode.
   // see primer §16 (object literals: shorthand keys) and §48 (the conditional expression)
-  return context.extensionMode === vscode.ExtensionMode.Test ? { provider, refresh, statusBar, treeView } : { provider, refresh };
+  return context.extensionMode === vscode.ExtensionMode.Test ? { provider, refresh, statusBar, treeView, readinessDeps } : { provider, refresh };
 }
 
 /**
@@ -252,6 +317,23 @@ async function connectedGit(gitExtension: GitExtensionAdapter): Promise<Connecte
 }
 
 /**
+ * The repositories the Git extension has open, in plan §6's order — by the workspace folder
+ * each belongs to, then by path: what the tree lists, and what the setup command offers.
+ * `rootUri.fsPath` is the repository root as a plain file-system path — the physical path, since
+ * the Git extension gets it from `git rev-parse --show-toplevel`. The Git extension's own list is
+ * in no stable order (vscode/gitApi.ts, sortRepositoryRoots); `workspaceFolders` is `undefined`
+ * when no folder is open at all (an empty window), and a list otherwise; `?? []` makes both cases
+ * a list.
+ */
+// see primer §25 (arrays: map) and §30 (`??`)
+function repositoryRoots(api: GitApi): string[] {
+  const roots = api.repositories.map((repository) => repository.rootUri.fsPath);
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  const folderPaths = folders.map((folder) => folder.uri.fsPath);
+  return sortRepositoryRoots(roots, folderPaths);
+}
+
+/**
  * The whole read pipeline, run once per refresh: the repositories the Git extension has
  * open (plan §6, §7.14), then the core functions in the order the plan lays them out (§5
  * trunk, §5 stack). One RepoState per repository, in the order of plan §6 — by the
@@ -264,16 +346,7 @@ async function connectedGit(gitExtension: GitExtensionAdapter): Promise<Connecte
 // see primer §6 (async / await), §22 (for ... of), §25 (arrays: map) and §30 (`??`)
 async function loadRepoStates(output: vscode.OutputChannel, gitExtension: GitExtensionAdapter): Promise<RepoState[]> {
   const { api, settings, git } = await connectedGit(gitExtension);
-
-  // `rootUri.fsPath` is the repository root as a plain file-system path — the physical
-  // path, since the Git extension gets it from `git rev-parse --show-toplevel`. The Git
-  // extension's own list is in no stable order (vscode/gitApi.ts, sortRepositoryRoots);
-  // `workspaceFolders` is `undefined` when no folder is open at all (an empty window), and
-  // a list otherwise; `?? []` makes both cases a list.
-  const roots = api.repositories.map((repository) => repository.rootUri.fsPath);
-  const folders = vscode.workspace.workspaceFolders ?? [];
-  const folderPaths = folders.map((folder) => folder.uri.fsPath);
-  const sortedRoots = sortRepositoryRoots(roots, folderPaths);
+  const sortedRoots = repositoryRoots(api);
 
   const states: RepoState[] = [];
   for (const root of sortedRoots) {
@@ -374,4 +447,71 @@ async function loadFileAtRef(
   // says why seven); a string helper is not worth an import of the tree module.
   output.appendLine(`${relPath} @ ${ref.slice(0, 7)}: ${outcome}`);
   return content ?? '';
+}
+
+/**
+ * The window's git-spice backend (core/backends/gitspice.ts), and what it was built from. Kept
+ * between calls because it remembers `ready` answers — five programs per action saved — and
+ * rebuilt, memo and all, when the git executable, `prCascade.gsPath` or (in a test) the command
+ * runner changes (D56: "a changed setting means a new backend").
+ */
+// see primer §8 (undefined: nothing built yet)
+let backend: { key: string; commands: CommandRunner; instance: GitSpiceBackend } | undefined;
+
+/** The backend for this git and this setting — the one kept, or a new one when either, or the runner, changed. */
+// see primer §44 (`\0` as a separator) and §12 (template strings)
+function backendFor(git: RealGitRunner, executable: string, gsPath: string): GitSpiceBackend {
+  const key = `${executable}\0${gsPath}`;
+  if (backend === undefined || backend.key !== key || backend.commands !== readinessDeps.commands) {
+    backend = { key, commands: readinessDeps.commands, instance: new GitSpiceBackend(git, readinessDeps.commands, gsPath) };
+  }
+  return backend.instance;
+}
+
+/**
+ * The readiness probe for one repository, as the setup flow asks it: through connectedGit on
+ * every call, so `prCascade.gitPath` and `prCascade.gsPath` are read afresh for each question
+ * (the remote and the trunk are fixed when the flow starts). With `fresh`, the remembered `ready`
+ * is dropped first (`forget`): asked by hand, the user may just have logged out or re-initialised
+ * in a terminal. Gated actions (items 20–21) will pass false.
+ */
+// see primer §33 (a function that returns a function) and §6 (async / await)
+function probeFor(gitExtension: GitExtensionAdapter, root: string, remote: string, fresh: boolean): () => Promise<Readiness> {
+  return async () => {
+    const { api, settings, git } = await connectedGit(gitExtension);
+    const probing = backendFor(git, gitExecutable(settings.gitPath, api.git.path), settings.gsPath);
+    if (fresh) {
+      probing.forget(root, remote);
+    }
+    return probing.readiness(root, remote);
+  };
+}
+
+/**
+ * `prCascade.setUpGitSpice` — "PR Cascade: Set Up git-spice" (D58): the §7.13.1 offers for one
+ * repository, one fix at a time, ending in the "ready" notification. The repository is the only
+ * one, or the one picked (vscode/login.ts, `chooseRepository`); its trunk is asked of git the way
+ * the tree asks it. Returns the flow's outcome — `executeCommand` resolves with it, which is what
+ * lets test/ext/login.test.ts wait for the flow — or `undefined` when no repository was chosen.
+ * A rejection (git could not run, E17) reaches VS Code, which shows it as an error.
+ */
+// see primer §6 (async / await), §8 (narrowing) and §73 (a notification with no buttons, not awaited)
+async function setUpGitSpice(gitExtension: GitExtensionAdapter, flows: ReadinessFlows): Promise<ReadyOutcome | undefined> {
+  const { api, settings, git } = await connectedGit(gitExtension);
+  const root = await chooseRepository(repositoryRoots(api), readinessDeps.host);
+  if (root === undefined) {
+    return undefined;
+  }
+  const trunk = await detectTrunk(git, root, { configured: settings.trunk, remote: settings.remote });
+  return flows.ensureReady({
+    root,
+    remote: settings.remote,
+    trunk,
+    gsPathSetting: settings.gsPath,
+    probe: probeFor(gitExtension, root, settings.remote, true),
+    git,
+    action: async (ready) => {
+      void readinessDeps.host.prompt('information', readyMessage(ready, root), []);
+    },
+  });
 }

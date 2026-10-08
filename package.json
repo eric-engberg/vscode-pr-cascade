@@ -61,6 +61,11 @@
         "command": "prCascade.openDiff",
         "title": "Open Changes",
         "category": "PR Cascade"
+      },
+      {
+        "command": "prCascade.setUpGitSpice",
+        "title": "Set Up git-spice",
+        "category": "PR Cascade"
       }
     ],
     "menus": {
@@ -94,6 +99,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Show the `<branch> · n of N` status bar item: the branch HEAD is on and its place in the stack, counted from the bottom. Click it to open the Stack view. Read again on each refresh, like every setting here."
+        },
+        "prCascade.gsPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "The git-spice executable. Empty (the default) tries `git-spice`, then `gs` — the old name, which on a Mac with Homebrew is often Ghostscript instead — in VS Code's own PATH. If **PR Cascade: Set Up git-spice** says git-spice was not found while a terminal has it, set its full path here, such as `/opt/homebrew/bin/git-spice`; a set value is the only one tried. Read again on each check, like every setting here."
         }
       }
     }
