@@ -3,16 +3,21 @@
  * probe's answer. Types only: this file compiles to nothing, and `npm run typecheck` is its
  * test.
  *
- * Layer: core (plan §4.1). Depends on: core/forge.ts (Forge, ForgeConfig). Depended on by:
- * core/backends/gitspice.ts (item 18, the first implementation), core/readinessFix.ts (item 19a:
- * `Ready`, `NotReady`), src/vscode/login.ts and src/extension.ts (items 19b–20). Plan: §4.4 (the
- * target shape — this file declares what the next PR implements and grows with each one, D55),
- * §7.13.1 (the probe), §7.13.3 (what each member runs), §8 E21/E25/E55/E59/E60/E62/E62b/E67/
- * E70/E75.
+ * Layer: core (plan §4.1). Depends on: core/forge.ts (Forge, ForgeConfig), core/model.ts
+ * (RepoState, StackLayer), core/readinessFix.ts (TrunkBranch — types only; readinessFix.ts
+ * imports `Ready` and `NotReady` from here, also as types, so the two files name each other's
+ * shapes and nothing runs in either direction). Depended on by: core/backends/gitspice.ts (item
+ * 18, the first implementation), core/readinessFix.ts (item 19a: `Ready`, `NotReady`),
+ * src/vscode/login.ts and src/extension.ts (items 19b–20). Plan: §4.4 (the target shape — this
+ * file declares what the next PR implements and grows with each one, D55; item 20a adds
+ * `enrich` and `track`), §7.8, §7.13.1 (the probe), §7.13.3 (what each member runs), §8
+ * E21/E25/E55/E56/E57/E59/E60/E62/E62b/E67/E70/E75, §13.2 D59.
  */
 
 // see primer §1 (import / export) and §9 (`import type`: a types-only module imports types only)
 import type { Forge, ForgeConfig } from './forge';
+import type { RepoState, StackLayer } from './model';
+import type { TrunkBranch } from './readinessFix';
 
 /**
  * The readiness probe's answer (plan §7.13.1): one object, never a throw. A tagged union on
@@ -107,15 +112,29 @@ export type Ready = Extract<Readiness, { kind: 'ready' }>;
 export type NotReady = Exclude<Readiness, Ready>;
 
 /**
+ * What `track` answers: the branches it tracked, bottom to top (`[]` when no layer was
+ * untracked), and why it stopped short — git-spice's own words when they are git-spice's — or
+ * `null`. Not a tagged union (primer §59): one field varies, so `string | null` is the lighter
+ * tool, and a caller reads `problem !== null` the way it reads `RepoState.trunk`.
+ */
+// see primer §9 (interface), §14 (readonly) and §10 (`string | null`: known absent)
+export interface TrackResult {
+  readonly tracked: readonly string[];
+  readonly problem: string | null;
+}
+
+/**
  * Everything that changes a stack or talks to a forge about one goes through this (plan
  * §4.4). There is one implementation, git-spice (core/backends/gitspice.ts, from item 18); the
  * interface exists so tests can substitute a fake and so a second backend would be additive.
  *
  * Declared with the members the next PR implements, and grown by each PR that implements
- * another (D55): item 18 adds nothing to it (it implements `readiness`), items 20–21 add
- * `enrich`, `track` and `push`, M7–M9 the rest of §4.4 — `createPRs`, `setDraft`, `restack`,
- * `sync`, `moveOnto`, `insertBelow`, `mergeBottom`, `rebaseState` — with their types. A member
- * declared before its implementation would force every implementer and every fake to stub it.
+ * another (D55): item 18 adds nothing to it (it implements `readiness`), item 20a adds
+ * `enrich` and `track`, item 21 `push`, M7–M9 the rest of §4.4 — `createPRs`, `setDraft`,
+ * `restack`, `sync`, `moveOnto`, `insertBelow`, `mergeBottom`, `rebaseState` — with their
+ * types. A member declared before its implementation would force every implementer and every
+ * fake to stub it; one declared in the PR that implements it makes the class that `implements`
+ * this fail to compile until it has the member (primer §9), which is that PR's first RED.
  */
 // see primer §9 (interface: methods) and §10 (an exact string as a type: the one value `kind` may hold)
 export interface StackBackend {
@@ -130,4 +149,38 @@ export interface StackBackend {
    * be used as a directory — faults the caller already draws for the tree (D56).
    */
   readiness(root: string, remote: string): Promise<Readiness>;
+  /**
+   * Plan §7.8's local tier over `gs log short --all --json`: a NEW RepoState whose layers carry
+   * `tracking` and whose `enrichment` says how it went; the input is never changed. The state
+   * itself comes back when there is no trunk or no layer (nothing to ask). Runs git-spice only
+   * when the repository is initialised — never `gs log` on one that is not: it would try to
+   * initialise it and, under `--no-prompt`, die at the trunk prompt (exit 1, verified 0.31.2;
+   * plan §7.6) — and only when a ref under `refs/heads`, `refs/remotes` or `refs/spice` has
+   * moved since the last answer for this root (§7.14.2's digest). A layer a complete answer
+   * does not list is `null` (untracked); when a line was malformed the answer is incomplete
+   * and such a layer gets no `tracking` at all (unknown — nothing will track it). Degrades
+   * (E57): every failure is `enrichment.kind === 'not-enriched'` with the layers as handed in
+   * and nothing remembered. Takes `state` as computeStack built it — a state this method already
+   * returned is not meant to come back. Rejects only as every core function does: when git
+   * itself cannot run (E17), or the root cannot be used as a directory.
+   */
+  enrich(state: RepoState): Promise<RepoState>;
+  /**
+   * Plan §7.13.3: `gs branch track <name> --base <base>` for each layer whose `tracking` is
+   * `null`, in the order given (bottom to top); `base` is the layer below's name, or for the
+   * first layer the trunk's *local* branch from `trunkBranch` (`--base origin/main` is
+   * refused). Tracked layers, git-spice's trunk and layers whose `tracking` is absent (not
+   * enriched, or unknown) are left alone — a second `track` silently moves a base. Refuses,
+   * with a sentence and no `gs branch track`, when the repository is not initialised (`gs branch
+   * track` would try to initialise it and die at the trunk prompt), when git-spice is missing or
+   * too old, or when the bottom layer is untracked and `trunkBranch` is not `local` — its own
+   * checks, so every caller gets them; the first two run before any git-spice command (one `git
+   * rev-parse` and the version banner), the trunk one as the bottom layer's base is chosen.
+   * Stops at the first failure with git-spice's `FTL` line. Every `problem` is a full sentence,
+   * shown as it is. Never throws for anything git-spice says; rejects only when git itself
+   * cannot run (E17). The refresh afterwards is the caller's (E83), and so is refusing during a
+   * rebase (the caller has `RepoState.rebaseInProgress`; git-spice itself tracks during one —
+   * verified 0.31.2).
+   */
+  track(root: string, layers: readonly StackLayer[], trunkBranch: TrunkBranch): Promise<TrackResult>;
 }

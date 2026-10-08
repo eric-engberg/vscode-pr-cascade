@@ -299,6 +299,15 @@ type, as long as every value of the new type still fits the old: `FakeReadinessH
 read `host.terminals.sent` without a check, while the flow, which only knows `ReadinessHost`,
 sees an ordinary `TerminalHost`.
 
+An interface grown in the PR that implements the new member — `StackBackend` gains `enrich` and
+`track` in `src/core/backend.ts` (M5, item 20a) — makes the class that `implements` it stop
+compiling until it has both: `npm run typecheck` reports "Class 'GitSpiceBackend' incorrectly
+implements interface 'StackBackend'. Type 'GitSpiceBackend' is missing the following properties
+from type 'StackBackend': enrich, track". That is
+plan D55's growth rule seen from the compiler's side, and such a PR's first RED: the contract is
+written, the implementation not yet, and nothing else in the codebase has to change for the
+compiler to say so.
+
 ## 10. Union types
 
 *First seen in `src/core/model.ts`.*
@@ -376,6 +385,16 @@ absent is normalised to a required field defaulting to `false`, so no reader has
 so the result is `{ name: 'main' }` and not `{ name: 'main', down: undefined }` — the two are
 different objects to `toStrictEqual`, and `const` (§4) forbids reassigning `entry`, not changing
 its fields.
+
+`StackLayer.tracking?: GsLogEntry | null` in `src/core/model.ts` (M5, item 20a) combines `?` with
+`| null`, and the two spell *two different absences*. The key left out means "not asked, nothing
+came back, or an answer too damaged to say" — the layer as computeStack built it; `null` means
+"asked, and git-spice does not list this branch" — not tracked. Reading the field gives
+`GsLogEntry | null | undefined`, and the two tests differ: `=== null` for the second, `'tracking'
+in layer` (§51) for the first. The gsLog.ts rule above holds here too — neither `tracking` nor
+`RepoState.enrichment?` is ever *assigned* `undefined`; `enrich` builds `{ ...layer, tracking:
+entry }`, `{ ...layer, tracking: null }` or a plain `{ ...layer }` — so a state `enrich` did not
+touch is the same shape computeStack built, and every test written before item 20a still passes.
 
 ## 12. Template strings
 
@@ -810,6 +829,16 @@ to `Number` (§27). Nothing anchors the end, so `0.32.0-dev` matches too — the
 ignored on purpose. `GIT_SPICE_BANNER`, `/^git-spice (\S+)/`, takes the word after the
 program's name from its `--version` banner: `\S` is any character that is *not* whitespace,
 so `(\S+)` is "the next word".
+
+`src/core/digest.ts` (M5, item 20a) adds the first pattern with a **flag**: `SPICE_DATA_LINE` is
+`/^refs\/spice\/data /m`, and the `m` after the closing slash — *multiline* — makes `^` match at
+the start of every line of the text, not only at the start of the whole text, so the pattern finds
+`refs/spice/data ` wherever `for-each-ref` printed it (sorted output puts it last). Without the
+flag `^` would hold for the first line only, and `isInitialised` would be true only for a
+repository with no other refs. The space at the end is part of the pattern on purpose:
+`refs/spice/database` or `refs/spice/data/x` would otherwise match too. Flags go after the closing
+slash, one letter each; the others most often met are `i` (ignore case) and `g` (every match
+rather than the first) — neither used here.
 
 ## 21. Set
 
@@ -2092,6 +2121,18 @@ one entry with **`delete(key)`**, `Map`'s third writing method beside `set` and 
 setup command asks for a fresh look before it probes (the user may just have logged out in a
 terminal), and `delete` of a key that is not there does nothing, so nothing has to check first.
 
+The third cache is `logByRoot` in the same file (M5, item 20a): a `Map` from a repository root to
+the last `gs log` answer — the entries by branch name, the plan §7.14.2 *digest* the answer was
+read under (the text of every ref `gs log` could have read, from one 10 ms `for-each-ref`), and
+whether every line parsed. It is the content-addressed kind in a different dress: the key is a
+*name* (the root), but an entry is used only when `remembered.digest === digest` — the text is
+recomputed on every refresh and compared whole — so an entry is never wrong, merely stale, and
+staleness is found by the compare, not by a clock. Two more of this section's rules apply. The
+`set` sits after the exit-code check, so a failed `gs log` leaves the map untouched and the next
+refresh asks again. And the remembered answer is applied to *today's* layers by name
+(`withTracking`), so a checkout — which moves no ref the digest lists — changes the rows without a
+`gs log`; the memo stores what git-spice said, not what the tree showed.
+
 ## 47. Parameter properties
 
 *First seen in `src/core/git.ts` (`RealGitRunner`); then in every class of
@@ -2268,7 +2309,11 @@ do for a *union* (§10) what `Pick` does for an object's fields. `Extract<Readin
 those. So `Ready` and `NotReady` are the union cut in two along its tag (§59), and both follow
 `Readiness` when a member is added or changed. A function that takes `NotReady` (`offerFor` in
 `src/core/readinessFix.ts`) cannot be handed `ready` — there is no offer for being ready — and
-one that takes `Ready` has every field of the ready member with no narrowing to do.
+one that takes `Ready` has every field of the ready member with no narrowing to do. The filter
+shape may itself hold a union: `Extract<Readiness, { kind: 'gs-missing' | 'gs-too-old' }>`
+(`NotLocated` in `src/core/backends/gitspice.ts`, M5 item 20a) keeps both members whose `kind`
+fits — the two answers step 1 of the probe can give — so a function taking one has no case to
+write for the eight others.
 
 ## 50. `JSON.stringify` and `JSON.parse`
 
@@ -2392,6 +2437,15 @@ without a library: forget to read a *required* field and the object literal no l
 A field the JSON may omit (`status`, which stays optional; `needsPush`, which the literal
 defaults to `false`) gets no such help — leaving its `if` out compiles: `status` is then silently
 dropped, `needsPush` silently always `false` — so those are pinned by tests, not by the compiler.
+
+Two more uses of `in` from M5 item 20a. On a union of object types whose members have *different
+field names* it narrows as `kind` does on a tagged union (§59): `baseFor` in
+`src/core/backends/gitspice.ts` answers `{ base: string } | { problem: string }`, and after `if
+('problem' in base) { return … }` the compiler knows `base.base` is a string. And in a test it asks
+whether a key is on the object *at all*: `'tracking' in layer` (`test/unit/enrich.test.ts`) is
+false for a layer `enrich` never touched and true for one it set to `null` (§11) — the question
+`toStrictEqual` asks, which `layer.tracking === undefined` would blur, since a key holding
+`undefined` and no key both read as `undefined`.
 
 ## 52. A tree row's command: `TreeItem.command` and `arguments: [this]`
 
@@ -2536,7 +2590,10 @@ FileNode)`), which this codebase does not use yet. There is also an array form, 
 instead of by name: `const [patch] = fs.readdirSync(patchDir)` in
 `test/git/rebase.git.test.ts` (M4 item 13a) takes the one file `format-patch -o` wrote,
 where `readdirSync(patchDir)[0]` would say the same thing less clearly — the shell's
-`set -- "$dir"/*; patch=$1`.
+`set -- "$dir"/*; patch=$1`. The array form also fits a `Map` walked with `for … of` (§22), whose
+elements are `[key, value]` pairs: `for (const [key, result] of tracks)` in
+`test/unit/track.test.ts` (M5, item 20a) names both halves of each pair as it goes, where
+`pair[0]` and `pair[1]` would say nothing.
 
 ## 55. `vscode.Uri.from`, and where percent-encoding happens
 
@@ -2788,6 +2845,18 @@ compiler has narrowed `readiness` to the one member left, `gh-missing`, and the 
 its `missing`, `ghVersion` and `ghMinimum` with no test at all. A member added to `Readiness`
 later lands in that last line too, which then no longer compiles — those fields are not on the
 new member — and that error is the reminder to write its offer.
+
+`Enrichment` in `src/core/model.ts` (M5, item 20a) is a two-member union — `enriched { ranGsLog,
+malformed }` and `not-enriched { cause, reason }` — because the two outcomes carry different
+payloads, which is the test this section gives. Beside it, `TrackResult` in `src/core/backend.ts`
+is deliberately *not* a union: `{ tracked: readonly string[]; problem: string | null }` — one field
+varies, so `string | null` is the lighter tool, as `RepoState.trunk` was above; a reader asks
+`problem !== null` and has the names tracked so far in both cases, which a `{ kind: 'failed' }`
+member would have had to carry again. And `baseFor` in `src/core/backends/gitspice.ts` returns
+`{ base: string } | { problem: string }`, a union with no tag at all: the two members have
+different *field names*, so `'problem' in base` (§51) tells them apart, and the compiler narrows
+on it as it does on `kind`. Three shapes, one rule: a tag when several fields vary together, a
+nullable field when one does, field names alone when each member has exactly one.
 
 ## 60. Another extension's API: `extensions.getExtension`, `activate()`, `exports`, `Thenable`, and a vendored `.d.ts`
 
@@ -3228,6 +3297,12 @@ It pairs with `??` (§30): `??` supplies a value when something is missing, `?.`
 when something is missing. Use it where "and if it is not there, do nothing" is the whole
 intent, as here; where the missing case needs a message or a different path, write the `if`.
 Plan §11.1 asks for the idiomatic spelling once the construct has its section; this is it.
+
+`layer.tracking?.change?.status` (`test/unit/enrich.test.ts`, M5 item 20a; the tree reads
+`tracking?.change` from item 20b) is `?.` on a field that may be `null` *or* `undefined` (§11:
+two absences). `?.` stops for both — the chain is `undefined` whether the layer was never enriched
+or is untracked — so one expression serves where only "is there a change request" is asked; where
+the two absences must be told apart, `=== null` is still the way to ask for the second.
 
 ## 71. A wait that can be stopped: `AbortController`, `AbortSignal`, and a sleep it cuts short
 
