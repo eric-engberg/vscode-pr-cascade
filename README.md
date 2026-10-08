@@ -24,7 +24,9 @@ reload. To build the file yourself, see Development below.
 
 - VS Code ≥ 1.85, with its built-in Git extension enabled (the default). With it disabled,
   the Stack view shows one row saying so and does nothing else.
-- git ≥ 2.38. Nothing else: v0.1 reads your repository through git alone.
+- git ≥ 2.38. The Stack view needs nothing else: it reads your repository through git alone.
+- git-spice ≥ 0.31 for **PR Cascade: Set Up git-spice**, and for the pull-request features
+  the next versions build on it (`brew install git-spice` on macOS; the command offers that).
 - In a remote window (SSH, a container, WSL) install the extension on the remote side, as
   with any extension that runs processes there.
 
@@ -72,6 +74,48 @@ Two cases need the **Refresh** button in the view's title bar:
   it. The Git extension's own operations (stage, commit, fetch) still run a status and
   refresh both.
 
+## git-spice setup
+
+**PR Cascade: Set Up git-spice** in the Command Palette checks, in order, that git-spice is
+installed and new enough, that the repository is initialised for it, that its remote is a
+GitHub or GitLab repository git-spice recognises, and that you are logged in — and offers the
+fix for the first thing missing. With several repositories open it asks which one. A fix that
+needs you runs in a terminal named `PR Cascade: <folder>` at the repository root, so you can
+answer git-spice's questions there; PR Cascade checks again every 3 seconds, for up to 5
+minutes, and once the step has taken it refreshes the view, says so, and offers the next one.
+Close the terminal to give up early. Before it runs a fix it looks once more, so a notification
+answered long after it appeared does nothing when the step was done meanwhile. The offers:
+
+- **Install** — with Homebrew in a terminal when `brew` is in one of its usual places
+  (`/opt/homebrew`, `/usr/local`, Linuxbrew's), else git-spice's install page in your browser;
+  PR Cascade then waits the same way, and a second click opens the page again. *If a terminal
+  finds git-spice but PR Cascade does not,* VS Code's own PATH is missing its directory (it
+  usually has your login shell's PATH): set `prCascade.gsPath` to its full path, such as
+  `/opt/homebrew/bin/git-spice` — the message names it when Homebrew has one.
+- **Upgrade** — git-spice older than 0.31: `brew upgrade git-spice` when the one found is
+  Homebrew's, else the install page.
+- **Initialise** — `git-spice repo init --trunk <branch> --remote <remote>`, with your trunk's
+  local branch (`main` for `origin/main`; git-spice needs a local one, and the message says how
+  to create it when there is none) and `prCascade.remote`.
+- **Set GitHub URLs** — for a host git-spice does not match on its own, such as
+  `<name>.ghe.com`: `git config spice.forge.github.url https://<host>` in this repository, and
+  `spice.forge.github.apiUrl` beside it (`https://api.<host>` for GHE.com, whose API git-spice
+  would otherwise look for in the wrong place). GitLab likewise.
+- **Log in** — `git-spice auth login --forge github` (or `gitlab`) in the terminal. git-spice
+  asks how; the main choices:
+  - *GitHub:* **GitHub CLI** if `gh` is logged in — nothing more to do, and PR Cascade will want
+    `gh` for GitHub's native stacks anyway; else **OAuth** (a code to paste in the browser), or a
+    **Personal Access Token** where an organisation does not allow the git-spice OAuth app.
+  - *GitLab:* **GitLab CLI** if `glab` is logged in, else **OAuth** (a self-hosted GitLab needs
+    an administrator to set up the git-spice OAuth app first) or a **Personal Access Token**.
+
+  A `GITHUB_TOKEN` (or `GITLAB_TOKEN`) in your shell's environment counts as a login to
+  git-spice and makes `auth login` refuse, so the line unsets it for that one command and a
+  real login is stored.
+
+Bitbucket, Gitea, Forgejo and Azure DevOps repositories keep the Stack view; their pull-request
+features are not in v1.
+
 ## Settings
 
 All under `prCascade.*` in the Settings editor (search "PR Cascade"). Every one is read
@@ -83,6 +127,7 @@ again on each refresh, so a change takes effect without reloading the window.
 | `gitPath` | `""` | The git executable. Empty = the one the built-in Git extension found (it honours `git.path`), so both run the same git; a full path only to override that. |
 | `remote` | `"origin"` | The remote whose default branch is consulted first — change it if you work on a fork. |
 | `statusBar` | `true` | Show the `<branch> · n of N` status bar item: the branch HEAD is on and its place in the stack, counted from the bottom. Click it to open the Stack view. |
+| `gsPath` | `""` | The git-spice executable. Empty = `git-spice`, then `gs`, from VS Code's PATH; a full path when VS Code's PATH misses it (see "git-spice setup"). A set value is the only one tried. |
 
 Which repositories the view shows is the built-in Git extension's decision, so its settings
 apply, exactly as in the Source Control view: `git.autoRepositoryDetection`,
@@ -97,7 +142,7 @@ Control stays closed here too, across reloads.
 v0.1 is the viewer. The milestones after it, each one stack of PRs, are laid out in
 [`pr-cascade-plan.md`](pr-cascade-plan.md):
 
-5. git-spice backend: readiness, login, push.
+5. git-spice backend: readiness and setup (the command above), then tracking and push.
 6. Two views of every stack in the repository: a compact smartlog rail in the Explorer and a
    detailed graph in the extension's own container; the v0.1 tree goes once the rail matches it.
 7. Create PRs for the whole stack, linked as a native GitHub stack.
@@ -169,9 +214,11 @@ src/extension.ts     entry point — wires core to VS Code
 src/core/            pure logic + git runner; no VS Code imports (enforced by lint)
 src/vscode/          adapters: the built-in Git extension's API (gitApi: repositories, the status
                      signal, the git executable), config (settings → plain values), the Stack tree
-                     view, the status bar item, the stackdiff: content provider and the commands
+                     view, the status bar item, the stackdiff: content provider, the commands,
+                     terminals, and the git-spice setup flow (login)
 test/unit, test/git  Vitest (see vitest.config.mts)
-test/helpers/        the fake git runner and the fixture builder (a real throwaway stack)
+test/helpers/        the fake git and command runners, a fake for VS Code's terminals and
+                     notifications, and the fixture builder (a real throwaway stack)
 test/ext, test/ext-parent   Mocha inside VS Code, one launch per folder (see .vscode-test.mjs)
 docs/                reading order and the TypeScript primer
 scripts/             developer tooling (never shipped)

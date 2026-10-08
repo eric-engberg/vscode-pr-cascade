@@ -7,14 +7,14 @@
  * TrunkOptions object of plain strings, and this file is what builds it. Depends on: the
  * `vscode` module. Depended on by: src/extension.ts, on every refresh and every click.
  * The settings and their defaults are declared in package.json "contributes.configuration".
- * Plan: §7.3, §7.14.1 (`gitPath`), §13.4.
+ * Plan: §7.3, §7.14.1 (`gitPath`), §7.13.1 (`gsPath`, M5 item 19b), §13.4.
  */
 
 // see primer §1 (import / export) and §2 (the vscode module)
 import * as vscode from 'vscode';
 
 /**
- * The four settings v0.1 reads, as plain values — no VS Code types, so a test can build
+ * The five settings the extension reads, as plain values — no VS Code types, so a test can build
  * one by hand and core code can take it without importing `vscode`. Each field's doc says
  * what the setting means; package.json "contributes.configuration" is what the user sees
  * in the Settings editor, and the two must agree. (M1 also read two repository-scan
@@ -36,6 +36,13 @@ export interface PrCascadeSettings {
   remote: string;
   /** `prCascade.statusBar`: whether the `<branch> · n of N` status bar item is shown (vscode/statusbar.ts); read on every refresh like the rest, so turning it off takes effect at the next one. */
   statusBar: boolean;
+  /**
+   * `prCascade.gsPath` (M5 item 19b): the git-spice executable, or `''` — the default — for
+   * `git-spice`, then `gs`, looked up in VS Code's PATH (core/backends/gitspice.ts). A full path
+   * when VS Code's PATH misses it; a wrong one is E62, naming it. Passed on exactly as read, as
+   * `gitPath` is.
+   */
+  gsPath: string;
 }
 
 /**
@@ -62,5 +69,6 @@ export function readSettings(): PrCascadeSettings {
     gitPath: configuration.get<string>('gitPath', ''),
     remote: configuration.get<string>('remote', 'origin'),
     statusBar: configuration.get<boolean>('statusBar', true),
+    gsPath: configuration.get<string>('gsPath', ''),
   };
 }
