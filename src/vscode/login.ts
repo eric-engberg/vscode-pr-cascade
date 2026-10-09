@@ -6,8 +6,9 @@
  * waits until the step passed (core/poll.ts, asking the probe again every 3 s for up to 5 min),
  * refreshes the view (E83), says so, and goes round again; once the probe says ready, it runs the
  * action it was given. The by-hand "Set Up git-spice" command (src/extension.ts) is its first
- * caller; item 21 will gate `push` on it. Track Stack (item 20b) does not — a local operation, D60
- * says why.
+ * caller; the first gated action is M7's `createPRs`. Track Stack (item 20b) and Push Whole Stack
+ * (item 21b) are not gated — local operations, a push with `--no-publish` consulting neither forge
+ * nor login; D60 and D62 say why.
  *
  * One fix runs at a time per repository: a click while one runs brings that fix's terminal
  * forward instead (§7.5 step 4). Nothing is held while a notification is open — only the click
@@ -115,7 +116,7 @@ export interface ReadyRequest {
  * window is closing; `in-flight` — another fix for this repository was running, so its terminal
  * was brought forward (or its page opened again — and nothing at all is shown when that fix is
  * only `git config` lines, or the look again at its click, both over in a moment) and this action
- * did not run. Item 21 can say which.
+ * did not run. M7's `createPRs`, the first gated action, can say which.
  */
 // see primer §10 (union types: exact strings as members)
 export type ReadyOutcome = 'acted' | 'not-ready' | 'gave-up' | 'in-flight';
@@ -206,8 +207,8 @@ export class ReadinessFlows implements Disposable {
    * (`fixIfStillNeeded`), and when the step was done meanwhile it starts the pass again. Rejects
    * when a probe, a `git config` or opening the browser rejects (git could not run, E17), and then
    * holds nothing. The
-   * action runs outside any flight: it is not a fix, and a slow push must not block a second
-   * repository's login.
+   * action runs outside any flight: it is not a fix, and a slow action (M7's `createPRs`) must not
+   * block a second repository's login.
    */
   // see primer §6 (async / await), §29 (a counted for loop) and §12 (template strings)
   async ensureReady(request: ReadyRequest): Promise<ReadyOutcome> {
