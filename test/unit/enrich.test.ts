@@ -375,6 +375,8 @@ describe('GitSpiceBackend.enrich', () => {
           phrase: 'FTL git-spice: boom',
         },
         { name: 'a line that merely mentions FTL', log: exited(1, '', 'INF the FTL line follows\nFTLISH not it\nFTL git-spice: boom\n'), phrase: 'FTL git-spice: boom' },
+        // A git line relayed after git-spice's `FTL stderr:` marker is appended (item 21a's rule, shared).
+        { name: 'a git line relayed after the FTL', log: exited(1, '', 'FTL git-spice: boom\nFTL stderr:\nFTL fatal: nope\n'), phrase: 'FTL git-spice: boom — fatal: nope' },
         { name: 'no FTL line', log: exited(1, '', '\n  oops  \nmore\n'), phrase: 'oops' },
         { name: 'empty stderr', log: exited(1), phrase: 'exited 1' },
         { name: 'whitespace-only stderr', log: exited(1, '', ' \r\n'), phrase: 'exited 1' },
