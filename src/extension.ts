@@ -7,22 +7,24 @@
  * `node:fs` (`existsSync`, for where Homebrew is) and `node:path` (a repository's folder name
  * in a sentence), core/git.ts, trunk.ts, stack.ts, changes.ts, uri.ts (the scheme name),
  * debounce.ts (the refresh), command.ts, backends/gitspice.ts (the readiness probe; `enrich` on
- * every load and `track` from Track Stack, item 20b), poll.ts, readinessFix.ts (`readyMessage`,
- * `trunkBranchFor`), vscode/gitApi.ts (the built-in Git extension: repositories, events, the
- * status signal, the git executable), vscode/config.ts, tree.ts, statusbar.ts, content.ts,
- * commands.ts, terminal.ts, login.ts (the git-spice setup flow, `chooseRepository`). Depended on
- * by: VS Code itself, test/ext/* and test/ext-parent/*. Plan: §4.1, §6, §7.1.0 (the status bar),
- * §7.2 (`prCascade.setUpGitSpice`, D58; `prCascade.trackStack`, D60), §7.2.1 (the `…` menu entry
- * and its context key), §7.8 (the local tier on every load), §7.13.1, §7.14, §7.14.2 (the digest
- * behind `enrich`), §8 E12/E56/E83, §9.1 (what activate returns), §10.1 items 6, M2 9, M3 11, M4
- * 12a, 12b, 14, M5 19b, 20b; §13.2 D52, D58, D60.
+ * every load, `track` from Track Stack, item 20b, and `push` from Push Whole Stack, item 21b),
+ * poll.ts, readinessFix.ts (`readyMessage`, `trunkBranchFor`), vscode/gitApi.ts (the built-in Git
+ * extension: repositories, events, the status signal, the git executable), vscode/config.ts,
+ * contextKeys.ts (the names of the context keys the listener sets), tree.ts, statusbar.ts,
+ * content.ts, commands.ts, terminal.ts, login.ts (the git-spice setup flow, `chooseRepository`).
+ * Depended on by: VS Code itself, test/ext/* and test/ext-parent/*. Plan: §4.1, §6, §7.1.0 (the
+ * status bar), §7.2 (`prCascade.setUpGitSpice`, D58; `prCascade.trackStack`, D60;
+ * `prCascade.pushStack`, D62), §7.2.1 (the `…` menu entries, their context keys and `enablement`),
+ * §7.7 (tracking before a push), §7.8 (the local tier on every load), §7.13.1, §7.14, §7.14.2 (the
+ * digest behind `enrich`), §8 E3/E12/E56/E76/E83, §9.1 (what activate returns), §10.1 items 6, M2
+ * 9, M3 11, M4 12a, 12b, 14, M5 19b, 20b, 21b; §13.2 D52, D58, D60, D62.
  */
 
 // see primer §1 (import / export), §2 (the vscode module) and §9 (`import type`)
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import type { Readiness, TrackResult } from './core/backend';
+import type { PushResult, Readiness, TrackResult } from './core/backend';
 import { GitSpiceBackend } from './core/backends/gitspice';
 import { changedFiles } from './core/changes';
 import { RealCommandRunner } from './core/command';
@@ -38,6 +40,7 @@ import { STACK_DIFF_SCHEME } from './core/uri';
 import { openDiff } from './vscode/commands';
 import { readSettings } from './vscode/config';
 import type { PrCascadeSettings } from './vscode/config';
+import { HAS_UNTRACKED_KEY, REBASE_IN_PROGRESS_KEY } from './vscode/contextKeys';
 import { StackDiffContentProvider } from './vscode/content';
 import { GitExtensionAdapter, GitUnavailableError, gitExecutable, realGitExtensionHost, sortRepositoryRoots } from './vscode/gitApi';
 import type { GitApi } from './vscode/gitApi';
@@ -192,19 +195,29 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
     () => readSettings().statusBar,
   );
   context.subscriptions.push(statusBar);
-  // The one listener on a load's states feeds three things from the same load (plan §7.1.0 "the
-  // same refresh cycle", D52): the status bar; `lastStates`, which Track Stack picks its repository
-  // from; and the context key `prCascade.hasUntracked`, which is what shows "Track Stack with
-  // git-spice" in the view's `…` menu exactly while a repository has a `not tracked` row — a
-  // static `when` in package.json cannot say that, a key an extension sets can (plan §7.2.1; the
-  // device §7.11 already plans for `prCascade.hasStack`). `setContext` is a built-in command, the
-  // one way an extension writes such a key; its Thenable is nobody's to await (primer §63).
-  // see primer §74 (a context key: `executeCommand('setContext', key, value)` and a menu's `when`)
+  // The one listener on a load's states feeds four things from the same load (plan §7.1.0 "the
+  // same refresh cycle", D52): the status bar; `lastStates`, which Track Stack and Push Whole
+  // Stack pick their repository from; the context key `prCascade.hasUntracked`, which is what
+  // shows "Track Stack with git-spice" in the view's `…` menu exactly while a repository has a
+  // `not tracked` row — a static `when` in package.json cannot say that, a key an extension sets
+  // can (plan §7.2.1; the device §7.11 already plans for `prCascade.hasStack`); and
+  // `prCascade.rebaseInProgress`, which both commands' `enablement` negate, so their entries are
+  // greyed out while a rebase is paused (item 21b; one key for the window, so one paused
+  // repository greys them for every repository — and each command still refuses with the
+  // folder's name, because `enablement` does not stop `executeCommand`, the route another
+  // extension or a test takes; what the Command Palette does with a disabled command is for
+  // Ric's F5 and is recorded in plan §13.4, item 21b's bullet). The names come from
+  // vscode/contextKeys.ts, the one module package.json's clauses are checked against
+  // (test/ext/commands.test.ts): a key's value cannot be read back. `setContext` is a built-in
+  // command, the one way an extension writes such a key; its Thenable is nobody's to await
+  // (primer §63).
+  // see primer §74 (a context key: `executeCommand('setContext', key, value)`, a menu's `when` and a command's `enablement`)
   context.subscriptions.push(
     provider.onDidLoadStates((states) => {
       statusBar.update(states);
       lastStates = states;
-      void vscode.commands.executeCommand('setContext', 'prCascade.hasUntracked', states.some(hasUntracked));
+      void vscode.commands.executeCommand('setContext', HAS_UNTRACKED_KEY, states.some(hasUntracked));
+      void vscode.commands.executeCommand('setContext', REBASE_IN_PROGRESS_KEY, states.some((state) => state.rebaseInProgress));
     }),
   );
 
@@ -269,16 +282,21 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
   // The git-spice setup flow (M5 item 19b, vscode/login.ts): one per window, handed the refresh
   // a fix of ours must be followed by (E83) and the Output channel for its give-up lines;
   // disposed with the window, which stops every wait at once. "PR Cascade: Set Up git-spice" in
-  // the Command Palette is its first caller (D58); item 21 will gate `push` on it. Track Stack
-  // (item 20b, below) does not: a local operation, D60 says why.
+  // the Command Palette is its first caller (D58); the first gated action is M7's `createPRs`.
+  // Track Stack (item 20b) and Push Whole Stack (item 21b), below, are not gated: local
+  // operations — a push with `--no-publish` consults neither forge nor login — D60 and D62 say why.
   const flows = new ReadinessFlows(readinessDeps, refresh, (line) => output.appendLine(line));
   // `push` takes several at once (primer §25): the flows, and the commands that run them.
   context.subscriptions.push(
     flows,
     vscode.commands.registerCommand('prCascade.setUpGitSpice', () => setUpGitSpice(gitExtension, flows)),
     // "Track Stack with git-spice" — in the view's `…` menu while a layer reads `not tracked`
-    // (the context key above), and in the Command Palette always (plan §7.2.1, E56, D60).
+    // (the first context key above), greyed out during a rebase through the second key (item 21b,
+    // D62), and in the Command Palette (plan §7.2.1, E56, D60).
     vscode.commands.registerCommand('prCascade.trackStack', () => trackStack(output, gitExtension, refresh)),
+    // "Push Whole Stack" — in the view's `…` menu always, greyed out during a rebase through the
+    // second key above, and in the Command Palette (plan §7.2.1, E12, E76, E83, D62).
+    vscode.commands.registerCommand('prCascade.pushStack', () => pushStack(output, gitExtension, refresh)),
   );
 
   // With the Stack view hidden at startup — a collapsed Source Control pane — VS Code asks
@@ -541,7 +559,7 @@ function backendFor(git: RealGitRunner, executable: string, gsPath: string): Git
  * every call, so `prCascade.gitPath` and `prCascade.gsPath` are read afresh for each question
  * (the remote and the trunk are fixed when the flow starts). With `fresh`, the remembered `ready`
  * is dropped first (`forget`): asked by hand, the user may just have logged out or re-initialised
- * in a terminal. The gated action of item 21 will pass false.
+ * in a terminal. M7's gated `createPRs` will pass false.
  */
 // see primer §33 (a function that returns a function) and §6 (async / await)
 function probeFor(gitExtension: GitExtensionAdapter, root: string, remote: string, fresh: boolean): () => Promise<Readiness> {
@@ -585,13 +603,30 @@ async function setUpGitSpice(gitExtension: GitExtensionAdapter, flows: Readiness
 }
 
 /**
- * What the last top-level load produced, kept from `onDidLoadStates` for Track Stack's repository
- * pick — one load, one truth, the same event the status bar follows (D52). `[]` after a failed
- * load (vscode/tree.ts fires it so), with no repository, or while the first load is still in
- * flight — never "all tracked".
+ * What the last top-level load produced, kept from `onDidLoadStates` for Track Stack's and Push
+ * Whole Stack's repository pick — one load, one truth, the same event the status bar follows
+ * (D52). `[]` after a failed load (vscode/tree.ts fires it so), with no repository, or while the
+ * first load is still in flight — never "all tracked".
  */
 // see primer §4 (`let`: reassigned by the listener) and §14 (`readonly` on an array type)
 let lastStates: readonly RepoState[] = [];
+
+/**
+ * The sentence for a command run while nothing is loaded — a failed load, no repository, or the
+ * first load still in flight; the Refresh button is the action named, so a warning (D57). Shared
+ * by Track Stack and Push Whole Stack.
+ */
+const NO_REPOSITORY_LOADED = 'The Stack view has no repository loaded — refresh it first.';
+
+/**
+ * The roots with a push in flight. Two `gs stack submit` at once in one repository race on the
+ * remote's refs and on `.git/config` — one run leaves an upstream unset with a `WRN`, another
+ * rejects a push `(failed to update ref)` (verified 0.31.2) — so a second click while one runs is
+ * answered with a sentence, not run (item 21b). Cleared in `pushStack`'s `finally`, whatever
+ * happened.
+ */
+// see primer §21 (Set: membership, `add`, `delete`)
+const pushing = new Set<string>();
 
 /**
  * Whether a state has a layer git-spice does not track — what shows "Track Stack with git-spice"
@@ -620,7 +655,7 @@ function notEnrichedMessage(folder: string, cause: EnrichmentCause, reason: stri
   return { severity: 'warning', message: `${sentence} Run PR Cascade: Set Up git-spice.` };
 }
 
-/** `1 branch`, `3 branches`: what Track Stack says it tracked. */
+/** `1 branch`, `3 branches`: what Track Stack says it tracked, and Push Whole Stack what it pushed. */
 function branchesLabel(count: number): string {
   if (count === 1) {
     return '1 branch';
@@ -672,7 +707,7 @@ async function trackStack(output: vscode.OutputChannel, gitExtension: GitExtensi
 // §54 (destructuring the message's two fields)
 function untrackedRepositories(host: ReadinessHost): string[] {
   if (lastStates.length === 0) {
-    void host.prompt('warning', 'The Stack view has no repository loaded — refresh it first.', []);
+    void host.prompt('warning', NO_REPOSITORY_LOADED, []);
     return [];
   }
   if (lastStates.every((state) => state.layers.length === 0)) {
@@ -700,7 +735,7 @@ function untrackedRepositories(host: ReadinessHost): string[] {
  * load: a `gs branch track` typed in a terminal is seen by no watcher (E83), so the last load
  * may show `not tracked` for a branch already tracked, and re-tracking it would silently move
  * its base. Then, in order: a paused rebase is refused with the view's own sentence (E12 —
- * git-spice would not refuse, verified 0.31.2; the greyed-out menu entry comes with item 21);
+ * git-spice would not refuse, verified 0.31.2; the greyed-out menu entry is `enablement`, item 21b);
  * no layers → nothing to track (the one state with no `enrichment`, so its reason is never
  * read); not enriched → its sentence; every layer tracked → a sentence; else `track`, with the
  * trunk's local branch asked of git the way the setup flow asks it (`trunkBranchFor`, item
@@ -738,4 +773,139 @@ async function trackIn(output: vscode.OutputChannel, gitExtension: GitExtensionA
     void host.prompt('information', `Tracked ${branchesLabel(result.tracked.length)} with git-spice in ${folder}.`, []);
   }
   return result;
+}
+
+/**
+ * `prCascade.pushStack` — "Push Whole Stack" (plan §7.2.1, E12, E76, E83, D62): the stack of one
+ * repository from the last load (picked when several), re-loaded fresh, its untracked layers
+ * tracked first (§7.7's preflight, E56), then `gs stack submit --no-publish` through the backend
+ * (core/backends/gitspice.ts `push`, which refuses first what must not be pushed), exactly one
+ * refresh per push begun (E83 — success, failure or refusal alike, in the `finally`; the in-flight
+ * guard's sentence refreshes nothing, since nothing of ours ran — the running push's `finally` will),
+ * one sentence. Not gated on the readiness flow (D62): `--no-publish` needs neither forge nor
+ * login — verified — so the flow would refuse pushes that work; where the setup flow would help
+ * (not initialised, git-spice missing or too old), the sentence names it. Returns the result —
+ * `executeCommand` resolves with it, which is what lets test/ext/commands.test.ts wait for it:
+ * `push`'s own answer, or `{ pushed: [], notes: [], problem: null }` when the fresh load had no
+ * layers; `undefined` when nothing was loaded, no repository had layers, the pick was escaped, a
+ * push is already running here, a rebase is paused, HEAD is detached, the fresh load was not
+ * enriched, or tracking first failed. A rejection (git could not run, E17) reaches VS Code, which
+ * shows it as an error; the refresh still runs and the guard is released.
+ */
+// see primer §6 (async / await), §18 (try / finally: the refresh and the guard's release, whatever happened) and §21 (Set)
+async function pushStack(output: vscode.OutputChannel, gitExtension: GitExtensionAdapter, refresh: () => void): Promise<PushResult | undefined> {
+  const host = readinessDeps.host;
+  const candidates = stackedRepositories(host);
+  if (candidates.length === 0) {
+    return undefined;
+  }
+  const root = await chooseRepository(candidates, host, 'Push the stack of which repository with git-spice?');
+  if (root === undefined) {
+    return undefined;
+  }
+  if (pushing.has(root)) {
+    void host.prompt('information', `Already pushing the stack in ${path.basename(root)}.`, []);
+    return undefined;
+  }
+  pushing.add(root);
+  try {
+    return await pushIn(output, gitExtension, root);
+  } finally {
+    pushing.delete(root);
+    refresh();
+  }
+}
+
+/**
+ * The roots of the last load's repositories with layers — Push Whole Stack's candidates — or `[]`
+ * after saying why there are none: nothing loaded (the shared warning), or no layers anywhere
+ * (E4, E5; information). No refresh in either: nothing of ours ran. Unlike Track Stack's
+ * candidates, a repository `enrich` could not serve is still one — `pushIn` says what is missing
+ * after the fresh load, so the user hears the setup command named for the repository they chose.
+ */
+// see primer §25 (arrays: `filter`, `map`)
+function stackedRepositories(host: ReadinessHost): string[] {
+  if (lastStates.length === 0) {
+    void host.prompt('warning', NO_REPOSITORY_LOADED, []);
+    return [];
+  }
+  const withLayers = lastStates.filter((state) => state.layers.length > 0);
+  if (withLayers.length === 0) {
+    void host.prompt('information', 'Nothing to push — the Stack view shows no layers.', []);
+    return [];
+  }
+  return withLayers.map((state) => state.root);
+}
+
+/**
+ * Push Whole Stack's action for one chosen repository, loaded afresh first and never from the last
+ * load (E83's reason: a `gs branch track`, a fetch or a rebase since then is seen by no watcher —
+ * and `push`'s own refusals read the fresh load's `gs log` lines). Then, in order: a paused rebase
+ * is refused with the view's own sentence (E12; `enablement` greys the entry too, but it does not
+ * stop `executeCommand`); no layers → nothing to push (the one state with no `enrichment`); a
+ * detached HEAD → `stack submit` acts on HEAD's branch, and git-spice would only say `in detached
+ * HEAD state` (E3); not enriched → its sentence, the setup command named where it would help; then
+ * the `null` layers tracked first (§7.7's preflight — an untracked layer between tracked ones
+ * git-spice skips silently, an untracked HEAD it refuses; a `track` problem ends it, pushing
+ * nothing); then `push`, and `reportPush` says how it went.
+ */
+// see primer §70 (`?.` on `enrichment`, absent only on the no-layers path above) and §28 (`basename`)
+async function pushIn(output: vscode.OutputChannel, gitExtension: GitExtensionAdapter, root: string): Promise<PushResult | undefined> {
+  const host = readinessDeps.host;
+  const folder = path.basename(root);
+  const connected = await connectedGit(gitExtension);
+  const fresh = await loadRepoState(output, connected, root);
+  if (fresh.rebaseInProgress) {
+    void host.prompt('warning', `Rebase in progress in ${folder} — resolve it first.`, []);
+    return undefined;
+  }
+  if (fresh.layers.length === 0) {
+    void host.prompt('information', `Not on a stack in ${folder} — nothing to push.`, []);
+    return { pushed: [], notes: [], problem: null };
+  }
+  if (fresh.head === null) {
+    void host.prompt('warning', `Detached HEAD in ${folder} — check out a branch of the stack first.`, []);
+    return undefined;
+  }
+  if (fresh.enrichment?.kind === 'not-enriched') {
+    const { severity, message } = notEnrichedMessage(folder, fresh.enrichment.cause, fresh.enrichment.reason);
+    void host.prompt(severity, message, []);
+    return undefined;
+  }
+  const { api, settings, git } = connected;
+  const backend = backendFor(git, gitExecutable(settings.gitPath, api.git.path), settings.gsPath);
+  if (hasUntracked(fresh)) {
+    const tracked = await backend.track(root, fresh.layers, await trunkBranchFor(git, root, fresh.trunk));
+    if (tracked.problem !== null) {
+      void host.prompt('warning', tracked.problem, []);
+      return undefined;
+    }
+    output.appendLine(`${root}: tracked ${tracked.tracked.join(', ')} before pushing`);
+  }
+  const result = await backend.push(root, fresh.layers);
+  reportPush(output, host, root, folder, result);
+  return result;
+}
+
+/**
+ * What the user hears and the Output panel keeps after `push`: every line git-spice said beside
+ * `Pushed` (a `<name>-2` rename, a `WRN`, the `ERR` remedy of a partial push — `notes`), one line
+ * naming the branches pushed (on a failure too: a partial push moved them), then core's `problem`
+ * as a warning, or the success sentence — with a tail pointing at the Output panel when git-spice
+ * said more than `Pushed`, the one honest way to surface a rename it reports with exit 0.
+ */
+// see primer §22 (for ... of), §48 (the conditional expression) and §12 (template strings)
+function reportPush(output: vscode.OutputChannel, host: ReadinessHost, root: string, folder: string, result: PushResult): void {
+  for (const line of result.notes) {
+    output.appendLine(`${root}: git-spice: ${line}`);
+  }
+  if (result.pushed.length > 0) {
+    output.appendLine(`${root}: pushed ${result.pushed.join(', ')}`);
+  }
+  if (result.problem !== null) {
+    void host.prompt('warning', result.problem, []);
+    return;
+  }
+  const tail = result.notes.length > 0 ? ' — git-spice also left notes in the Output panel' : '';
+  void host.prompt('information', `Pushed ${branchesLabel(result.pushed.length)} with git-spice in ${folder}${tail}.`, []);
 }

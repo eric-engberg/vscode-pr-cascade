@@ -485,6 +485,21 @@ function: `readonly onDidClose: Event<TerminalLike> = (listener) => { … }` is 
 is an arrow function, and because it is an arrow, `this` inside it is the instance (§5) — the
 same function written as a method would be one more thing to bind.
 
+`SlowRunner` in `test/ext/commands.test.ts` (M5, item 21b) **overrides** a method: a child class
+declares `run` again with the same signature, and anything holding the object — even under the
+parent's type, `FakeCommandRunner` — gets the child's version when it calls `run`. Inside it,
+`super.run(request)` is the *parent's* `run`, called from the child's, so the call is still recorded
+in `calls` and answered from the Map; `super(...)` in `GitError` above calls the parent's
+constructor, `super.name(...)` calls one of its methods. It works because `run` is an ordinary
+public method: a `private` method, or a field holding an arrow like `onDidClose` above, cannot be
+reached through `super` (the compiler refuses both). The child declares no constructor, so it
+inherits the parent's: `new SlowRunner(results)` hands the Map straight through to
+`FakeCommandRunner`'s parameter property — which is why the subclass needs the Map at construction
+rather than later. And a class may be declared inside a function like any other declaration:
+`SlowRunner` is local to `slowRunner`, exists while that function runs, and its `run` closes over the
+function's own variables (`gate`, `signalReached`) exactly as an arrow would (§5) — the one object
+made from it leaves through the return value.
+
 ## 14. readonly
 
 *First seen in `src/core/git.ts` (`GitError`).*
@@ -3509,16 +3524,19 @@ test answers the questions from a script — "the user clicks Log in" — and re
 notification shown, word for word.
 
 
-## 74. A context key for menus: `executeCommand('setContext', key, value)` and a `when` clause
+## 74. A context key for menus: `executeCommand('setContext', key, value)`, a `when` clause, and `enablement`
 
 *First seen in `src/extension.ts` (the `onDidLoadStates` listener) and `package.json` (the
-`view/title` entry for `prCascade.trackStack`).*
+`view/title` entry for `prCascade.trackStack`); `prCascade.rebaseInProgress` and `enablement`
+from M5 item 21b, with the names in `src/vscode/contextKeys.ts`.*
 
 ```ts
-void vscode.commands.executeCommand('setContext', 'prCascade.hasUntracked', states.some(hasUntracked));
+void vscode.commands.executeCommand('setContext', HAS_UNTRACKED_KEY, states.some(hasUntracked));
+void vscode.commands.executeCommand('setContext', REBASE_IN_PROGRESS_KEY, states.some((state) => state.rebaseInProgress));
 ```
 ```json
 { "command": "prCascade.trackStack", "when": "view == prCascade && prCascade.hasUntracked", "group": "2_stack@8" }
+{ "command": "prCascade.pushStack", "title": "Push Whole Stack", "enablement": "!prCascade.rebaseInProgress" }
 ```
 
 VS Code keeps a per-window dictionary of named values — **context keys** — that the `when`
@@ -3537,7 +3555,30 @@ repository shows a `not tracked` row. The plan's own manifest already leans on o
 (`prCascade.hasStack` on `createStackPRs`, §7.11, M7); this is the first the code sets. Name keys
 with the extension's prefix: the dictionary is shared by every extension in the window.
 
-Two things there is no API for. A key cannot be *read back*, so `test/ext/commands.test.ts` pins
-the manifest entry word for word and the command's effects, not the key's value. And a key lives
-only as long as the window: a reload starts with none, and the first load after activation writes
-it again — which is why nothing resets it on deactivation.
+A second key from the same listener (M5 item 21b): `prCascade.rebaseInProgress`, true while any
+loaded repository has a rebase paused. It drives not a `when` but **`enablement`**, a field on the
+command itself in `contributes.commands`: `"enablement": "!prCascade.rebaseInProgress"`. `when`
+decides whether a menu entry *exists*; `enablement` decides whether the command is *enabled*
+wherever it appears — the `…` menu entry and any keybinding are greyed out — and, by VS Code's own
+documentation, it does **not** stop the command being run through `executeCommand`, which is how
+another extension or a test may reach it. That is why `pushStack` and `trackStack` keep their own
+refusal after the fresh load (the sentence is the behaviour; the greying is the courtesy) and why
+`test/ext/commands.test.ts` can run the E12 case at all: it executes the command while a rebase is
+paused and asserts the sentence. What the Command Palette does with a disabled command (VS Code's
+palette filters its entries by `enabled`, so both commands should be absent from it while a rebase
+is paused) is to be recorded in plan §13.4 (item 21b's bullet) once checked at F5.
+
+A key's value cannot be read back, so the one thing a test can check is that the string the
+listener *writes* is the string the manifest *reads*: `test/ext/commands.test.ts` pins the manifest
+entries word for word against the constants, and the commands' effects, not the keys' values. Both
+names therefore live in one module,
+`src/vscode/contextKeys.ts` (`HAS_UNTRACKED_KEY`, `REBASE_IN_PROGRESS_KEY`), imported by the
+listener and by the manifest test — a typo in a literal on either side would otherwise leave
+`!prCascade.rebaseInProgress` reading `!undefined`, which is `true`: both commands enabled for
+ever, and every test green.
+
+Two more things there is no API for. A key is per window, not per repository — nothing scopes one
+to a folder — so one paused repository greys the entry for every repository, and the command's
+sentence names the folder. And a key lives only as long as the window: a reload starts with none,
+and the first load after activation writes it again — which is why nothing resets it on
+deactivation.
