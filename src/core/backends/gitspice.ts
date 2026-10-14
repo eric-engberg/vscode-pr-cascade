@@ -22,8 +22,8 @@
  * types from core/backend.ts; item 20b calls `enrich` on every load and `track` from Track
  * Stack; item 21b calls `track` then `push` from Push Whole Stack). Plan: §4.4, §7.6, §7.7, §7.8,
  * §7.13, §7.13.1, §7.13.3, §7.14.2, §8 E17/E22/E55/E56/E57/E59/E60/E62/E67/E70/E75/E76/E83,
- * §13.1 (`gs` is Ghostscript on a Homebrew Mac), §13.2 D56/D59/D61, §13.4 (git-spice 0.31.2
- * facts, 2026-10-08 and 2026-10-09).
+ * §13.1 (`gs` is Ghostscript on a Homebrew Mac), §13.2 D56/D59/D61/D63 (item 22a: the timeout is a
+ * cancel), §13.4 (git-spice 0.31.2 facts, 2026-10-08 and 2026-10-09).
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -76,12 +76,15 @@ export const PROBE_TIMEOUT_MS = 15_000;
  * How long one push may take (item 21a): `git ls-remote` and `git push` per branch over a
  * network, pre-push hooks included — about half a second per branch against a local origin
  * (verified: 12 branches in 6 s) — so two minutes bound a dead link or a hung credential helper
- * without killing a long stack over a slow one. A budget against a hang, not a cancel: the kill
- * reaches git-spice alone, and a `git push` it had started finishes on its own — the branch lands
- * on the remote with no upstream recorded here, and the next push would name its upstream
- * `<name>-2` (verified); `git fetch origin` then `git branch --set-upstream-to=origin/<b> <b>`
- * repairs it (item 21b's README says so). A guess until a real remote is measured (item 22, which
- * also owns the process-group kill that would stop git's push too).
+ * without killing a long stack over a slow one. Since item 22a a cancel, not only a budget: the
+ * kill reaches the whole process group — git-spice, git's push and a pre-push hook — so a push
+ * cut off here does not land on the remote (measured, D63); a program that ignores SIGTERM gets
+ * SIGKILL two seconds later (`KILL_GRACE_MS`, core/command.ts), so the notification can come up
+ * to 122 s after the click. Before 22a the kill reached git-spice alone and the branch landed
+ * with no upstream recorded here, the next push naming its upstream `<name>-2` (D61; item 21b's
+ * README keeps the `git fetch origin` + `git branch --set-upstream-to` recovery for a push cut
+ * off between the remote's update and git's own upstream write). A guess until a real remote is
+ * measured.
  */
 export const PUSH_TIMEOUT_MS = 120_000;
 
@@ -300,7 +303,7 @@ export class GitSpiceBackend implements StackBackend {
    * --reset` in a terminal: that command forgets first (D57). M7's `createPRs`, the first action
    * gated on the flow, will do the same after an operation fails on login or init, then ask
    * again; Track Stack (item 20b) and Push Whole Stack (item 21b) are not gated and never forget
-   * (D60; D62 when 21b lands). Not part of `StackBackend`
+   * (D60, D62). Not part of `StackBackend`
    * (core/backend.ts) until something other than this class needs it (D55).
    */
   // see primer §46 (a Map as a cache: `delete`)

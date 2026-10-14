@@ -29,6 +29,9 @@ in `package.json`, and a release's tag is that version with a `v` in front.
   (after a fetch), a layer that needs a restack, a paused rebase and a detached HEAD; what
   git-spice says beside `Pushed` (an upstream renamed to `<branch>-2`, a warning) goes to the
   Output panel and the sentence says so. Both it and Track Stack are greyed out during a rebase.
+  A push that runs past two minutes is stopped whole on macOS and Linux — git-spice, git's push
+  and any hook — so the branch being pushed does not land; branches already pushed stay pushed
+  and the Output panel lists them.
 
 ## [0.1.0] - 2026-10-01
 

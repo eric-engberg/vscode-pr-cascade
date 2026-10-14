@@ -562,14 +562,14 @@ explicitly; the `return;` after `resolve(stdout)` matters, because the callback 
 otherwise continue into the failure branch; and both callbacks are arrow functions because
 they read `this.gitPath` — an arrow keeps the method's `this`, a `function` would not (§5).
 
-`RealCommandRunner.run` in `src/core/command.ts` (M5, item 18) is the same adapter with four
-differences: the executable comes from the request rather than the constructor, and three more. It never calls `reject`: every outcome — exit 0, exit 1, a program that was not
-there — becomes a `CommandResult` handed to `resolve`, because for its callers an exit code is
-an answer, not a failure (the file's header says why). It passes `timeout` in the options, so Node kills a
-program that runs too long; the callback then gets an error with `killed: true` and no exit
-code, which the code reads as `timedOut`. And it keeps what `execFile` *returns* — the
-`ChildProcess` handle, which `RealGitRunner` ignores — to close the program's input at once:
-`child.stdin?.end()` (§70 for the `?.`).
+`RealCommandRunner.run` in `src/core/command.ts` (M5, item 18) is the same adapter with a
+difference that matters: it never calls `reject`. Every outcome — exit 0, exit 1, a program that
+was not there — becomes a `CommandResult` handed to `resolve`, because for its callers an exit
+code is an answer, not a failure (the file's header says why). Until item 22a it wrapped
+`execFile` as `RealGitRunner` does, with `timeout` in the options and `child.stdin?.end()` on the
+handle `execFile` returns; since item 22a it wraps `spawn` (§75), which has no callback at all —
+the result is assembled from the child's events, and `resolve` is called inside the `close`
+handler, once, by the `watch` function the Promise's body hands it to.
 
 Two smaller uses arrive with `src/core/poll.ts` (M5, item 19a). `sleep` has nothing that can
 fail, so its function takes only `resolve` and never rejects (§71). And `test/unit/poll.test.ts`
@@ -1436,6 +1436,14 @@ a meaning defined by that interface: "the whole tree changed, ask for the top ag
 channel, a registered command, the provider itself. Pushing one onto
 `context.subscriptions` (in `activate`) hands it to VS Code, which calls `dispose()` on
 each when the extension shuts down; that is why `activate` never has to undo anything.
+
+Node has the same idea under the same name. `EventEmitter` from `node:events` is what Node's own
+objects extend, and a `ChildProcess` (§75) is one: `child.on('close', (code, signal) => { … })`
+subscribes a listener the way `provider.onDidChangeTreeData(…)` does, with the event's name as
+the first argument instead of a field per event, and `child.stdout.on('data', …)` the same on a
+stream. Node's version returns the emitter rather than a `Disposable` (`off` or
+`removeListener` unsubscribes); `src/core/command.ts` never needs to, because a child's events
+stop with the child.
 
 ## 33. Function types
 
@@ -2788,6 +2796,16 @@ leaned on the same thing already: its listener names `subscription`, the very `c
 being assigned. Read such a closure as "when this fires, use whatever these names hold
 then".
 
+Two timers, one cancelled: `watch` in `src/core/command.ts` (M5, item 22a) keeps the timeout's
+handle in `let timeoutTimer: NodeJS.Timeout | undefined` and calls `clearTimeout(timeoutTimer)` on
+`close` — `clearTimeout` accepts `undefined`, so a run with no limit needs no `if` — and a program
+that exits in time is never signalled. The SIGKILL timer `stopGroup` starts is deliberately *not*
+cleared: `close` fires as soon as the program and its pipes are gone, while a member of its group
+that ignored SIGTERM may live on, and only a timer that outlives `close` reaches it. So that
+timer is `unref()`'d instead (§75) — a pending timer keeps a Node process alive, and `unref()`
+says "do not wait for me" — and a late kill of a group that is gone is an `ESRCH` `killGroup`
+swallows.
+
 ## 59. Tagged unions: object shapes told apart by a `kind` field
 
 *First seen in `src/vscode/gitApi.ts` (`GitConnection`); read in `src/extension.ts`
@@ -3158,6 +3176,13 @@ five-minute loop of a hundred sleeps plays out exactly as it would in real time;
 Promise, which the test awaits. **`vi.getTimerCount()`** is how many fake timers are still
 queued — 0 after an abort is the proof that `clearTimeout` ran.
 
+`vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })` (`test/git/command.git.test.ts`,
+M5 item 22a) fakes only the two calls named and leaves `Date`, `setImmediate` and the rest real —
+so a real child process can run to its `close` while every `setTimeout` the runner makes is
+caught in the fake queue, and `vi.getTimerCount()` then says how many are still pending: zero,
+once the result is in, is the proof that the runner cleared the timer it set. `vi.useRealTimers()`
+in the `finally` hands the clock back whatever the assertion said.
+
 ## 66. The status bar: `window.createStatusBarItem` and `StatusBarItem`
 
 *First seen in `src/extension.ts` (the item is made there) and `src/vscode/statusbar.ts`
@@ -3306,18 +3331,21 @@ refused by its `protocol`.
 
 ## 70. `?.`: read a field, or call a method, only if the thing before the dot is there
 
-*First seen in `src/core/command.ts` (`RealCommandRunner.run`).*
+*First seen in `src/core/command.ts` (`RealCommandRunner.run`, M5 item 18; since item 22a in
+`watch`).*
 
 ```ts
-const child = execFile(request.executable, [...request.args], options, (error, stdout, stderr) => { … });
-child.stdin?.end();
+child.stdout?.setEncoding('utf8');
+child.stdout?.on('data', (chunk: string) => collect(chunk, (text) => (stdout += text)));
 ```
 
-`execFile` returns a `ChildProcess`, whose `stdin` is typed `Writable | null` (§10): the
-stream the program reads its input from, or `null` for a child spawned without an input pipe
-(`stdio: 'ignore'`); `execFile` always gives one, so here the `?.` satisfies the type rather
-than a case the code can meet. `child.stdin.end()` would not compile — `end` does not exist on `null` — and §8's spelling
-is `if (child.stdin !== null) { child.stdin.end(); }`. The `?.` is that `if` in one token:
+`spawn` returns a `ChildProcess`, whose `stdout` is typed `Readable | null` (§10): the stream
+the program's output arrives on, or `null` for a child spawned without that pipe (`stdio:
+'ignore'` for it); ours always has one, so here the `?.` satisfies the type rather than a case
+the code can meet. (Until item 22a the example was `child.stdin?.end()` on the handle `execFile`
+returned — the same shape, on the input stream, which is now `/dev/null` from the start.)
+`child.stdout.on(…)` would not compile — `on` does not exist on `null` — and §8's spelling
+is `if (child.stdout !== null) { child.stdout.on(…); }`. The `?.` is that `if` in one token:
 **optional chaining**. `a?.b` reads `b` when `a` is neither `null` nor `undefined`, and is
 `undefined` otherwise, without reading anything; `a?.b()` calls `b` on the same condition and
 does nothing otherwise. The chain is also *short-circuited*: in `a?.b.c`, when `a` is missing
@@ -3582,3 +3610,147 @@ to a folder — so one paused repository greys the entry for every repository, a
 sentence names the folder. And a key lives only as long as the window: a reload starts with none,
 and the first load after activation writes it again — which is why nothing resets it on
 deactivation.
+
+## 75. `spawn`: `stdio`, `detached` and a process group; `process.kill(-pid)`; a child's events; `NodeJS.ErrnoException` and `NodeJS.Signals`
+
+*First seen in `src/core/command.ts` (`RealCommandRunner.run`, `watch`, `stopGroup`, `killGroup`,
+M5 item 22a).*
+
+```ts
+child = spawn(request.executable, [...request.args], {
+  cwd: request.cwd,
+  env: { ...process.env, ...request.env },
+  stdio: ['ignore', 'pipe', 'pipe'],
+  detached: process.platform !== 'win32',
+  windowsHide: true,
+});
+child.stdout?.setEncoding('utf8');
+child.stdout?.on('data', (chunk: string) => { … });
+child.on('error', (error: NodeJS.ErrnoException) => { startError = error; });
+child.on('close', (code, signal) => { … resolve(…); });
+
+process.kill(-child.pid, 'SIGTERM');   // the whole group, not the one process
+```
+
+`spawn` is the primitive `execFile` (§15) is built on. `execFile` starts the program, collects
+both outputs for you up to `maxBuffer`, kills it at `timeout`, and calls you back once with
+`(error, stdout, stderr)`. `spawn` starts the program and hands you the `ChildProcess` — an
+`EventEmitter` (§32) with two readable streams — and does nothing else: the caller wires the
+streams and the timers itself. `core/command.ts` moved from one to the other in item 22a for a
+single option `execFile` cannot pass on: **`detached`**. (Node's `execFile` copies a fixed list
+of options — `cwd`, `env`, `uid`, `gid`, `shell`, `signal`, the two Windows flags — into its
+`spawn` call and drops the rest; measured, the child's group stayed the parent's.)
+
+**`stdio`** says what the program's three standard streams are, as a three-element array — or one
+word for all three (`stdio: 'ignore'`, as the tests' control spawn has it): `'ignore'`
+is `/dev/null` (the program's input here — a tool that waits for input gives up at once, and
+there is no `stdin` to close), `'pipe'` is a stream on the `ChildProcess` (`child.stdout`,
+`child.stderr`, each `Readable | null`, §70), `'inherit'` would be the parent's own. With
+`setEncoding('utf8')` a stream delivers text rather than `Buffer`s, and its decoder keeps a
+multi-byte character that a chunk boundary split in two whole — which a `toString()` per chunk
+would not.
+
+**`detached: true`** on macOS and Linux means one system call, `setsid()`: the program becomes
+the leader of a new session and a new **process group** whose id is its own pid, with no
+controlling terminal. Nothing else changes — it is still waited for, its output still read, it
+is not `unref()`'d (that would be the opt-out of waiting). Every process it starts — git's
+`push`, a pre-push hook, the shell running it — inherits that group. That is the point:
+**`process.kill(pid, signal)`** sends a signal to one process, and a *negative* pid means "every
+process in the group whose id is `-pid`". So `process.kill(-child.pid, 'SIGTERM')` reaches
+git-spice *and* git's push *and* the hook, where `execFile`'s own `timeout` signalled git-spice
+alone and the push ran on to completion (item 21a measured it; plan D61). SIGTERM first, because
+git tidies its lock files on it; then, after a grace (`KILL_GRACE_MS`), SIGKILL — which nothing
+can ignore — for anything that carried on. That second timer is **`unref()`'d**: a pending timer
+keeps a Node process alive until it fires, and `unref()` says "do not wait for me", so a run whose
+result is in does not hold the process for a kill that is probably redundant — but the timer is
+not cleared, because the program may have died on the SIGTERM while a member of its group that
+ignored it lives on, and `close` has already fired by then (§58). `ESRCH` is the error for a pid
+or group that no longer exists — the program exited between the timer and the kill — and is
+swallowed. Signal `0` is a
+question, not a kill: `process.kill(pid, 0)` throws when there is no such process and does
+nothing otherwise, which is how the tests ask "is the grandchild still there". On Windows there
+are no process groups, `detached` means a new console, and `process.kill(-pid)` throws; the
+runner falls back to `child.kill(signal)` — the one pid, as before item 22a — and the plan
+states the floor as macOS and Linux (D63).
+
+**The events**, in the order they matter: `data` on each stream, as output arrives; `error` on
+the child when the program could not be started (ENOENT: not found; EACCES: not executable) or
+could not be signalled; `exit` when the process ended — its streams may still hold data; and
+**`close`** when the process has ended *and* every stream has drained, which is why `watch`
+settles the result there and nowhere else. A program that never started fires `error` and then
+`close` with a negative code (measured: −2 for ENOENT, −13 for EACCES), so the `error` is
+remembered in a variable and decides the result when `close` arrives. One consequence shaped
+`stopGroup`: `close` waits for the pipes, and a descendant that left the group (`setsid` again —
+a daemonising hook) while still holding the program's two pipes would keep `close` from firing
+until it exited, or for ever. So after the SIGKILL the runner calls **`destroy()`** on both
+streams — our end of each pipe is closed, `close` fires, and what `data` already delivered stays
+in the strings (measured: the result settled at the limit plus the grace instead of five seconds
+later). `execFile`'s own `kill()` destroyed the streams too, which is why the old runner never
+met the case.
+
+**Two `NodeJS.*` types** appear here for the first time beyond §58's `NodeJS.Timeout` — the
+`NodeJS` namespace is `@types/node`'s, Node's own types under one name.
+`NodeJS.ErrnoException` is an `Error` with the fields a system call's failure carries —
+`code` (`'ENOENT'`), `errno`, `syscall`, `path` — the type the `error` event delivers (declared
+as plain `Error` in `@types/node`; the narrower annotation on the handler compiles because the
+extra fields are all optional, §9); the
+`ExecFileException` that `classifyStartFailure` (core/git.ts) was written for is an
+`ErrnoException` with a few optional fields added, so an `ErrnoException` is accepted where one is
+asked for (§9: a value with at least the fields). `NodeJS.Signals` is the signal names as an
+exact-string union (§10): `'SIGTERM' | 'SIGKILL' | 'SIGINT' | …`, so `killGroup(child, 'SIGTERN')`
+is a compile error rather than a runtime one, and `close`'s second argument is typed with it.
+
+**`process.platform`** is the string Node reports for the operating system — `'darwin'`,
+`'linux'`, `'win32'` — compared with `===` as any exact string is (§45).
+
+## 76. `describe.skipIf` and `it.skipIf`: a test decided when the file loads
+
+*First seen in `test/git/git.git.test.ts` (`it.skipIf(runningAsRoot)`, M1 — the pointer was
+added in M5 item 22a) and `test/git/command.git.test.ts` (`describe.skipIf(process.platform ===
+'win32')`, item 22a).*
+
+```ts
+const runningAsRoot = process.getuid !== undefined && process.getuid() === 0;
+it.skipIf(runningAsRoot)('reports not-executable for a file without the execute bit', …);
+
+describe.skipIf(process.platform === 'win32')('the timeout kills the whole process group (item 22a)', () => { … });
+```
+
+Vitest collects a file by *running* its top level: every `describe` and `it` call registers a
+test, and only afterwards are the tests run. So a condition computed at the top level — who the
+process runs as, which operating system this is, whether a program is installed — is known
+before any test starts, and **`skipIf(condition)`** uses it: `it.skipIf(c)` returns an `it` that
+registers the test as skipped when `c` is true, `describe.skipIf(c)` does the same for a whole
+block. Note the shape — `it.skipIf(c)(title, fn)` is *two* calls: the first picks the `it` to use,
+the second registers the test. A skipped test is not silent, but it is quiet: the default
+reporter `npm test` uses prints only the count (`Tests  128 passed | 2 skipped (130)`), and `npm
+run test:git -- --reporter=verbose` lists each one as `↓ |git| <file> > <block> > <title>` — a grey
+arrow before the title, never the word "skipped".
+
+Why skip rather than fake or fail. A root user has every execute bit, so the test's premise is
+false there — not the code; Windows has no process groups, so the seven tests would prove nothing
+there — and the extension's floor is macOS and Linux (plan D63). A skip is honest where the test
+*cannot* mean anything on this machine; it would be dishonest where the test merely needs
+something the machine lacks and CI must always have — that case gets a loud failure instead, and
+M5 item 22b's real-git-spice files show the pattern (`it.runIf`, extending this section).
+
+## 77. A test's own time limit: `it(title, fn, timeout)`
+
+*First seen in `test/git/command.git.test.ts` (the escaped-grandchild test, M5 item 22a).*
+
+```ts
+it('a descendant that left the group … settles at the timeout plus the grace', async () => {
+  …
+}, 10_000);
+```
+
+Vitest gives every test the same time to finish — 5 s by default, or the project's `testTimeout`
+in `vitest.config.mts` — and a test that runs past it fails with `Test timed out in 5000ms`, which
+says nothing about *why*. A third argument to `it` is that one test's own limit, in milliseconds.
+It is the right tool when the failure the test exists to catch would itself take longer than the
+default: here, without the pipes destroyed, `close` arrives when the grandchild ends, at about
+5.2 s — just past Vitest's clock — so the regression would read as a timeout instead of as the
+`elapsed` assertion the test was written around. Ten seconds keeps Vitest's clock out of the way;
+the test's own `expect(elapsed).toBeLessThan(3_000)` is still what fails. A limit is a ceiling,
+not a budget: a test that *reaches* it is broken, not slow (the comment on `hookTimeout` in
+`vitest.config.mts` says the same of hooks).

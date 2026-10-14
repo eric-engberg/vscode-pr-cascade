@@ -381,13 +381,15 @@ the repository root; its §13 is the running log of decisions and deviations mad
     a missing executable is "not installed"), `CommandRequest` (one object for the executable,
     the arguments, the directory, the variables and the timeout — the executable is per request
     because the probe tries two names), `CommandResult` (the counterpart of `GitFailure` that
-    also covers success), and `RealCommandRunner.run`: `execFile` turned into a Promise as
-    `RealGitRunner` does it, sharing its directory check and ENOENT/EACCES classification (now
-    exported from `git.ts`), with the program's input closed at once (`?.`, primer §70) and an
-    optional timeout. This is the "execFile wrapper" plan §11.3 weighed `execa` against in M5
-    item 21a and kept (D61); read the timeout's doc comment for what the kill is — a budget
-    against a hang, not a cancel: it reaches the program alone, and a child it started (git's
-    push) runs on.
+    also covers success), and `RealCommandRunner.run`: `spawn` turned into a Promise as
+    `RealGitRunner` does with `execFile`, sharing its directory check and ENOENT/EACCES
+    classification (exported from `git.ts`), the program's input `/dev/null` from the start, both
+    outputs collected under the same 32 MB ceiling, and — since M5 item 22a — the program started
+    as the leader of its own process group (`detached`, primer §75) so the request's timeout kills
+    the group: git-spice, git's push and a pre-push hook together (`killGroup`, SIGTERM then
+    SIGKILL after `KILL_GRACE_MS`). This is the "execFile wrapper" plan §11.3 weighed `execa`
+    against in item 21a and kept (D61); read `watch` for why the result settles on `close`, and
+    the class comment for why `execFile` with `detached` was not an option.
 30. **`test/helpers/fakeCommand.ts`** — the same interface answered from canned results, the
     way `fakeGit.ts` (item 5) answers git: a Map keyed by the executable and its arguments,
     every request recorded whole, `answerIn` for one directory, and a loud throw for a command
@@ -399,7 +401,16 @@ the repository root; its §13 is the running log of decisions and deviations mad
 32. **`test/git/command.git.test.ts`** — the real runner over real processes: git for the exit
     codes; Node itself for the environment, for a program that reads its input (it must not
     wait) and for one that outlives its timeout (it must be killed); and paths that are not
-    programs for the three start failures. Every case resolves.
+    programs for the three start failures. Every case resolves. Since item 22a, ten more: a
+    multi-byte character kept whole across a chunk boundary; then the process-group describe — a
+    Node child that spawns a Node grandchild, gone after the timeout; SIGKILL after the grace for
+    a program that ignores SIGTERM, the line it wrote on the signal kept; the control that kills
+    the one pid, as `execFile` did, and finds the grandchild alive; exit 7 on SIGTERM kept beside
+    `timedOut`; the 32 MB ceiling, the program stopped and not only unread; a foreign signal
+    named; a descendant that left the group but kept the program's pipes, which cannot hold the
+    result open (the pipes are destroyed after the SIGKILL, not before the SIGTERM); a grandchild
+    that ignores SIGTERM while the program dies on it, still reached by a SIGKILL timer that
+    outlives `close`; and no timer left queued once a result is in.
 33. **`src/core/backends/gitspice.ts`** — the first M5 file that talks to git-spice: the
     readiness probe (plan §7.13.1). Read the constants first — the two names tried, the
     variables every call gets, the timeout, the version floor — then the four small version
