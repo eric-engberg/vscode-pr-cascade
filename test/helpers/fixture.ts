@@ -6,8 +6,9 @@
  * Layer: test helper (plan §9.1 layer 2, §9.3); hermetic on its own — the git environment
  * is built into `git()`, not the test runner — so it works outside Vitest too. Depends on:
  * Node built-ins only, nothing under src/. Depended on by: test/git/stack.git.test.ts,
- * test/git/rebase.git.test.ts, .vscode-test.mjs (its compiled copy under out/),
- * scripts/fixture.ts. Plan: §9.3, Appendix A.
+ * test/git/rebase.git.test.ts, the three real-git-spice files test/git/gitspice*.git.test.ts and
+ * their helper test/helpers/gitspice.ts (M5 item 22b), .vscode-test.mjs (its compiled copy under
+ * out/), scripts/fixture.ts. Plan: §9.3, Appendix A.
  */
 
 // see primer §1 (import / export) and §28 (the Sync variants of Node's functions): they
@@ -60,8 +61,22 @@ export interface Fixture {
   addUnrelatedStack(name?: string): void;
   /** Leaves HEAD detached at the commit it is on (E3). */
   detach(): void;
-  /** Starts a rebase of the stack onto a trunk that now conflicts with the bottom layer, and leaves it paused (E12): the `rebase-merge` directory (`git rev-parse --git-path rebase-merge`) exists afterwards. */
+  /** Starts a rebase of the stack onto a trunk that now conflicts with the bottom layer, and leaves it paused (E12): the `rebase-merge` directory (`git rev-parse --git-path rebase-merge`) exists afterwards. Its trunk commit is not pushed — the E12 tests depend on the layers that leaves; `commitOnTrunk` is the pushed form. */
   startConflictingRebase(): void;
+  /**
+   * Trunk gains one commit setting `file` to `content`, pushed to the origin when there is one so
+   * `origin/<trunk>` moves with it — a local trunk ahead of its remote-tracking ref would itself read
+   * as a layer (D59) — and HEAD is put back. With a new file name the stack merely needs a restack;
+   * with the bottom layer's file (`a`) a restack conflicts — the pause git-spice leaves is what
+   * item 22's tests read (M5 item 22b).
+   */
+  commitOnTrunk(file: string, content: string): void;
+  /**
+   * Writes an executable git hook (`.git/hooks/<name>`, found through `rev-parse --git-path hooks`)
+   * with `script` as its whole text — a `#!/bin/sh` line first — and returns its path, so a test can
+   * remove it again. For the pre-push hook that makes a push slow (M5 item 22b).
+   */
+  addHook(name: string, script: string): string;
   /** Deletes the repository, its origin and the scratch directory holding them. */
   cleanup(): void;
 }
@@ -286,6 +301,31 @@ class StackFixture implements Fixture {
     if (fs.existsSync(rebaseDir) === false) {
       throw new Error(`startConflictingRebase: expected a paused rebase, but ${rebaseDir} does not exist`);
     }
+  }
+
+  commitOnTrunk(file: string, content: string): void {
+    const previousBranch = this.currentBranch();
+    this.git(['checkout', '-q', this.trunk]);
+    fs.writeFileSync(path.join(this.dir, file), content);
+    this.git(['add', file]);
+    this.git(['commit', '-q', '-m', `trunk: ${file}`]);
+    if (this.hasRemote) {
+      // Pushed, unlike startConflictingRebase's commit: with the origin behind, the local trunk
+      // would be ahead of `origin/<trunk>` — the ref the stack is measured against — and read
+      // as a layer of its own (D59, measured in item 22b's design).
+      this.git(['push', '-q', 'origin', this.trunk]);
+    }
+    this.git(['checkout', '-q', previousBranch]);
+  }
+
+  addHook(name: string, script: string): string {
+    // `--git-path hooks` for the same reason as `rebase-merge` above: never hardcode `.git/`.
+    const hooksDir = path.resolve(this.dir, this.git(['rev-parse', '--git-path', 'hooks']).trim());
+    fs.mkdirSync(hooksDir, { recursive: true });
+    const hookPath = path.join(hooksDir, name);
+    // `mode` makes the file executable as it is written; git ignores a hook it cannot run.
+    fs.writeFileSync(hookPath, script, { mode: 0o755 });
+    return hookPath;
   }
 
   cleanup(): void {
