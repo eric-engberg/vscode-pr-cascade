@@ -33,6 +33,12 @@ export default defineConfig({
           // skips every test in the file. Sixty seconds is a ceiling, not a budget: a
           // hook that reaches it is broken, not slow.
           hookTimeout: 60_000,
+          // The real-git-spice files (M5 item 22b) make up to three git-spice calls in one test —
+          // 0.4–0.5 s each on an idle Mac, 1.5 s for a push of three branches, and two to three
+          // times that on a GitHub runner — and two of them measured 4.7 s here, past Vitest's 5 s
+          // default. Thirty seconds is a ceiling, not a budget: a test that reaches it is broken,
+          // not slow. Arrangements that run more than three calls go in `beforeAll` (above).
+          testTimeout: 30_000,
         },
       },
     ],
