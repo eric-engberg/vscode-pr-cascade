@@ -25,8 +25,9 @@ reload. To build the file yourself, see Development below.
 - VS Code ≥ 1.85, with its built-in Git extension enabled (the default). With it disabled,
   the Stack view shows one row saying so and does nothing else.
 - git ≥ 2.38. The Stack view needs nothing else: it reads your repository through git alone.
-- git-spice ≥ 0.31 for **PR Cascade: Set Up git-spice**, and for the pull-request features
-  the next versions build on it (`brew install git-spice` on macOS; the command offers that).
+- git-spice ≥ 0.31 for **PR Cascade: Set Up git-spice**, **Track Stack with git-spice** and
+  **Push Whole Stack**, and for the pull-request features the next versions build on it
+  (`brew install git-spice` on macOS; the setup command offers that).
 - In a remote window (SSH, a container, WSL) install the extension on the remote side, as
   with any extension that runs processes there.
 
@@ -55,8 +56,10 @@ are on is not listed in v0.1: check out the top of the stack to see all of it.
   set prCascade.trunk** when no trunk could be found.
 - **What git-spice knows** about each layer, once the repository is initialised for it (see
   git-spice setup below): `#12` (its pull request — the link is in the tooltip), `needs restack`
-  (the layer below moved), `needs push` (local commits not on the remote), `not tracked`
-  (git-spice does not know the branch yet). A layer git-spice tracks and has nothing to say
+  (the layer below moved), `needs push` (the branch and its remote copy differ — your commits
+  are not there yet, or, after a `git fetch`, the remote has commits you do not: then **Push
+  Whole Stack** refuses rather than drop them), `not tracked` (git-spice does not know the
+  branch yet). A layer git-spice tracks and has nothing to say
   about shows only its count; hover for `git-spice: tracked on <base>` — the base as git-spice
   names it, which for the bottom layer is your trunk's local branch — and, when the row is too
   narrow to show them, its `needs restack` / `needs push`. Without git-spice, or before
@@ -76,7 +79,8 @@ Two cases need the **Refresh** button in the view's title bar:
 - A ref that moves without the working tree, the index or `HEAD` changing is seen by no
   one: `git branch -f`, `git update-ref`, `git tag`, a push of a branch other than the
   current one's upstream, `gs branch track` typed in a terminal (the view's own **Track Stack
-  with git-spice** refreshes by itself). Press Refresh after one of those.
+  with git-spice** and **Push Whole Stack** refresh by themselves). Press Refresh after one of
+  those.
 - With `git.autorefresh` off, or in a repository with more changes than `git.statusLimit`
   allows (10 000 by default), the Git extension stops reacting to changes on disk: git run
   outside VS Code is noticed by neither Source Control nor this view — press Refresh after
@@ -130,6 +134,38 @@ initialised repository, not a login; it refuses while a rebase is paused (resolv
 it again); with several repositories open it asks which. A branch git-spice already tracks is never tracked again (that
 would move its base), so the command looks at the repository afresh before it runs.
 
+**Pushing.** **Push Whole Stack** in the view's `…` menu (and the Command Palette) runs
+`git-spice stack submit --no-publish --no-update-only` for the repository (asked which, with
+several): every branch of the stack you are on — including layers above your branch, which the
+view does not list in v0.1 — is pushed to the remote. Layers git-spice does not track yet are
+tracked first. No pull request is created — that is milestone 7 below — and no login is needed:
+it takes git-spice, an initialised repository and a reachable remote. Two things it will not do,
+each said in a sentence before anything moves: push over a layer whose remote copy has commits
+yours does not (the view reads `needs push` on it after a `git fetch` — someone rebased or pushed
+it there; bring their commits in first, with `git rebase --onto origin/<branch>` when you have
+unpushed work or `git branch -f <branch> origin/<branch>` when you have none — Sync Stack will do
+this for you in v0.9), and push while a layer reads `needs restack` — after you `git pull` trunk
+the bottom layer does, and that alone refuses the whole push, so run `git-spice stack restack` in a
+terminal first (Restack onto Trunk arrives in v0.9; a `spice.submit.skipRestackCheck` setting in
+your git config is not consulted here).
+Before you fetch, git's own force-with-lease check refuses a branch someone else changed on the
+remote (`! [rejected] … (stale info)`) and nothing is overwritten; the sentence quotes it. Two
+more things to know. git-spice names each branch's remote copy after the branch, but only when it
+sets the upstream itself: if the remote already has a `<branch>` with no upstream recorded here —
+you pushed it once with plain `git push origin <branch>`, or from another clone — git-spice pushes
+to `<branch>-2` and says so in the Output panel (the sentence points there); run `git branch
+--set-upstream-to=origin/<branch> <branch>` first to keep the name. And a push that takes longer
+than two minutes is cut off with `timed out`; git's own push may still finish, so before pushing
+again run `git fetch origin` and set the upstream of any layer the remote now has (`git branch
+-vv` shows which has none) — otherwise that layer goes to `<branch>-2` as above. It refuses while
+a rebase is paused (the menu entry is greyed out, and so is Track Stack) and when you are not on a
+branch. The one case where git-spice does use your login: a branch that already has a pull request
+git-spice knows is updated on push, so if your git-spice login has expired the push says so in
+git-spice's words — run **PR Cascade: Set Up git-spice** and push again. Credentials are git's own
+— an ssh key in your agent or keychain, or a credential helper; PR Cascade never answers a
+password prompt, so a push that would ask one fails at once with git's message, and the fix is the
+agent or the helper, or `git push` once from a terminal.
+
 Bitbucket, Gitea, Forgejo and Azure DevOps repositories keep the Stack view; their pull-request
 features are not in v1.
 
@@ -159,7 +195,8 @@ Control stays closed here too, across reloads.
 v0.1 is the viewer. The milestones after it, each one stack of PRs, are laid out in
 [`pr-cascade-plan.md`](pr-cascade-plan.md):
 
-5. git-spice backend: readiness and setup (the command above), then tracking and push.
+5. git-spice backend: readiness and setup, tracking and push (the commands above — done); then
+   `gh` for GitHub's native stacks.
 6. Two views of every stack in the repository: a compact smartlog rail in the Explorer and a
    detailed graph in the extension's own container; the v0.1 tree goes once the rail matches it.
 7. Create PRs for the whole stack, linked as a native GitHub stack.

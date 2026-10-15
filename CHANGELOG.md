@@ -22,6 +22,13 @@ in `package.json`, and a release's tag is that version with a `v` in front.
 - **Track Stack with git-spice** in the Stack view's `…` menu (shown while a layer reads
   `not tracked`) and in the Command Palette: adopts the untracked layers bottom to top and
   refreshes.
+- **Push Whole Stack** in the Stack view's `…` menu and the Command Palette: pushes every
+  branch of the stack with `git-spice stack submit --no-publish --no-update-only` —
+  force-with-lease, no pull requests created, no login needed — tracking the untracked layers
+  first; refuses, before anything moves, a layer whose remote copy has commits yours does not
+  (after a fetch), a layer that needs a restack, a paused rebase and a detached HEAD; what
+  git-spice says beside `Pushed` (an upstream renamed to `<branch>-2`, a warning) goes to the
+  Output panel and the sentence says so. Both it and Track Stack are greyed out during a rebase.
 
 ## [0.1.0] - 2026-10-01
 

@@ -70,7 +70,14 @@
       {
         "command": "prCascade.trackStack",
         "title": "Track Stack with git-spice",
-        "category": "PR Cascade"
+        "category": "PR Cascade",
+        "enablement": "!prCascade.rebaseInProgress"
+      },
+      {
+        "command": "prCascade.pushStack",
+        "title": "Push Whole Stack",
+        "category": "PR Cascade",
+        "enablement": "!prCascade.rebaseInProgress"
       }
     ],
     "menus": {
@@ -79,6 +86,11 @@
           "command": "prCascade.refresh",
           "when": "view == prCascade",
           "group": "navigation@1"
+        },
+        {
+          "command": "prCascade.pushStack",
+          "when": "view == prCascade",
+          "group": "2_stack@1"
         },
         {
           "command": "prCascade.trackStack",

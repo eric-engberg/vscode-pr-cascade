@@ -8,10 +8,11 @@
  * only — a layer's `tracking` is read through `StackLayer`, so no gsLog import), vscode/gitApi.ts
  * (GitUnavailableError, the one failure drawn as a warning), Node's `node:path`. Depended on by:
  * src/extension.ts (creates the view over the provider, hands it the two loaders, and feeds the
- * status bar and the `prCascade.hasUntracked` context key from `onDidLoadStates`),
+ * status bar and the `prCascade.hasUntracked` and `prCascade.rebaseInProgress` context keys from
+ * `onDidLoadStates`),
  * vscode/commands.ts (the FileNode a file row hands its command) and test/ext/tree.test.ts. Plan:
  * §6, §7.1, §7.2 (the click), §7.2.1 (the `contextValue` vocabulary), §7.8 (the local tier's
- * texts), §7.14.3, §8 E3/E4/E5/E7/E10/E12/E17/E44/E56/E57/E82, §12 item 3, §13.2 D60.
+ * texts), §7.14.3, §8 E3/E4/E5/E7/E10/E12/E17/E44/E56/E57/E82, §12 item 3, §13.2 D60, D62.
  */
 
 // see primer §1 (import / export), §2 (the vscode module) and §9 (`import type`)
@@ -484,9 +485,11 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
  * from the last layer to do the reversing; the array is left as it was.
  *
  * The row above the layers (M4 item 13b, D51): a paused rebase comes first — a warning,
- * because it is a state the user must resolve, and the one in which M5's commands will
- * refuse to run (E12). Only when no rebase is paused does a detached HEAD get its row (E3,
- * information: nothing is wrong, the layers are still there, none of them current). Not
+ * because it is a state the user must resolve, and the one in which Track Stack and Push
+ * Whole Stack refuse to run — their `…` entries greyed out too, through `enablement:
+ * !prCascade.rebaseInProgress`, a key src/extension.ts sets from these same states (E12;
+ * items 20b and 21b, D60, D62). Only when no rebase is paused does a detached HEAD get its
+ * row (E3, information: nothing is wrong, the layers are still there, none of them current). Not
  * both: every rebase pause point but `git am` detaches HEAD, so a second row would say the
  * same thing twice, and the rebase row is the one that says what to do. No trunk (E4)
  * stands alone — nothing else was computed on that path (src/extension.ts).
