@@ -518,17 +518,6 @@ function measureMembers(entries: RefEntry[], commits: Map<string, readonly strin
       continue;
     }
     const walk = walkHistory(entry.sha, commits);
-    // The candidates: every member on a commit the walk visited — other than this member itself,
-    // and on its own commit only the names that sort before it, so that of two names on one
-    // commit the earlier is the ancestor and never the reverse.
-    const candidates: string[] = [];
-    for (const sha of walk.visited) {
-      for (const name of namesBySha.get(sha) ?? []) {
-        if (sha !== entry.sha || name < entry.name) {
-          candidates.push(name);
-        }
-      }
-    }
     members.push({
       name: entry.name,
       sha: entry.sha,
@@ -536,7 +525,7 @@ function measureMembers(entries: RefEntry[], commits: Map<string, readonly strin
       depth: walk.depth,
       forks: walk.forks,
       onTip: walk.forks.includes(trunkSha),
-      candidates,
+      candidates: candidatesOf(entry, walk, namesBySha),
       parent: trunk,
       children: [],
       isTip: true,
@@ -550,6 +539,25 @@ function measureMembers(entries: RefEntry[], commits: Map<string, readonly strin
     member.parent = chooseParent(member.candidates, byName, trunk);
   }
   return members;
+}
+
+/**
+ * Step 3's last answer: the names of every member on a commit the walk visited — the layers
+ * `entry`'s history reaches — other than `entry` itself; on its own commit only the names that
+ * sort before it (compareByCodePoint), so that of two names on one commit the earlier is the
+ * ancestor and never the reverse (E6). A function of its own, so measureMembers stays readable
+ * (and under SonarCloud's cognitive-complexity ceiling, as `probe` was split in item 18).
+ */
+function candidatesOf(entry: RefEntry, walk: Walk, namesBySha: Map<string, string[]>): string[] {
+  const candidates: string[] = [];
+  for (const sha of walk.visited) {
+    for (const name of namesBySha.get(sha) ?? []) {
+      if (sha !== entry.sha || compareByCodePoint(name, entry.name) < 0) {
+        candidates.push(name);
+      }
+    }
+  }
+  return candidates;
 }
 
 /** What one walk down a member's history finds (step 3). */

@@ -2183,7 +2183,7 @@ item 12 split 2026-09-26 into 12a/12b so every later item number stays true)
      `GraphLayout { rows, lanes }`; membership by a DAG line, depth and forks by one walk per member, parent = the greatest
      ancestor by (depth, name), depth-first drawing with the biggest subtree straight and side children on `lane + 1` joining
      below, `filled`/`hollow`/`dashed`, `dirty` an input, one `elided` row, `onlyStackOf` as git-spice's stack; `unit/graph` 110,
-     `git/graph.git` 20; primer §81; eight commits, each green — the seventh a four-lens review's fixes). The first M6 PR, on the unmerged M5 stack (§0 waived a
+     `git/graph.git` 20; primer §81; nine commits, each green — the seventh a four-lens review's fixes, the ninth SonarCloud's S3776). The first M6 PR, on the unmerged M5 stack (§0 waived a
      second time — §13.4).
 23b. `core/viewmodel` + `src/webview/protocol.ts`: `StackViewModel`, every `Indicator` from its source
      field, message rows, ages. Pure; `unit/viewmodel`.
@@ -2984,12 +2984,13 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
   same way; an orphan branch's first commit prints with no parents; a merge of one named line into another (`b` merging `a`)
   gives `rev-list --count` a 1, b-base 1, b 4 while `for-each-ref --merged HEAD --no-merged origin/main` lists all three — the
   shape where computeStack's chain and the graph's parents differ; `rev-list --count <trunk> ^<bottom>` is the trunk commits
-  since a bottom layer's fork (1 for the moved trunk, 0 for a root on the tip). Eight commits, each green — the seventh the
+  since a bottom layer's fork (1 for the moved trunk, 0 for a root on the tip). Nine commits, each green — the seventh the
   review's fixes: a four-lens panel (algorithm, mutation, comments and primer, plan conformance) with two sceptics per finding
   over a scratch copy found 39 things, none refuted, 38 taken — twelve of them mutants the 105 tests then missed, every one
   about an order no shape exercised (every refs text was in name order; the tip's SHA `0000…` sorts first) — and one noted
-  (the file headers past §11.1's 3–8 lines, as 63 of 82 `.ts` files are: a repository-wide follow-up). `test:ext` 135, run
-  once.
+  (the file headers past §11.1's 3–8 lines, as 63 of 82 `.ts` files are: a repository-wide follow-up); the ninth SonarCloud's
+  S3776 on `measureMembers` (cognitive complexity 16 against 15; the candidate collection moved into `candidatesOf`). `test:ext`
+  135, run once. CI's first run: Ubuntu 1 min 19 s, macOS 3 min 15 s, both green; SonarCloud's gate failed on that one issue.
 - **M6 started 2026-10-15 on the unmerged M5 stack** (Ric: "do the next PR") — §0's "don't start the next milestone's
   stack until the current one is merged" waived a second time (the first: M5 on M4, 2026-10-01, below); item 23a sits
   on `m5/23b-gh-setup` (#42), so an amend to any of #30–#42 means `git-spice upstack restack` for it and a fresh
