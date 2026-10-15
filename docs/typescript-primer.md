@@ -838,7 +838,8 @@ flag `^` would hold for the first line only, and `isInitialised` would be true o
 repository with no other refs. The space at the end is part of the pattern on purpose:
 `refs/spice/database` or `refs/spice/data/x` would otherwise match too. Flags go after the closing
 slash, one letter each; the others most often met are `i` (ignore case) and `g` (every match
-rather than the first) — neither used here.
+rather than the first) — `i` is not used here; `g` arrives with M5 item 21a in `relayedGitLine`
+(`core/backends/gitspice.ts`), `.replaceAll(/\s+/g, ' ')`, explained beside `replaceAll` in §23.
 
 ## 21. Set
 
@@ -980,6 +981,12 @@ Strings carry their own methods, called with a dot like a method on any object:
   a string in double quotes holding one single quote; the second is the four characters `'\''`,
   with the backslash written twice because inside a string literal a backslash starts an
   escape (§44) — `\\` is how a string holds one.
+- `replaceAll` with a regular expression (§20) instead of a string — `.replaceAll(/\s+/g, ' ')` in
+  `relayedGitLine` (`core/backends/gitspice.ts`, M5 item 21a) turns any run of blanks into one
+  space (git aligns `! [rejected]` in columns, meaningless in a notification). The pattern must carry
+  the flag `g` after its closing slash — *global*, every match — or `replaceAll` refuses it; `replace`
+  with the same `g` pattern would do the same job, and SonarCloud asks for `replaceAll` where the
+  intent is every occurrence. `\s` is any whitespace, `+` one or more of it.
 
 None of them change the string they are called on — a string, once made, never changes;
 each method returns a new one. That is why the code writes `printedRoot =

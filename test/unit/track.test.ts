@@ -207,6 +207,8 @@ describe('GitSpiceBackend.track', () => {
       // arrange: the first track fails each way in turn
       const failures: { name: string; result: CommandResult; phrase: string }[] = [
         { name: 'INF lines first', result: exited(1, '', 'INF x\nINF y\nFTL git-spice: boom\n'), phrase: 'FTL git-spice: boom' },
+        // A git line relayed after git-spice's `FTL stderr:` marker is appended (item 21a's rule, shared).
+        { name: 'a git line relayed after the FTL', result: exited(1, '', 'FTL git-spice: boom\nFTL stderr:\nFTL fatal: nope\n'), phrase: 'FTL git-spice: boom — fatal: nope' },
         { name: 'no FTL line', result: exited(1, '', 'something else\n'), phrase: 'something else' },
         { name: 'empty stderr', result: exited(1), phrase: 'exited 1' },
         { name: 'a timeout', result: timedOut(), phrase: 'timed out after 15000 ms' },

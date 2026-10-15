@@ -5,7 +5,10 @@
  * one `Readiness` member, the first failing step winning, and remembered once it is `ready`.
  * Item 20a adds `enrich` — plan §7.8's local tier, `gs log short --all --json` behind the
  * §7.14.2 digest memo, self-gated on `refs/spice/data` — and `track`, which adopts the layers
- * git-spice does not know, bottom to top. Item 21 adds `push`, over the same runner.
+ * git-spice does not know, bottom to top. Item 21a adds `push` — `gs stack submit --no-publish
+ * --no-update-only` from wherever HEAD is, refused first for a layer the remote is ahead of and
+ * for one that needs a restack — over the same runner, and the failure phrase learns to quote
+ * git's own line after git-spice's.
  *
  * Layer: core (no VS Code imports; plan §4.1). Depends on: core/backend.ts (the contract and
  * the answers), core/command.ts (how programs are run), core/digest.ts (`readRefDigest`,
@@ -17,13 +20,14 @@
  * src/extension.ts (item 19b, which builds one per window and calls `forget` before the setup
  * command's look; the flow in src/vscode/login.ts sees only a probe function and the `Readiness`
  * types from core/backend.ts; item 20b calls `enrich` on every load and `track` from Track
- * Stack). Plan: §4.4, §7.6, §7.8, §7.13,
- * §7.13.1, §7.13.3, §7.14.2, §8 E17/E22/E55/E56/E57/E59/E60/E62/E67/E70/E75/E83, §13.1 (`gs` is
- * Ghostscript on a Homebrew Mac), §13.2 D56/D59, §13.4 (git-spice 0.31.2 facts, 2026-10-08).
+ * Stack; item 21b calls `track` then `push` from Push Whole Stack). Plan: §4.4, §7.6, §7.7, §7.8,
+ * §7.13, §7.13.1, §7.13.3, §7.14.2, §8 E17/E22/E55/E56/E57/E59/E60/E62/E67/E70/E75/E76/E83,
+ * §13.1 (`gs` is Ghostscript on a Homebrew Mac), §13.2 D56/D59/D61, §13.4 (git-spice 0.31.2
+ * facts, 2026-10-08 and 2026-10-09).
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
-import type { Readiness, StackBackend, TrackResult } from '../backend';
+import type { PushResult, Readiness, StackBackend, TrackResult } from '../backend';
 import type { CommandResult, CommandRunner } from '../command';
 import { isInitialised, readRefDigest } from '../digest';
 import { detectForge } from '../forge';
@@ -49,11 +53,16 @@ export const GS_CANDIDATES: readonly string[] = ['git-spice', 'gs'];
 
 /**
  * The variables every git-spice call gets on top of the process's own (plan §7.13.1): no
- * colour codes in its output, messages in English, and no optional git locks — the same
- * `GIT_OPTIONAL_LOCKS=0` RealGitRunner sets, for the same reason (core/git.ts).
+ * colour codes in its output, messages in English, no optional git locks — the same
+ * `GIT_OPTIONAL_LOCKS=0` RealGitRunner sets, for the same reason (core/git.ts) — and, from item
+ * 21a, no credential prompt: git asks on the terminal (`/dev/tty`), not on stdin, so the closed
+ * stdin of core/command.ts does not stop it where VS Code has one; `GIT_TERMINAL_PROMPT=0` makes
+ * such a push fail at once with `fatal: could not read Username for '<host>': terminal prompts
+ * disabled` instead of hanging until the timeout. A working push is unchanged by it, and nothing
+ * but a push reaches a remote (verified 0.31.2).
  */
 // see primer §43 (`Record<string, string>`: any keys, all strings)
-export const GS_ENV: Record<string, string> = { NO_COLOR: '1', LC_ALL: 'C', GIT_OPTIONAL_LOCKS: '0' };
+export const GS_ENV: Record<string, string> = { NO_COLOR: '1', LC_ALL: 'C', GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' };
 
 /**
  * How long one probe spawn may take before it is killed and read as "did not answer". The
@@ -62,6 +71,38 @@ export const GS_ENV: Record<string, string> = { NO_COLOR: '1', LC_ALL: 'C', GIT_
  */
 // see primer §27 (`_` between digits: `15_000` is 15000)
 export const PROBE_TIMEOUT_MS = 15_000;
+
+/**
+ * How long one push may take (item 21a): `git ls-remote` and `git push` per branch over a
+ * network, pre-push hooks included — about half a second per branch against a local origin
+ * (verified: 12 branches in 6 s) — so two minutes bound a dead link or a hung credential helper
+ * without killing a long stack over a slow one. A budget against a hang, not a cancel: the kill
+ * reaches git-spice alone, and a `git push` it had started finishes on its own — the branch lands
+ * on the remote with no upstream recorded here, and the next push would name its upstream
+ * `<name>-2` (verified); `git fetch origin` then `git branch --set-upstream-to=origin/<b> <b>`
+ * repairs it (item 21b's README says so). A guess until a real remote is measured (item 22, which
+ * also owns the process-group kill that would stop git's push too).
+ */
+export const PUSH_TIMEOUT_MS = 120_000;
+
+/**
+ * `stack submit`'s arguments (plan §7.13.3): push every tracked branch of HEAD's stack, create no
+ * change request, and update-only off — `spice.submit.updateOnly = true` in a user's git config
+ * would otherwise skip every branch without a change request and exit 0 (verified 0.31.2); the
+ * explicit flags win over the config, as `--no-publish` does over `spice.submit.publish`.
+ * `--no-prompt` is `gs()`'s. Exported for the tests, which spell the arguments out literally on
+ * purpose — an edit here must fail them.
+ */
+export const GS_SUBMIT_ARGS: readonly string[] = ['stack', 'submit', '--no-publish', '--no-update-only'];
+
+/**
+ * git-spice's one line per pushed branch (stderr, verified 0.31.2): `INF Pushed <name>`, and the
+ * name is everything after the one space. The space keeps a near miss (`INF Pushedz`) out; the
+ * anchors and `\S+` keep out a line that only contains the words — a `WRN` block's indented
+ * continuation line, or text after the name.
+ */
+// see primer §20 (a capturing group; `\S+` — a branch name has no blanks; `^` and `$` on a trimmed line)
+const PUSHED_LINE = /^INF Pushed (\S+)$/;
 
 /**
  * `gs log`'s arguments (item 20a): `short` and `--json` as plan §7.13.2 documents, and `--all`
@@ -256,9 +297,10 @@ export class GitSpiceBackend implements StackBackend {
    * The memo is right for an action gated on readiness — five programs per click would be
    * wasted on a repository that was ready a minute ago — but wrong when the user asks by hand
    * (item 19b's "Set Up git-spice"), who may just have run `gs auth logout` or `gs repo init
-   * --reset` in a terminal: that command forgets first (D57). Item 21's gated `push` will do the
-   * same after an operation fails on login or init, then ask again; Track Stack (item 20b) is not
-   * gated and never forgets (D60). Not part of `StackBackend`
+   * --reset` in a terminal: that command forgets first (D57). M7's `createPRs`, the first action
+   * gated on the flow, will do the same after an operation fails on login or init, then ask
+   * again; Track Stack (item 20b) and Push Whole Stack (item 21b) are not gated and never forget
+   * (D60; D62 when 21b lands). Not part of `StackBackend`
    * (core/backend.ts) until something other than this class needs it (D55).
    */
   // see primer §46 (a Map as a cache: `delete`)
@@ -300,7 +342,7 @@ export class GitSpiceBackend implements StackBackend {
     }
     const result = await gs(this.commands, located.gsPath, GS_LOG_ARGS, state.root);
     if (result.exitCode !== 0) {
-      return notEnriched(state, 'gs-log-failed', `gs ${GS_LOG_ARGS.join(' ')} failed: ${describeResult(result)}`);
+      return notEnriched(state, 'gs-log-failed', `gs ${GS_LOG_ARGS.join(' ')} failed: ${describeResult(result, PROBE_TIMEOUT_MS)}`);
     }
     const parsed = parseGsLog(result.stdout);
     // By name, the later of two lines naming one branch winning — `set` overwrites.
@@ -358,12 +400,79 @@ export class GitSpiceBackend implements StackBackend {
       }
       const result = await gs(this.commands, located.gsPath, ['branch', 'track', layer.name, '--base', base.base], root);
       if (result.exitCode !== 0) {
-        return { tracked, problem: `git-spice could not track ${layer.name}: ${describeResult(result)}.` };
+        return { tracked, problem: sentence(`git-spice could not track ${layer.name}: ${describeResult(result, PROBE_TIMEOUT_MS)}`) };
       }
       tracked.push(layer.name);
     }
     return { tracked, problem: null };
   }
+
+  /**
+   * Plan §7.13.3's `push` — StackBackend.push (core/backend.ts) says what it promises. Five
+   * refusals come first, in this order, each a sentence and no spawn that moves a ref: an empty
+   * stack (from trunk git-spice would push every tracked branch of every stack, none of which the
+   * view shows — verified); no `refs/spice/data` (`stack submit` would try to initialise the
+   * repository and die at the trunk prompt — verified, as `gs log` and `branch track` do); a layer
+   * whose remote copy is ahead (`tracking.push.behind > 0`: after a fetch the lease protects
+   * nobody and git-spice overwrites the remote's commits with exit 0 — verified; plan E76's rule,
+   * with a wider predicate because the strictly-behind case was overwritten too) — before the
+   * banner, since it needs no executable; git-spice missing or old (track's sentences); a layer
+   * that needs a restack (`tracking.down.needsRestack`: git-spice pushes the layers below it and
+   * then refuses — a partial push; a `git pull` on trunk is the everyday trigger — verified) — after
+   * the banner, so the remedy spells the executable that answered. Then the one submit, from
+   * wherever HEAD is, with a push-sized timeout; `pushed` and `notes` read off its stderr whether
+   * it exited 0 or not. An untracked layer is the caller's to track first (§7.7's preflight): a
+   * caller that just ran `track` still holds `tracking: null` layers, so a guard here would refuse
+   * the very caller that did the right thing. `spice.submit.skipRestackCheck` is not read: a user
+   * who set it has a terminal, and this guard calls git-spice's own safety check by its name.
+   */
+  // see primer §25 (arrays: `filter`, `map`, `length`), §70 (`?.` through two optional fields) and §30 (`??`)
+  async push(root: string, layers: readonly StackLayer[]): Promise<PushResult> {
+    if (layers.length === 0) {
+      return { pushed: [], notes: [], problem: null };
+    }
+    const dataRef = await this.git.tryRun([...SPICE_DATA_REF], root);
+    if (dataRef === null) {
+      return refused(`Nothing was pushed: ${NOT_INITIALISED}.`);
+    }
+    // No `push` field — no remote-tracking branch yet — counts as nothing behind.
+    const behind = layers.filter((layer) => (layer.tracking?.push?.behind ?? 0) > 0).map((layer) => layer.name);
+    if (behind.length > 0) {
+      const verb = behind.length === 1 ? 'has' : 'have';
+      return refused(`Nothing was pushed: ${listNames(behind)} ${verb} commits on the remote that are not here. Bring them in first — a push would drop them.`);
+    }
+    const located = await locateGitSpice(this.commands, this.gsPath, root);
+    if (located.kind !== 'located') {
+      return refused(`Nothing was pushed: ${notLocatedReason(located, this.gsPath)}.`);
+    }
+    const stale = layers.filter((layer) => layer.tracking?.down?.needsRestack === true).map((layer) => layer.name);
+    if (stale.length > 0) {
+      const restack = shellCommandLine([located.gsPath, 'stack', 'restack']);
+      const verb = stale.length === 1 ? 'needs' : 'need';
+      return refused(`Nothing was pushed: ${listNames(stale)} ${verb} a restack. Run ${restack} in a terminal first.`);
+    }
+    const result = await gs(this.commands, located.gsPath, GS_SUBMIT_ARGS, root, PUSH_TIMEOUT_MS);
+    const pushed = pushedBranches(result.stderr);
+    const notes = otherLines(result.stderr);
+    if (result.exitCode !== 0) {
+      return { pushed, notes, problem: sentence(`git-spice could not push the stack: ${describeResult(result, PUSH_TIMEOUT_MS)}`) };
+    }
+    return { pushed, notes, problem: null };
+  }
+}
+
+/** A refusal before the spawn: nothing pushed, nothing said by git-spice, one sentence. */
+function refused(problem: string): PushResult {
+  return { pushed: [], notes: [], problem };
+}
+
+/**
+ * A `problem` that quotes a program's words as a full sentence: a full stop added unless the quoted
+ * text already ends with one — git says `ERROR: Repository not found.`, git-spice `… is not tracked`.
+ */
+// see primer §23 (`endsWith`) and §48 (the conditional expression)
+function sentence(text: string): string {
+  return text.endsWith('.') ? text : `${text}.`;
 }
 
 /**
@@ -484,11 +593,78 @@ async function probe(git: GitRunner, commands: CommandRunner, gsPath: string, ro
  * Runs git-spice the way every call of ours must (plan §7.13, §7.13.1): `--no-prompt` first,
  * so nothing ever waits for an answer; GS_ENV; the repository root as the working directory —
  * never `-C`, because 0.31.2 reads `spice.forge.*` from the directory it was started in, not
- * the one `-C` names (plan §13.4); and the probe's timeout.
+ * the one `-C` names (plan §13.4); and the probe's timeout, unless the caller asks for its own
+ * (a push, item 21a).
  */
-// see primer §16 (arrays: spread puts `--no-prompt` before the caller's arguments)
-function gs(commands: CommandRunner, executable: string, args: readonly string[], root: string): Promise<CommandResult> {
-  return commands.run({ executable, args: ['--no-prompt', ...args], cwd: root, env: GS_ENV, timeoutMs: PROBE_TIMEOUT_MS });
+// see primer §16 (arrays: spread puts `--no-prompt` before the caller's arguments) and §13 (a
+// default parameter after required ones)
+function gs(commands: CommandRunner, executable: string, args: readonly string[], root: string, timeoutMs: number = PROBE_TIMEOUT_MS): Promise<CommandResult> {
+  return commands.run({ executable, args: ['--no-prompt', ...args], cwd: root, env: GS_ENV, timeoutMs });
+}
+
+/** The stderr lines that say something: trimmed (a CRLF's `\r` goes with it), blank ones dropped, order kept. */
+// see primer §25 (arrays: `split`, `map`, `filter`)
+function nonEmptyLines(stderr: string): string[] {
+  return stderr
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+}
+
+/** The branch names git-spice says it pushed, in its order: every line that is exactly `INF Pushed <name>`. */
+// see primer §22 (for ... of), §20 (`exec` and a captured group) and §25 (a typed empty array, `push`)
+function pushedBranches(stderr: string): string[] {
+  const names: string[] = [];
+  for (const line of nonEmptyLines(stderr)) {
+    const match = PUSHED_LINE.exec(line);
+    if (match !== null) {
+      names.push(match[1]);
+    }
+  }
+  return names;
+}
+
+/** Everything else git-spice said, for the Output panel: a renamed upstream, a `WRN`, the `ERR` remedy lines, the `FTL stderr:` block. */
+// see primer §20 (`test`: a yes-or-no match) and §25 (`filter`)
+function otherLines(stderr: string): string[] {
+  return nonEmptyLines(stderr).filter((line) => !PUSHED_LINE.test(line));
+}
+
+/** `a`, `a and b`, `a, b and c` — names in a sentence. */
+// see primer §25 (arrays: `slice` with a negative end, `join`)
+function listNames(names: readonly string[]): string {
+  if (names.length <= 1) {
+    return names.join('');
+  }
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/**
+ * git-spice's fatal tag: `FTL ` before its words. A relayed blank line of git's is a bare `FTL`
+ * once trimmed, which this leaves out — it says nothing, and `nonEmptyLines` keeps it for `notes`.
+ */
+// see primer §23 (`startsWith`)
+function isFtl(line: string): boolean {
+  return line.startsWith('FTL ');
+}
+
+/**
+ * git's own line relayed after git-spice's `FTL stderr:` marker — a push failure prints the fatal
+ * line, then `FTL stderr:`, then git's stderr with each line prefixed `FTL ` (verified 0.31.2): the
+ * first of those after the fatal line that says something — not the `stderr:` marker, not an
+ * empty body, not git's `To <url>` push header — with runs of blanks made one (git aligns
+ * `! [rejected]` in columns, meaningless in a notification); `null` when there is none (an
+ * `enrich` or `track` failure prints one FTL line and nothing after it).
+ */
+// see primer §25 (`slice(1)`: every line after the first) and §23 (`slice`; `replaceAll` with a `g` regex)
+function relayedGitLine(ftlLines: readonly string[]): string | null {
+  for (const line of ftlLines.slice(1)) {
+    const body = line.slice(3).trim().replaceAll(/\s+/g, ' ');
+    if (body !== '' && body !== 'stderr:' && !body.startsWith('To ')) {
+      return body;
+    }
+  }
+  return null;
 }
 
 /**
@@ -546,34 +722,32 @@ function notLocatedReason(answer: NotLocated, gsPath: string): string {
 
 /**
  * One phrase for a program that did not exit 0, for a reason or a problem sentence: git-spice's
- * fatal line — the first stderr line starting with `FTL ` (an auto-init failure prints two `INF`
- * lines before it; a plain `branch track` failure prints the `FTL` alone — verified 0.31.2).
- * Without one: `timed out after <ms> ms` for a run the timeout killed (the one every call here
- * asks for) — an `INF` line it printed before the kill is not the reason, the kill is; else the
- * first non-empty stderr line, trimmed; else `exited <code>`, `could not start (<why>)` (a
+ * fatal line — the first `FTL` line (an auto-init failure prints two `INF` lines before it; a plain
+ * `branch track` failure prints the `FTL` alone — verified 0.31.2) — and, when git relayed a line
+ * after it (`relayedGitLine`), ` — ` and that line: so a rejected push reads `… push: exit status 1
+ * — ! [rejected] <sha> -> a (stale info)` and a missing remote `… exit status 128 — fatal: 'origin'
+ * does not appear to be a git repository`, while a `track` or `gs log` failure reads as before.
+ * Without an FTL line: `timed out after <ms> ms` for a run the timeout killed — the request's own
+ * limit, `timeoutMs` — and an `INF` line it printed before the kill is not the reason, the kill
+ * is; else the first non-empty stderr line; else `exited <code>`, `could not start (<why>)` (a
  * program that never started printed nothing), or Node's own `detail` (a signal, the output
- * ceiling). One line, not the whole text: the sentence goes in a notification.
+ * ceiling). One line, not the whole text: the sentence goes in a notification. Four small functions
+ * rather than one loop: the one-loop form of this rule measured cognitive complexity 21 against
+ * SonarCloud's limit of 15 (item 21a); these measure 7 and 4.
  */
-// see primer §22 (for ... of, and `continue`), §23 (`trim`, `startsWith`) and §30 (`??`)
-function describeResult(result: CommandResult): string {
-  let first: string | null = null;
-  for (const raw of result.stderr.split('\n')) {
-    const line = raw.trim();
-    if (line === '') {
-      continue;
-    }
-    if (line.startsWith('FTL ')) {
-      return line;
-    }
-    if (first === null) {
-      first = line;
-    }
+// see primer §25 (`filter`), §48 (the conditional expression) and §30 (`??`)
+function describeResult(result: CommandResult, timeoutMs: number): string {
+  const lines = nonEmptyLines(result.stderr);
+  const ftl = lines.filter(isFtl);
+  if (ftl.length > 0) {
+    const detail = relayedGitLine(ftl);
+    return detail === null ? ftl[0] : `${ftl[0]} — ${detail}`;
   }
   if (result.timedOut) {
-    return `timed out after ${PROBE_TIMEOUT_MS} ms`;
+    return `timed out after ${timeoutMs} ms`;
   }
-  if (first !== null) {
-    return first;
+  if (lines.length > 0) {
+    return lines[0];
   }
   if (result.exitCode !== null) {
     return `exited ${result.exitCode}`;

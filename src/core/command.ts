@@ -8,11 +8,11 @@
  * Layer: core (no VS Code imports; plan §4.1). Depends on: Node's `node:child_process`, and
  * core/git.ts for the three things both runners need the same way — the output ceiling, the
  * working-directory check and the ENOENT/EACCES classification. Depended on by:
- * core/backends/gitspice.ts (the readiness probe, item 18; enrich/track/push from items 20–21)
- * and, from item 23, the gh probe; test/helpers/fakeCommand.ts implements the interface for
- * tests. Plan: §4.2, §7.13 (every gs call: `--no-prompt`, env, cwd), §7.13.1, §11.3 (the
- * `execa` question, item 21: this file is the "execFile wrapper" it is measured against),
- * §13.2 D56.
+ * core/backends/gitspice.ts (the readiness probe, item 18; `enrich` and `track`, item 20a;
+ * `push`, item 21a) and, from item 23, the gh probe; test/helpers/fakeCommand.ts implements the
+ * interface for tests. Plan: §4.2, §7.13 (every gs call: `--no-prompt`, env, cwd), §7.13.1, §11.3
+ * (the `execa` question: this file is the "execFile wrapper" it was measured against in item 21a
+ * and kept — D61), §13.2 D56, D61.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -36,7 +36,7 @@ export interface CommandRequest {
   readonly cwd: string;
   /**
    * Variables pinned on top of the caller's environment. Each tool's module owns its own:
-   * git-spice's `NO_COLOR`, `LC_ALL`, `GIT_OPTIONAL_LOCKS` (plan §7.13.1); gh's `GH_HOST` and
+   * git-spice's `NO_COLOR`, `LC_ALL`, `GIT_OPTIONAL_LOCKS` and, from item 21a, `GIT_TERMINAL_PROMPT` (plan §7.13.1); gh's `GH_HOST` and
    * hygiene (item 23). Absent means "the environment as it is". A value typed as an
    * `interface` — core/forge.ts's `GhEnv` — is not accepted here as it is (an interface has no
    * index signature, primer §43); item 23 spreads it into a literal, `{ ...ghEnv(host), … }`,
@@ -46,7 +46,10 @@ export interface CommandRequest {
   /**
    * Kill the program after this many milliseconds and report `timedOut`. Absent means no
    * limit. The readiness probe sets one on every spawn: a tool stuck behind a keychain prompt
-   * or a slow disk must not hang the refresh for good.
+   * or a slow disk must not hang the refresh for good. The kill is SIGTERM to the program alone
+   * — a child it spawned (git's `push`, a pre-push hook) runs on and finishes (verified, item
+   * 21a) — so a timeout is a budget against a hang, not a cancel; killing the process group is
+   * item 22's hardening.
    */
   readonly timeoutMs?: number;
 }

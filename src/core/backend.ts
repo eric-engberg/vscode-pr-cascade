@@ -8,10 +8,11 @@
  * imports `Ready` and `NotReady` from here, also as types, so the two files name each other's
  * shapes and nothing runs in either direction). Depended on by: core/backends/gitspice.ts (item
  * 18, the first implementation), core/readinessFix.ts (item 19a: `Ready`, `NotReady`),
- * src/vscode/login.ts and src/extension.ts (items 19b–20). Plan: §4.4 (the target shape — this
+ * src/vscode/login.ts and src/extension.ts (items 19b–20; 21b for `push`). Plan: §4.4 (the target shape — this
  * file declares what the next PR implements and grows with each one, D55; item 20a adds
- * `enrich` and `track`), §7.8, §7.13.1 (the probe), §7.13.3 (what each member runs), §8
- * E21/E25/E55/E56/E57/E59/E60/E62/E62b/E67/E70/E75, §13.2 D59.
+ * `enrich` and `track`, item 21a `push` and `PushResult`), §7.8, §7.13.1 (the probe), §7.13.3
+ * (what each member runs), §8 E21/E25/E55/E56/E57/E59/E60/E62/E62b/E67/E70/E75/E76, §13.2
+ * D59/D61.
  */
 
 // see primer §1 (import / export) and §9 (`import type`: a types-only module imports types only)
@@ -124,13 +125,29 @@ export interface TrackResult {
 }
 
 /**
+ * What `push` answers: the branches git-spice reported pushed (`INF Pushed <name>`, one line per
+ * branch), in its order — the whole stack of HEAD's branch, layers above HEAD included (E44) — or
+ * `[]` when it refused before the spawn; every other line git-spice printed (`notes`: an upstream
+ * renamed to `<name>-2` because the remote already had `<name>`, a `WRN`, the `ERR` lines with its
+ * own remedy — things the sentence cannot carry and the Output panel can), trimmed, in order, `[]`
+ * before the spawn; and why it stopped, or `null`. On a partial push (git-spice pushed the layers
+ * below a branch it then refused) `pushed` names what moved beside `problem`. `TrackResult`'s
+ * shape, for its reasons: one field varies, so `string | null` and not a tagged union.
+ */
+export interface PushResult {
+  readonly pushed: readonly string[];
+  readonly notes: readonly string[];
+  readonly problem: string | null;
+}
+
+/**
  * Everything that changes a stack or talks to a forge about one goes through this (plan
  * §4.4). There is one implementation, git-spice (core/backends/gitspice.ts, from item 18); the
  * interface exists so tests can substitute a fake and so a second backend would be additive.
  *
  * Declared with the members the next PR implements, and grown by each PR that implements
  * another (D55): item 18 adds nothing to it (it implements `readiness`), item 20a adds
- * `enrich` and `track`, item 21 `push`, M7–M9 the rest of §4.4 — `createPRs`, `setDraft`,
+ * `enrich` and `track`, item 21a `push`, M7–M9 the rest of §4.4 — `createPRs`, `setDraft`,
  * `restack`, `sync`, `moveOnto`, `insertBelow`, `mergeBottom`, `rebaseState` — with their
  * types. A member declared before its implementation would force every implementer and every
  * fake to stub it; one declared in the PR that implements it makes the class that `implements`
@@ -183,4 +200,31 @@ export interface StackBackend {
    * verified 0.31.2).
    */
   track(root: string, layers: readonly StackLayer[], trunkBranch: TrunkBranch): Promise<TrackResult>;
+  /**
+   * Plan §7.13.3: `gs stack submit --no-publish` in the repository at `root` — every tracked branch
+   * of HEAD's stack, force-with-lease (a branch someone else moved on the remote is refused while
+   * this clone has not fetched), no change request created; `--no-update-only` too, so a user's
+   * `spice.submit.updateOnly` cannot turn it into a push of nothing (verified 0.31.2). Runs from
+   * wherever HEAD is: git-spice has no `--branch` and pushes the whole stack from a middle layer —
+   * and from trunk, every tracked branch of every stack (verified). `layers` feed its refusals and
+   * nothing else: nothing to push; a layer whose `tracking.push.behind` is above zero — after a
+   * fetch the lease protects nobody and git-spice would overwrite the remote's commits with exit 0
+   * (verified; plan E76's rule); and a layer whose `tracking.down.needsRestack` is set — git-spice
+   * would push the layers below it and then refuse, a partial push (verified) — named with the
+   * restack command to run. Refuses too, with no spawn that moves a ref, an uninitialised
+   * repository (`stack submit` would try to initialise it and die at the trunk prompt under
+   * `--no-prompt`; before any spawn) and a missing or old git-spice (after the `--version`
+   * banner). Never tracks: the caller tracks the `null` layers first (§7.7's
+   * preflight) — an untracked layer between tracked ones is skipped silently, an untracked HEAD is
+   * refused by git-spice. `pushed` is read from git-spice's `INF Pushed <name>` lines, so it is the
+   * truth of what moved; `notes` is everything else it said. Needs git-spice, an initialised
+   * repository and a reachable remote — not a login: with `--no-publish` git-spice consults neither
+   * forge nor keychain (verified), except for a branch that already has an open change request,
+   * which it updates through the forge (its own help says so); that failure comes back as
+   * git-spice's words. Every `problem` is a full sentence. Never throws for anything git-spice or
+   * git says; rejects only when git itself cannot run (E17) — a root that cannot be used as a
+   * directory reads as not initialised, as it does for `track`. The refresh afterwards (E83), the
+   * paused-rebase and detached-HEAD refusals are the caller's — it holds `RepoState`.
+   */
+  push(root: string, layers: readonly StackLayer[]): Promise<PushResult>;
 }
