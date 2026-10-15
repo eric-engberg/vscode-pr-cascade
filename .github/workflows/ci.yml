@@ -36,6 +36,11 @@ jobs:
       # require test in gitspiceFacts.git.test.ts fails by name, so a broken install step cannot
       # pass as "skipped" here.
       PRCASCADE_REQUIRE_GS: '1'
+      # The same promise for gh (test/git/gh.git.test.ts, M5 item 23a): no install step, because
+      # both runner images ship the GitHub CLI; with this set the file's require test fails by name
+      # if an image ever stops, instead of the file passing as "skipped". The file runs read-only
+      # against an empty gh config of its own, so the job's GITHUB_TOKEN never reaches it.
+      PRCASCADE_REQUIRE_GH: '1'
     steps:
       - uses: actions/checkout@v5
 
