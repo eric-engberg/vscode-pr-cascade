@@ -326,6 +326,8 @@ interface Member {
   parent: string;
   /** The members whose `parent` is this one — filled once every member has its parent. */
   readonly children: Member[];
+  /** Rows in this member's subtree, itself included — set once the tree stands (step 7); decides which child continues a lane. */
+  size: number;
 }
 
 /**
@@ -339,12 +341,19 @@ interface Member {
  * 3. one walk per member down its history, for its depth and its fork commits;
  * 4. its parent: the deepest member its history reaches, else trunk;
  * 5. the tree: children, roots, tips;
- * 9. the rows, depth-first: a layer's children above it, trunk last;
+ * 7. each subtree's size — how many rows it will draw;
+ * 8. which child continues its parent's lane (the biggest subtree, ties by name) and in what
+ *    order the rest stand beside it;
+ * 9. the rows, depth-first: the continuing child's subtree on the parent's lane, each other
+ *    child's subtree one lane to the right with `joinsLane` on its lowest row, then the parent;
+ *    trunk last;
+ * 10. why that never crosses a lane (`draw`'s comment);
  * 11. the checked-out row is filled — a layer, or the trunk row when HEAD is on a branch trunk
- *     already contains.
+ *     already contains;
+ * 14. `lanes`, the highest lane drawn plus one.
  *
- * (Steps 6–8, 10 and 12–14 — the §7.2.1 filter, which child continues a lane, side lanes, the
- * working-tree and elided rows — arrive in the next commits.)
+ * (Steps 6, 12 and 13 — the §7.2.1 filter, the working-tree row and the elided row — arrive in
+ * the next commit.)
  */
 // see primer §19 (Map), §21 (Set) and §22 (for ... of)
 export function layoutGraph(input: GraphInput, options: GraphOptions): GraphLayout {
@@ -366,15 +375,39 @@ export function layoutGraph(input: GraphInput, options: GraphOptions): GraphLayo
   const memberNames = new Set(members.map((member) => member.name));
   const trunkFilled = options.head !== null && branchNames.has(options.head) && !memberNames.has(options.head);
 
-  // 9. The rows, built top-down by a function that draws a layer's children before the layer
-  // itself (primer §81 arrives with the lanes; for now every row is on lane 0).
+  // 7. How many rows each subtree will draw.
+  for (const root of roots) {
+    measureSize(root);
+  }
+
+  // 9 and 10. The rows, built by a function that draws a layer's children before the layer itself
+  // and calls itself for each child (primer §81): the continuing child's whole subtree on this
+  // lane, then each side child's subtree on the next lane with its lowest row — the side child
+  // itself, drawn last — curving into this lane, then the layer's own row. Rows come out top
+  // first and trunk last by construction. Why `lane + 1` is always free, so lanes never cross:
+  // when a side child starts, everything drawn above it on lanes greater than `lane` belongs to
+  // an earlier sibling's subtree or to the continuing child's own side children, and every one
+  // of those ended in a row joining `lane` — every higher lane has already curved back. So
+  // consecutive siblings reuse one lane (view-lab's `fix/…` and `chore/…` are both on lane 1),
+  // every lane left of a row carries a straight line through it, and `joinsLane` is always
+  // `lane − 1`. `lanes` is a running maximum: the highest lane any row took, plus one.
   const rows: GraphRow[] = [];
-  // see primer §5 (arrow functions: a function that closes over `rows` and `options`)
-  const draw = (member: Member, lane: number): void => {
-    for (const child of orderChildren(member.children)) {
-      draw(child, lane);
+  let lanes = 1;
+  // see primer §5 (arrow functions: a function that closes over `rows`, `lanes` and `options`),
+  // §54 (a rest element: `const [continuing, ...side]`), §8 (`continuing` is undefined for a tip)
+  // and §48 (the conditional expression that keeps `joinsLane` absent, not `undefined`)
+  const draw = (member: Member, lane: number, joins: number | null): void => {
+    const [continuing, ...side] = orderChildren(member.children);
+    if (continuing !== undefined) {
+      draw(continuing, lane, null);
     }
-    rows.push({
+    for (const child of side) {
+      draw(child, lane + 1, lane);
+    }
+    if (lane + 1 > lanes) {
+      lanes = lane + 1;
+    }
+    const row: LayerRow = {
       kind: 'layer',
       name: member.name,
       sha: member.sha,
@@ -385,10 +418,18 @@ export function layoutGraph(input: GraphInput, options: GraphOptions): GraphLayo
       forks: member.forks,
       lane,
       node: member.name === options.head ? 'filled' : 'hollow',
-    });
+    };
+    rows.push(joins === null ? row : { ...row, joinsLane: joins });
   };
-  for (const root of orderChildren(roots)) {
-    draw(root, 0);
+
+  // Trunk is drawn like any other parent — its continuing child straight up lane 0, the other
+  // roots beside it — except that its own row is the trunk row.
+  const [continuingRoot, ...sideRoots] = orderChildren(roots);
+  if (continuingRoot !== undefined) {
+    draw(continuingRoot, 0, null);
+  }
+  for (const root of sideRoots) {
+    draw(root, 1, 0);
   }
   rows.push({
     kind: 'trunk',
@@ -398,7 +439,7 @@ export function layoutGraph(input: GraphInput, options: GraphOptions): GraphLayo
     lane: 0,
     node: trunkFilled ? 'filled' : 'hollow',
   });
-  return { rows, lanes: 1 };
+  return { rows, lanes };
 }
 
 /**
@@ -462,6 +503,7 @@ function measureMembers(entries: RefEntry[], commits: Map<string, readonly strin
       candidates,
       parent: trunk,
       children: [],
+      size: 0,
     });
   }
 
@@ -574,13 +616,39 @@ function buildTree(members: Member[], trunk: string): Member[] {
 }
 
 /**
- * The order a layer's children are drawn in: by name, with `<` and `>` (see isDeeper), so two
- * machines draw the same rows. (The lanes, in the next commit, decide which child continues its
- * parent's lane and in what order the rest stand beside it.)
+ * Step 7: how many rows a member's subtree will draw — itself and every layer above it. A
+ * function that calls itself once per child and adds up the answers (primer §81): a post-order
+ * walk, the children before the parent, as `draw` is. Recursion is safe here where the commit
+ * walk (step 3) avoided it: one paused call per layer of nesting, a few dozen at most, never one
+ * per commit. Layers only — the working-tree row is not counted, or a checkout would change which
+ * child continues a lane.
  */
-// see primer §26 (sort and comparison functions) and §16 (arrays: spread — a sorted copy, not a sort in place)
+// see primer §81 (recursion: a function that calls itself)
+function measureSize(member: Member): number {
+  let size = 1;
+  for (const child of member.children) {
+    size += measureSize(child);
+  }
+  member.size = size;
+  return size;
+}
+
+/**
+ * Step 8: the order a parent's children are drawn in. The first continues on the parent's lane;
+ * the rest are side children, drawn in this order, the first of them highest. Sorted by subtree
+ * size, biggest first, then by name: the subtree with the most rows stays straight (usually the
+ * long stack), a HEAD-first rule would swap lanes on every checkout, and the name tie-break keeps
+ * two equal siblings in one order on every machine — by `<` and `>`, as isDeeper compares, never
+ * `localeCompare`. A sorted copy: a sort in place would reorder `children`, which other steps
+ * read.
+ */
+// see primer §26 (sort and comparison functions) and §16 (arrays: spread — a copy)
 function orderChildren(children: readonly Member[]): Member[] {
   return [...children].sort((first, second) => {
+    if (first.size !== second.size) {
+      // The bigger first: a negative result puts `first` before `second`.
+      return second.size - first.size;
+    }
     if (first.name < second.name) {
       return -1;
     }

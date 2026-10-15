@@ -38,6 +38,11 @@ const SHA_C = 'cccccccccccccccccccccccccccccccccccccccc';
 const SHA_D = 'dddddddddddddddddddddddddddddddddddddddd';
 const SHA_E = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 const SHA_F = 'ffffffffffffffffffffffffffffffffffffffff';
+const SHA_1 = '1111111111111111111111111111111111111111';
+const SHA_2 = '2222222222222222222222222222222222222222';
+const SHA_3 = '3333333333333333333333333333333333333333';
+// The amended middle layer of one case: a second commit standing where `add-retries` stood.
+const SHA_S2 = 'e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2';
 
 // What `rev-list -1 --no-commit-header --format='%H %ct'` prints for trunk: its tip and the date.
 // see primer §12 (template strings)
@@ -346,6 +351,122 @@ const E78_CASES: LayoutCase[] = [
     rows: [TRUNK_HOLLOW],
     lanes: 1,
   },
+  {
+    title: "a second stack on the same parent → lane 1 with joinsLane 0 on its lowest row; the bigger stack continues (E16's other-work, drawn)",
+    refs: refs(['add-retries', SHA_B], ['api-refactor', SHA_A], ['main', SHA_T], ['other-work', SHA_D], ['retry-metrics', SHA_C]),
+    dag: dag([SHA_D, SHA_T]) + APPENDIX_A_DAG,
+    head: 'retry-metrics',
+    dirty: false,
+    rows: [...APPENDIX_A_ROWS, { kind: 'layer', name: 'other-work', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 }, TRUNK_HOLLOW],
+    lanes: 2,
+  },
+  {
+    title: 'a stack rooted on a middle layer → lane 1 from that layer: side-fix off add-retries, retry-metrics continuing (the size tie goes to the smaller name)',
+    refs: SIDE_FIX_REFS,
+    dag: SIDE_FIX_DAG,
+    head: 'retry-metrics',
+    dirty: false,
+    rows: [
+      { kind: 'layer', name: 'retry-metrics', lane: 0, node: 'filled', parent: 'add-retries', depth: 3 },
+      { kind: 'layer', name: 'side-fix', lane: 1, node: 'hollow', joinsLane: 0, parent: 'add-retries', depth: 3 },
+      { kind: 'layer', name: 'add-retries', lane: 0, node: 'hollow', parent: 'api-refactor', depth: 2 },
+      { kind: 'layer', name: 'api-refactor', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 2,
+  },
+  {
+    title: "three siblings on trunk reuse lane 1, never lane 2; the tie is broken by code-point order, not the locale's (alpha, zeta, ömega)",
+    refs: refs(['alpha', SHA_A], ['main', SHA_T], ['zeta', SHA_B], ['ömega', SHA_C]),
+    dag: dag([SHA_C, SHA_T], [SHA_B, SHA_T], [SHA_A, SHA_T]),
+    head: 'alpha',
+    dirty: false,
+    // 'zeta' < 'ömega' by code point while 'zeta'.localeCompare('ömega') is 1: a localeCompare
+    // would draw ömega above zeta and fail here.
+    rows: [
+      { kind: 'layer', name: 'alpha', lane: 0, node: 'filled', parent: TRUNK, depth: 1 },
+      { kind: 'layer', name: 'zeta', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 },
+      { kind: 'layer', name: 'ömega', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 2,
+  },
+  {
+    title: 'a side child with a side child of its own opens lane 2 and joins lane 1 — lanes step one at a time',
+    refs: refs(['alpha', SHA_A], ['alpha-top', SHA_C], ['alpha-up', SHA_B], ['beta', SHA_1], ['beta-1', SHA_2], ['beta-2', SHA_3], ['main', SHA_T]),
+    dag: dag([SHA_C, SHA_B], [SHA_B, SHA_A], [SHA_A, SHA_T], [SHA_3, SHA_1], [SHA_2, SHA_1], [SHA_1, SHA_T]),
+    head: 'beta-2',
+    dirty: false,
+    // alpha's chain and beta's bush both have three rows: the name decides, alpha continues.
+    rows: [
+      { kind: 'layer', name: 'alpha-top', lane: 0, node: 'hollow', parent: 'alpha-up', depth: 3 },
+      { kind: 'layer', name: 'alpha-up', lane: 0, node: 'hollow', parent: 'alpha', depth: 2 },
+      { kind: 'layer', name: 'alpha', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+      { kind: 'layer', name: 'beta-1', lane: 1, node: 'hollow', parent: 'beta', depth: 2 },
+      { kind: 'layer', name: 'beta-2', lane: 2, node: 'filled', joinsLane: 1, parent: 'beta', depth: 2 },
+      { kind: 'layer', name: 'beta', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 3,
+  },
+  {
+    title: 'bottom layer amended (E14): the old commit stays unnamed under add-retries, which becomes a root of depth 2 on lane 0; the amended api-refactor is a one-row stack on lane 1 — what computeStack lists, plus the branch it drops',
+    refs: refs(['add-retries', SHA_B], ['api-refactor', SHA_1], ['main', SHA_T], ['retry-metrics', SHA_C]),
+    dag: dag([SHA_1, SHA_T]) + APPENDIX_A_DAG,
+    head: 'retry-metrics',
+    dirty: false,
+    rows: [
+      { kind: 'layer', name: 'retry-metrics', lane: 0, node: 'filled', parent: 'add-retries', depth: 3 },
+      { kind: 'layer', name: 'add-retries', lane: 0, node: 'hollow', parent: TRUNK, depth: 2 },
+      { kind: 'layer', name: 'api-refactor', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 2,
+  },
+  {
+    title: "a branch merged into another's deeper line: the merge sits on its deepest named ancestor and the merged branch is a one-row stack of its own — what git says (E14/E15); the one shape where computeStack's count order would chain a → b-base → b instead",
+    refs: refs(['a', SHA_A], ['b', SHA_2], ['b-base', SHA_B], ['main', SHA_T]),
+    dag: dag([SHA_2, SHA_B, SHA_A], [SHA_B, SHA_1], [SHA_1, SHA_T], [SHA_A, SHA_T]),
+    head: null,
+    dirty: false,
+    rows: [
+      { kind: 'layer', name: 'b', lane: 0, node: 'hollow', parent: 'b-base', depth: 4 },
+      { kind: 'layer', name: 'b-base', lane: 0, node: 'hollow', parent: TRUNK, depth: 2 },
+      { kind: 'layer', name: 'a', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 2,
+  },
+  {
+    title: "the middle layer amended (E14's cousin): the top layer still sits on the old unnamed commit, so both are children of the nearest layer whose tip they contain; the size tie goes to the smaller name",
+    refs: refs(['add-retries', SHA_S2], ['api-refactor', SHA_A], ['main', SHA_T], ['retry-metrics', SHA_C]),
+    dag: dag([SHA_C, SHA_B], [SHA_B, SHA_A], [SHA_S2, SHA_A], [SHA_A, SHA_T]),
+    head: 'retry-metrics',
+    dirty: false,
+    rows: [
+      { kind: 'layer', name: 'add-retries', lane: 0, node: 'hollow', parent: 'api-refactor', depth: 2 },
+      { kind: 'layer', name: 'retry-metrics', lane: 1, node: 'filled', joinsLane: 0, parent: 'api-refactor', depth: 3 },
+      { kind: 'layer', name: 'api-refactor', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 2,
+  },
+  {
+    title: 'size, not position and not HEAD, chooses the straight line: the bigger side stack off the middle layer continues on lane 0 and the checked-out one-row tip curves beside it',
+    refs: refs(['add-retries', SHA_B], ['api-refactor', SHA_A], ['main', SHA_T], ['retry-metrics', SHA_C], ['side-1', SHA_E], ['side-2', SHA_F]),
+    dag: dag([SHA_F, SHA_E], [SHA_E, SHA_B], [SHA_C, SHA_B], [SHA_B, SHA_A], [SHA_A, SHA_T]),
+    head: 'retry-metrics',
+    dirty: false,
+    rows: [
+      { kind: 'layer', name: 'side-2', lane: 0, node: 'hollow', parent: 'side-1', depth: 4 },
+      { kind: 'layer', name: 'side-1', lane: 0, node: 'hollow', parent: 'add-retries', depth: 3 },
+      { kind: 'layer', name: 'retry-metrics', lane: 1, node: 'filled', joinsLane: 0, parent: 'add-retries', depth: 3 },
+      { kind: 'layer', name: 'add-retries', lane: 0, node: 'hollow', parent: 'api-refactor', depth: 2 },
+      { kind: 'layer', name: 'api-refactor', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 2,
+  },
 ];
 
 describe('layoutGraph', () => {
@@ -375,6 +496,29 @@ describe('layoutGraph', () => {
       expect(shas).toEqual([SHA_C, SHA_E, SHA_B, SHA_A, SHA_T]);
       const dates = layout.rows.map((row) => (row.kind === 'layer' || row.kind === 'trunk' ? row.committedAt : null));
       expect(dates).toEqual([DATE, DATE, DATE, DATE, TRUNK_DATE]);
+    });
+
+    it('a checkout changes which node is filled and nothing else — a HEAD-first lane rule would swap lanes on every checkout', () => {
+      // arrange: the same repository seen from the top layer and from the side branch
+      const input = { refs: SIDE_FIX_REFS, dag: SIDE_FIX_DAG, trunkTip: TRUNK_TIP };
+
+      // act
+      const onTop = layoutGraph(input, { trunk: TRUNK, head: 'retry-metrics', dirty: false });
+      const onSide = layoutGraph(input, { trunk: TRUNK, head: 'side-fix', dirty: false });
+
+      // assert: the skeletons differ in `node` alone — side-fix keeps lane 1 and its curve into lane 0
+      // see primer §54 (destructuring: the fields by name, `node` left out)
+      const withoutNode = (row: GraphRow) => {
+        const { kind, name, lane, joinsLane, parent, depth } = skeleton(row);
+        return { kind, name, lane, joinsLane, parent, depth };
+      };
+      expect(onTop.rows.map(withoutNode)).toEqual(onSide.rows.map(withoutNode));
+      const filledName = (layout: { rows: readonly GraphRow[] }): string | null => {
+        const filled = layout.rows.find((row) => row.kind === 'layer' && row.node === 'filled');
+        return filled !== undefined && filled.kind === 'layer' ? filled.name : null;
+      };
+      expect(filledName(onTop)).toBe('retry-metrics');
+      expect(filledName(onSide)).toBe('side-fix');
     });
 
     it('marks a layer isTip when no row has it as its parent', () => {
