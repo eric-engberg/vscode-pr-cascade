@@ -196,6 +196,7 @@ describe('RealGitRunner', () => {
       );
     });
 
+    // see primer §76 (it.skipIf: a test decided when the file loads)
     it.skipIf(runningAsRoot)(
       'blames the directory, not git, when the working directory cannot be entered',
       async () => {

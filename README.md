@@ -154,10 +154,12 @@ more things to know. git-spice names each branch's remote copy after the branch,
 sets the upstream itself: if the remote already has a `<branch>` with no upstream recorded here —
 you pushed it once with plain `git push origin <branch>`, or from another clone — git-spice pushes
 to `<branch>-2` and says so in the Output panel (the sentence points there); run `git branch
---set-upstream-to=origin/<branch> <branch>` first to keep the name. And a push that takes longer
-than two minutes is cut off with `timed out`; git's own push may still finish, so before pushing
-again run `git fetch origin` and set the upstream of any layer the remote now has (`git branch
--vv` shows which has none) — otherwise that layer goes to `<branch>-2` as above. It refuses while
+--set-upstream-to=origin/<branch> <branch>` first to keep the name. And a push that runs past two
+minutes is stopped with `timed out` — on macOS and Linux git-spice, git's push and any hook with
+it, so the branch being pushed does not land; branches pushed before the cut-off stay pushed and
+are listed in the Output panel. Push again when the remote is reachable; if `git branch -vv` then
+shows a layer with no upstream that `git fetch origin` says the remote has, set it with `git branch
+--set-upstream-to=origin/<branch> <branch>` first, as above. It refuses while
 a rebase is paused (the menu entry is greyed out, and so is Track Stack) and when you are not on a
 branch. The one case where git-spice does use your login: a branch that already has a pull request
 git-spice knows is updated on push, so if your git-spice login has expired the push says so in
