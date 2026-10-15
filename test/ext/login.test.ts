@@ -355,6 +355,38 @@ describe('PR Cascade: Set Up git-spice (plan §7.13.1, D58)', () => {
     }
   });
 
+  it('builds a new backend when prCascade.ghPath changes — the next probe runs the gh it names (D56, item 23b)', async () => {
+    // arrange: one fake runner for both runs; the second gh exists only in the fake, with all three answers
+    await makeItGitHub();
+    const { runner } = fakeGitSpice([
+      { key: AUTH, result: exited(0) },
+      { key: '/opt/fake/gh --version', result: exited(0, GH_BANNER) },
+      { key: '/opt/fake/gh stack --version', result: exited(0, 'gh stack version 0.1.1\n') },
+      { key: '/opt/fake/gh auth status --hostname github.com', result: exited(0) },
+    ]);
+    const host = fakeReadinessHost();
+    useFakes(runner, host);
+    const configuration = vscode.workspace.getConfiguration('prCascade');
+    try {
+      assert.strictEqual(await setUp(), 'acted');
+      const before = runner.calls.length;
+
+      // act
+      await configuration.update('ghPath', '/opt/fake/gh', vscode.ConfigurationTarget.Workspace);
+      const outcome = await setUp();
+
+      // assert: after the change the new backend asked the gh named and never `gh`; the ready line is the same
+      assert.strictEqual(outcome, 'acted');
+      const after = runner.calls.slice(before);
+      assert.ok(after.some((call) => call.executable === '/opt/fake/gh'));
+      assert.ok(after.every((call) => call.executable !== 'gh'));
+      assert.deepStrictEqual(host.asked[1], { severity: 'information', message: 'git-spice 0.31.2 and gh 2.102.0 are ready for repo (github.com).', buttons: [] });
+    } finally {
+      await configuration.update('ghPath', undefined, vscode.ConfigurationTarget.Workspace);
+      await undoGitHub();
+    }
+  });
+
   it('reuses one of VS Code\'s own terminals by name and directory — the real TerminalHost', async () => {
     // arrange: VS Code's window, as src/extension.ts hands it to the flow; `true` is harmless
     // see primer §72 (window.terminals, createTerminal, onDidCloseTerminal)
