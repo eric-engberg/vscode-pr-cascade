@@ -1,6 +1,6 @@
 ---
 name: check-toolchain
-description: Verify that every tool PR Cascade needs to build, test and run is installed and new enough — git, Node, npm, VS Code, git-spice, gh and its gh-stack extension, plus login state. Use when setting up on a new machine or a fresh clone, before starting a milestone that adds a new tool, or when npm ci / npm test / npm run test:ext / F5 fails in a way that looks like a missing, broken or outdated tool rather than a bug in the code.
+description: Verify that every tool PR Cascade needs to build, test and run is installed and new enough — git, Node, npm, VS Code, git-spice, gh and its gh-stack extension, plus login state. Use when setting up on a new machine or a fresh clone, before starting a milestone that adds a new tool, or when npm ci / npm test / npm run test:ext / F5 fails in a way that looks like a missing, broken or outdated tool rather than a bug in the code, or when `npm run test:git` reports the `gitspice*.git.test.ts` files as skipped.
 ---
 
 # Check the toolchain
@@ -14,7 +14,7 @@ concluding that a failure is a bug in the code.
 
 ```sh
 sh scripts/doctor.sh            # what is needed right now
-sh scripts/doctor.sh --strict   # also require the M5 tools and a local VS Code
+sh scripts/doctor.sh --strict   # also require git-spice, gh and a local VS Code
 ```
 
 It only reads. It never installs anything, and it never writes to the repository.
@@ -30,9 +30,14 @@ Checks are grouped by when you actually need them, and that grouping is the poin
    stops all work.
 2. **Run it in VS Code** — only the F5 loop and `code --install-extension` need a local
    VS Code. `npm run test:ext` downloads its own copy, so this is a warning, not a failure.
-3. **Stacked pull requests** — git-spice, gh, the gh-stack extension and both logins. No
-   code calls these before milestone M5, so they are warnings until then. Use `--strict`
-   when you are about to start M5, or when setting a machine up properly.
+3. **Stacked pull requests** — git-spice, gh, the gh-stack extension and both logins. The
+   extension calls git-spice from M5 on, and `npm run test:git` runs three files
+   (`test/git/gitspice*.git.test.ts`) against a real git-spice when one is on PATH, skipping
+   them when none is — so git-spice is a warning, not a failure: `npm test` passes without it,
+   but a green run on such a machine has not run those files. CI installs a pinned git-spice
+   (`GIT_SPICE_VERSION` in `.github/workflows/ci.yml`) and sets `PRCASCADE_REQUIRE_GS=1`, so a
+   missing git-spice fails the run there rather than passing as a skip. Use `--strict` when
+   setting a machine up properly.
 
 A `[FAIL]` means required and absent or too old. A `[warn]` means you can work today but
 something is missing. A `[skip]` means the check did not apply, for example `package.json`
@@ -67,6 +72,17 @@ Two specific rules on this project:
   is a reinstall, not an install.
 - **`code` is often not on PATH** even when VS Code is installed. That only matters for
   `code --install-extension`; F5 works without it.
+- **`↓ |git| test/git/gitspice*.git.test.ts …` in `npm run test:git`** (the verbose reporter's
+  mark for a skipped test; the default reporter only counts them, as `… | 3 skipped`) means no
+  git-spice was found (on PATH, or at `PRCASCADE_TEST_GS` when that is set), not that a test is
+  broken; the doctor's git-spice line says so. One such line is expected even with git-spice
+  installed: gitspiceFacts' `git-spice on this machine > is installed`, which runs only under
+  `PRCASCADE_REQUIRE_GS=1` (a full run shows `1 skipped`). On CI the skip comes with that one
+  failing test, so the run is red.
+- **Your git-spice is whatever Homebrew had the day you installed it; CI's is pinned.** When a
+  git-spice test differs between your machine and CI, compare `git-spice --version` with
+  `GIT_SPICE_VERSION` in `ci.yml` before suspecting the code; `PRCASCADE_TEST_GS=<path>` runs
+  the files against another build.
 
 ## What it does not check
 

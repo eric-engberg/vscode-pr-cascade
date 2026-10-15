@@ -7,8 +7,11 @@
 # `vscode:prepublish`), and `gh`, preinstalled on GitHub's runners. Depended on by: nothing — the
 # Releases page is where the .vsix is downloaded from. Only `npm test` runs here, not the
 # extension-host suite: a tag points at a `main` commit ci.yml has already tested on both
-# operating systems, and that suite needs a 300 MB VS Code download. Publishing to the
-# Marketplace is not here (plan §11.2, "later"). Plan: §9.5, §10.1 item 15, §13.2 D53.
+# operating systems, and that suite needs a 300 MB VS Code download. The three real-git-spice
+# files (test/git/gitspice*.git.test.ts) skip here too — no git-spice is installed in this
+# workflow and PRCASCADE_REQUIRE_GS is not set — for the same reason: ci.yml has run them on
+# this commit (M5 item 22b, plan D64). Publishing to the Marketplace is not here (plan §11.2,
+# "later"). Plan: §9.5, §10.1 item 15, §13.2 D53.
 name: Release
 
 # A tag is pushed by a person — `git tag -a v0.1.0 -m v0.1.0 && git push origin v0.1.0` on the

@@ -777,6 +777,11 @@ cans one string and one Error writes them out: `new Map<string, string | Error>(
 were added; `for (const flight of this.flights.values())` in `src/vscode/login.ts` (M5, item
 19b) walks every fix that is running, and `[...map.keys()]` (§16) collects them into an array.
 
+A Map built from an array in one expression: `new Map(lines.map((line) => [line.name, line]))`
+(`logLinesByName` in `test/helpers/gitspice.ts`, M5 item 22b) — `map` turns each line into a
+`[key, value]` pair (§25), and `new Map` takes the array of pairs, as the canned-answers Maps
+above take a literal one. The compiler reads the key and value types off the pairs.
+
 ## 20. Regular expression literals
 
 *First seen in `test/git/git.git.test.ts`.*
@@ -1273,6 +1278,20 @@ first, exactly as `ln` takes them. And `fs.readFileSync(p, 'utf8')` is `cat`:
 `test/unit/release.test.ts` (M4 item 15) reads package.json and CHANGELOG.md with it, the
 `'utf8'` saying "as text" the way `encoding` does for `execFileSync`.
 
+`spawnSync` (`locateGitSpiceForTests` in `test/helpers/gitspice.ts`, M5 item 22b) is the `Sync`
+form of `spawn` (§75), and it differs from `execFileSync` in one way that decides where each is
+used: it does not throw. Its result is an object — `status` (the exit code), `stdout`, `stderr`,
+`error` (set when the program could not start, or was stopped at the `timeout`), `signal` — so a
+program that is missing or exits non-zero is an answer, not an exception: the locator reads
+`error` and `stdout` and moves to the next candidate, where `execFileSync` would have needed a
+`try` per name. Its `timeout` sends SIGTERM to the program alone, not to the process group the
+runner has killed since item 22a (§75) — enough for a `--version` that prints one line and exits.
+The fixture keeps `execFileSync` because there a failing git command *is* a broken test, and the
+throw is wanted. A third `execFileSync` option, `input: text`, hands the program that text as its
+standard input and then closes it — `git show --format= <ref> | git patch-id --stable` in shell;
+`patchId` in `test/git/gitspiceOps.git.test.ts` (item 22b) needs it, and makes its own call because
+the fixture's `git()` closes stdin (`stdio: ['ignore', …]`) and so can never be given any.
+
 ## 29. Counted for loops
 
 *First seen in `test/helpers/fixture.ts` (`buildStack`); counting down, in
@@ -1766,6 +1785,13 @@ lives in the base module, the Promise functions in `/promises` — for one purpo
 directory, or cannot be read; discovery treats all three alike and skips what is below.
 `path.join(a, b)` (§28) makes each child's full path from its parent's and its name.
 
+The synchronous twin, `fs.readdirSync(dir, { withFileTypes: true })`, gives the same `Dirent`s
+without the `await`, and `filesUnder` in `test/helpers/gitspice.ts` (M5 item 22b) walks a whole
+tree with it: a function `walk` that lists one directory and calls *itself* for each entry that
+`isDirectory()` — recursion, the natural shape for a tree, where a loop would need a queue (§38).
+Sync because it is test arrangement (§28's rule), and the walk reads every file under `.git`, a
+few hundred at most.
+
 ## 40. A sentinel value: -1 for "no limit"
 
 *First seen in `src/core/discovery.ts` (`DiscoveryOptions.scanMaxDepth`, `listCandidates`;
@@ -1995,6 +2021,24 @@ compiler checks for completeness: `FORGE_NAMES: Record<ForgeKind, string>` in
 `TOKEN_VARIABLE: Record<'github' | 'gitlab', string>` exactly the two forges v1 serves. Reading
 it, `FORGE_NAMES[forge.kind]`, the value is really there for every key — the compiler made sure of
 it when the table was written, which a `Record<string, string>` could not.
+
+The construct `Record<string, V>` is shorthand for is an **index signature**, and
+`test/helpers/gitspice.ts` (M5 item 22b) writes one out, the codebase's first:
+
+```ts
+export interface RawLogLine {
+  readonly name: string;
+  readonly [key: string]: unknown;
+}
+```
+
+`[key: string]: unknown` inside an interface means "and any other string key, each holding
+anything": the named field `name` stays required and typed, the rest is open — which is what a
+JSON line git-spice may add fields to is. `readonly` on the signature covers those keys too. It
+differs from `Record<string, unknown>` (every key unknown, none named) and from a plain
+interface (only the named keys exist — which is why core/forge.ts's `GhEnv`, the interface the
+paragraph above alludes to, is not accepted where a `Record` is asked for: an interface with no
+index signature promises nothing about other keys).
 
 ## 44. Escape sequences in string literals: `\0`
 
@@ -2402,6 +2446,14 @@ two ways, and both show in `parseJsonQuery`:
 `JSON.stringify(relPath)` also appears in `test/unit/uri.test.ts`, inside a test's *name*:
 it is the shortest way to print a string with its newline visible as `\n`, so the test
 list shows `"new\nline.txt"` on one line.
+
+`JSON.parse(line) as RawLogLine` (`logLinesByName` in `test/helpers/gitspice.ts`, M5 item 22b) is
+a **type assertion**, the codebase's first: `expr as T` tells the compiler to treat the value as a
+`T` and checks nothing at run time. On an `any` — which is what `JSON.parse` returns — it always
+compiles, so a line with no `name` would become the Map key `undefined` without a word. It is
+acceptable here only because it is a test helper whose every caller compares the result exactly,
+so a wrong shape fails the test it was read for; production code takes §51's checks instead, as
+`core/gsLog.ts` does for the same lines.
 
 ## 51. Checking the shape of a parsed value: `typeof x === 'object'`, `null`, and `in`
 
@@ -3703,11 +3755,13 @@ is a compile error rather than a runtime one, and `close`'s second argument is t
 **`process.platform`** is the string Node reports for the operating system — `'darwin'`,
 `'linux'`, `'win32'` — compared with `===` as any exact string is (§45).
 
-## 76. `describe.skipIf` and `it.skipIf`: a test decided when the file loads
+## 76. `describe.skipIf`, `it.skipIf`, `it.runIf` and `expect(value, message)`: a test decided when the file loads
 
 *First seen in `test/git/git.git.test.ts` (`it.skipIf(runningAsRoot)`, M1 — the pointer was
 added in M5 item 22a) and `test/git/command.git.test.ts` (`describe.skipIf(process.platform ===
-'win32')`, item 22a).*
+'win32')`, item 22a); `it.runIf` and the files that skip as a block in `test/helpers/gitspice.ts` /
+`test/git/gitspice*.git.test.ts` (item 22b); `expect(value, message)` earlier, in
+`test/unit/enrich.test.ts` (item 20a).*
 
 ```ts
 const runningAsRoot = process.getuid !== undefined && process.getuid() === 0;
@@ -3731,8 +3785,22 @@ Why skip rather than fake or fail. A root user has every execute bit, so the tes
 false there — not the code; Windows has no process groups, so the seven tests would prove nothing
 there — and the extension's floor is macOS and Linux (plan D63). A skip is honest where the test
 *cannot* mean anything on this machine; it would be dishonest where the test merely needs
-something the machine lacks and CI must always have — that case gets a loud failure instead, and
-M5 item 22b's real-git-spice files show the pattern (`it.runIf`, extending this section).
+something the machine lacks and CI must always have — that case gets a loud failure instead.
+
+The three real-git-spice files (M5 item 22b, `test/git/gitspice*.git.test.ts`) show both halves.
+Each file's tests sit in one `describe.skipIf(GIT_SPICE === null)(…)` block
+(gitspiceFacts.git.test.ts adds one plain `describe` above it for the require test), `GIT_SPICE`
+being the answer of a synchronous locator (`spawnSync`, §28) run when `test/helpers/gitspice.ts`
+loads — so on a machine without git-spice the files skip, with the found version in the block's
+title when they do run. And **`it.runIf(condition)`** is the mirror of `skipIf`: the test is
+registered either way, runs when the condition holds and is reported as skipped when it does not.
+`it.runIf(GIT_SPICE_REQUIRED)` runs one test under `PRCASCADE_REQUIRE_GS=1`, which ci.yml sets,
+and is one skip everywhere else — the variable read once at load as
+`process.env.PRCASCADE_REQUIRE_GS === '1'` (an environment variable is always a string, never a
+boolean) — asserting that git-spice *was* found; so on CI a missing git-spice is one red test with
+a name beside the three files' quiet skips. Its assertion uses **`expect(value, message)`**: a
+second argument that becomes the failure's message, so the report says *why* — `git-spice not
+found (tried git-spice, gs)` — rather than only `expected null not to be null`.
 
 ## 77. A test's own time limit: `it(title, fn, timeout)`
 
@@ -3754,3 +3822,64 @@ default: here, without the pipes destroyed, `close` arrives when the grandchild 
 the test's own `expect(elapsed).toBeLessThan(3_000)` is still what fails. A limit is a ceiling,
 not a budget: a test that *reaches* it is broken, not slow (the comment on `hookTimeout` in
 `vitest.config.mts` says the same of hooks).
+
+## 78. `it.each`: a table of tests
+
+*First seen in `test/git/gitspiceFacts.git.test.ts` (the exit-code table, M5 item 22b).*
+
+```ts
+const rows: [string, string[], number, RegExp][] = [
+  ['an unknown command', ['nonsense'], 1, /^FTL git-spice: unexpected argument nonsense$/m],
+  …
+];
+
+it.each(rows)('%s', async (_label, args, exit, line) => {
+  const result = await runGitSpice(commands, args, fixture.dir);
+  expect(result.exitCode).toBe(exit);
+  expect(result.stderr).toMatch(line);
+});
+```
+
+`it.each(rows)` makes one test per row: the title is the format string with `%s` filled from the
+row's first element, and the function receives the row's elements as its parameters, in order. The
+rows are typed as a **tuple** — `[string, string[], number, RegExp]` is an array of exactly four
+elements with those types in those positions (§25 for the `[]` after a type; a tuple is an array
+type that also fixes the length and each slot) — so a row with a missing regex is a compile error
+and `args` arrives as `string[]`, not as `string | number | RegExp | string[]`, the union of every
+column that TypeScript would work out from an unannotated array of arrays. The leading underscore
+on `_label` is the convention for a parameter that exists only for its position: tsconfig.json's
+`noUnusedParameters` rejects a parameter that is never read (written `label`, `npm run typecheck`
+fails with TS6133) but skips one whose name starts with `_`. The title already used it.
+
+Why a table here and not everywhere: eleven commands, one rule each — the exit code and the one
+stderr line — and nothing else varies, so the table *is* the specification and a plain `it` per row
+would be the same four lines eleven times. A row cannot carry its own arrangement or a second
+assertion that only it needs; `test/unit/forge.test.ts`'s URL forms chose plain `it`s for that
+reason, and so does every other file here. The `/m` flag on the regexes (§20) makes `^` and `$`
+match at line breaks, so a line is pinned wherever it sits in stderr.
+
+## 79. `fs.statSync(…, { bigint: true })` and `BigInt`
+
+*First seen in `test/helpers/gitspice.ts` (`snapshotGitDir`, M5 item 22b).*
+
+```ts
+const stat = fs.statSync(path.join(gitDir, relative), { bigint: true });
+files.set(relative, `${stat.size} ${stat.mtimeNs} ${stat.ino}`);
+```
+
+A JavaScript `number` is a 64-bit floating-point value: it holds every integer up to 2⁵³ exactly
+and rounds the rest. A file's modification time in *nanoseconds* since 1970 is about 1.8 × 10¹⁸,
+past that limit, so Node's ordinary `stat` gives `mtimeMs` — milliseconds as a `number`, its
+fraction rounded to about a quarter of a microsecond at today's dates — and offers a second
+form: with `{ bigint: true }` every numeric field — `size`, `ino`, `mtimeNs` — is a **`bigint`**,
+JavaScript's second numeric type, an integer of any size. Its literals end in `n` (`2_000n`), it
+cannot be mixed with `number` in arithmetic (`1n + 1` is a compile error — convert one side first),
+and it prints as itself in a template string, which is all `snapshotGitDir` does with it.
+
+Why the pin wants nanoseconds and the inode: plan §13.4 (k) promises that `gs log` writes no file
+under `.git`, and the test's instrument is "every file's size, modification time and inode, before
+and after". A write that lands just after the snapshot must not pass as "nothing changed" —
+`mtimeMs` would round two writes a hundred nanoseconds apart to the same value, while `mtimeNs` is
+the time exactly as APFS and ext4 store it — and a file replaced by `rename` keeps its path and
+may keep its size, but never its inode. Beside the snapshot the tests read the ref digest
+(core/digest.ts) too: two instruments, so a quiet write would have to fool both.

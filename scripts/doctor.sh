@@ -6,8 +6,11 @@
 
 set -u
 
-# Nothing calls git-spice or gh before milestone M5, and `npm test` downloads its own VS Code,
-# so those are warnings until --strict turns every warning into a failure.
+# git-spice and gh are warnings, not failures: the extension calls git-spice from M5 on and gh
+# from item 23, but `npm test` passes without them — the three test files that run a real
+# git-spice (test/git/gitspice*.git.test.ts) skip themselves when none is found, and CI installs
+# its own. `npm run test:ext` downloads its own VS Code. --strict turns every warning into a
+# failure.
 STRICT=0
 
 usage() {
@@ -232,7 +235,7 @@ fi
 
 # --- stacked pull requests -------------------------------------------------
 
-printf '\nStacked pull requests — used by the extension from M5 on, and to submit its own PRs\n'
+printf '\nStacked pull requests — used by the extension from M5 on, by three test files, and to submit its own PRs\n'
 
 # Homebrew installs the binary as `git-spice`, because Ghostscript owns `gs` on most machines.
 GIT_SPICE_MINIMUM=0.31
@@ -255,7 +258,7 @@ if [ -n "$spice_command" ]; then
             "$(install_hint 'brew upgrade git-spice' https://abhinav.github.io/git-spice/start/install/)"
     fi
 else
-    report warn "git-spice" "not found" \
+    report warn "git-spice" "not found (npm test skips test/git/gitspice*.git.test.ts without it)" \
         "$(install_hint 'brew install git-spice' https://abhinav.github.io/git-spice/start/install/)"
 fi
 

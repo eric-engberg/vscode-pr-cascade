@@ -252,16 +252,23 @@ To live with a build in your normal VS Code: `npm run package`, then
 | `npm run typecheck` | `tsc --noEmit` over `src/`, `test/` and `scripts/` |
 | `npm run lint` | ESLint, including the rule that `src/core` never imports `vscode` |
 | `npm run test:unit` | Vitest, `test/unit` — pure logic, no git, no VS Code |
-| `npm run test:git` | Vitest, `test/git` — real `git` in throwaway temp repos |
+| `npm run test:git` | Vitest, `test/git` — real `git` in throwaway temp repos; three files (`gitspice*.git.test.ts`) also run a real git-spice (`git-spice` or `gs` on PATH, whichever names itself git-spice) and are skipped when there is none — so a green run without git-spice has not run them |
 | `npm run test:ext` | Mocha inside a real VS Code, `test/ext` and `test/ext-parent` — two launches, one workspace each (see `.vscode-test.mjs`); downloads VS Code into `.vscode-test/` on first run (slow, once) |
 | `npm run build` / `watch` / `analyze` | esbuild: one bundle / rebuild on save / bundle plus per-package size report |
 | `npm run package` | `vsce package` → a `.vsix` you can install with `code --install-extension` |
 | `npm run depcheck -- <pkg>` | the dependency card a PR must include before adding a runtime library |
 
-CI (`.github/workflows/ci.yml`) runs `npm test`, `npm run package` and `npm run test:ext` on
-Linux and macOS. A pushed `v*` tag runs `.github/workflows/release.yml`, which checks the tag
-against `package.json` and `CHANGELOG.md`, packages, and attaches the `.vsix` to a GitHub
-release.
+git-spice is optional for `npm test`: without it the three real-git-spice files are skipped.
+`brew install git-spice` to run everything (`sh scripts/doctor.sh` says whether you have it);
+`PRCASCADE_REQUIRE_GS=1 npm run test:git` makes a missing git-spice a failure, as CI does, and
+`PRCASCADE_TEST_GS=/path/to/git-spice` runs those files against another build.
+
+CI (`.github/workflows/ci.yml`) installs git-spice from its release tarball — the version is
+pinned in the workflow, the download checksum-verified — and runs `npm test`, `npm run package`
+and `npm run test:ext` on Linux and macOS, with `PRCASCADE_REQUIRE_GS=1` so a missing git-spice
+fails the run there (one named test) instead of passing with the files skipped. A pushed `v*`
+tag runs `.github/workflows/release.yml`, which checks the tag against `package.json` and
+`CHANGELOG.md`, packages, and attaches the `.vsix` to a GitHub release.
 
 ### Layout
 
