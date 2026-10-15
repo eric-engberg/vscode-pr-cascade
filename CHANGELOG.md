@@ -16,6 +16,12 @@ in `package.json`, and a release's tag is that version with a `v` in front.
   `git-spice repo init`, the forge's `spice.forge.*` URLs, `git-spice auth login` in a
   terminal), waits for it to take, refreshes, and goes on to the next.
 - Setting `prCascade.gsPath`: the git-spice executable, when VS Code's PATH does not find it.
+- Each layer now shows what git-spice knows about it beside its count: its pull request's id
+  (`#12`; the link is in the tooltip), `needs restack`, `needs push`, or `not tracked`. Nothing
+  changes when git-spice is not set up; the Output panel says why.
+- **Track Stack with git-spice** in the Stack view's `…` menu (shown while a layer reads
+  `not tracked`) and in the Command Palette: adopts the untracked layers bottom to top and
+  refreshes.
 
 ## [0.1.0] - 2026-10-01
 

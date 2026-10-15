@@ -53,6 +53,14 @@ are on is not listed in v0.1: check out the top of the stack to see all of it.
   and while HEAD is detached — as it is at every rebase pause except `git am` — none of them
   is current. **Not on a stack** stands alone when you are on trunk, and **No trunk found —
   set prCascade.trunk** when no trunk could be found.
+- **What git-spice knows** about each layer, once the repository is initialised for it (see
+  git-spice setup below): `#12` (its pull request — the link is in the tooltip), `needs restack`
+  (the layer below moved), `needs push` (local commits not on the remote), `not tracked`
+  (git-spice does not know the branch yet). A layer git-spice tracks and has nothing to say
+  about shows only its count; hover for `git-spice: tracked on <base>` — the base as git-spice
+  names it, which for the bottom layer is your trunk's local branch — and, when the row is too
+  narrow to show them, its `needs restack` / `needs push`. Without git-spice, or before
+  `repo init`, the rows are as before and the Output panel says why.
 - **The status bar** names the branch you are on and its place in the stack, counted from
   the bottom — `retry-metrics · 3 of 3` — or reads `not on a stack`; click it to open the
   Stack view.
@@ -67,7 +75,8 @@ Two cases need the **Refresh** button in the view's title bar:
 
 - A ref that moves without the working tree, the index or `HEAD` changing is seen by no
   one: `git branch -f`, `git update-ref`, `git tag`, a push of a branch other than the
-  current one's upstream, `gs branch track`. Press Refresh after one of those.
+  current one's upstream, `gs branch track` typed in a terminal (the view's own **Track Stack
+  with git-spice** refreshes by itself). Press Refresh after one of those.
 - With `git.autorefresh` off, or in a repository with more changes than `git.statusLimit`
   allows (10 000 by default), the Git extension stops reacting to changes on disk: git run
   outside VS Code is noticed by neither Source Control nor this view — press Refresh after
@@ -112,6 +121,14 @@ answered long after it appeared does nothing when the step was done meanwhile. T
   A `GITHUB_TOKEN` (or `GITLAB_TOKEN`) in your shell's environment counts as a login to
   git-spice and makes `auth login` refuse, so the line unsets it for that one command and a
   real login is stored.
+
+**Tracking.** When a layer reads `not tracked`, the view's `…` menu offers **Track Stack with
+git-spice** (also in the Command Palette): it runs `git-spice branch track <branch> --base <layer
+below>` for each such layer, bottom to top — the bottom one on your trunk's local branch — then
+refreshes and says how many it tracked, or what git-spice said. It needs git-spice and an
+initialised repository, not a login; it refuses while a rebase is paused (resolve it, then run
+it again); with several repositories open it asks which. A branch git-spice already tracks is never tracked again (that
+would move its base), so the command looks at the repository afresh before it runs.
 
 Bitbucket, Gitea, Forgejo and Azure DevOps repositories keep the Stack view; their pull-request
 features are not in v1.

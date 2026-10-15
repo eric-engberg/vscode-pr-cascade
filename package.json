@@ -66,6 +66,11 @@
         "command": "prCascade.setUpGitSpice",
         "title": "Set Up git-spice",
         "category": "PR Cascade"
+      },
+      {
+        "command": "prCascade.trackStack",
+        "title": "Track Stack with git-spice",
+        "category": "PR Cascade"
       }
     ],
     "menus": {
@@ -74,6 +79,11 @@
           "command": "prCascade.refresh",
           "when": "view == prCascade",
           "group": "navigation@1"
+        },
+        {
+          "command": "prCascade.trackStack",
+          "when": "view == prCascade && prCascade.hasUntracked",
+          "group": "2_stack@8"
         }
       ]
     },

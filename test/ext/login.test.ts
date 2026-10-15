@@ -42,10 +42,14 @@ let provider: StackTreeProvider;
 let deps: ReadinessDeps;
 let real: ReadinessDeps;
 
-// The fake git-spice's keys (executable and arguments joined by spaces), as the probe asks them.
+// The fake git-spice's keys (executable and arguments joined by spaces), as the probe asks them —
+// and as the tree's `enrich` asks `gs log` (item 20b): once the init fix has written
+// `refs/spice/data`, the E83 refresh enriches through the same fake, which throws for a command
+// nobody canned, so the default fake answers `gs log` with nothing (no layer tracked).
 // see primer §4 (const)
 const VERSION = 'git-spice --no-prompt --version';
 const AUTH = 'git-spice --no-prompt auth status --forge github';
+const LOG = 'git-spice --no-prompt log short --all --json';
 const BANNER = 'git-spice 0.31.2\nCopyright (C) Abhinav Gupta\n';
 
 /** The repository root: the workspace folder named `repo` (the other folder is its empty `nested` subfolder). */
@@ -77,10 +81,18 @@ interface Canned {
   result: CommandResult;
 }
 
-/** A fake git-spice: `git-spice` answers its banner, plus whatever the test adds. The Map stays in the test's hands, so it can change an answer mid-flow. */
+/**
+ * A fake git-spice: `git-spice` answers its banner and an empty `gs log` (every ext test that writes
+ * `refs/spice/data` with a fake installed must can `gs log`, since the refresh after the fix
+ * enriches through it), plus whatever the test adds. The Map stays in the test's hands, so it can
+ * change an answer mid-flow.
+ */
 // see primer §19 (Map), §31 (type arguments on `new Map`), §22 (for ... of) and §13 (a default parameter)
 function fakeGitSpice(extra: Canned[] = []): { runner: FakeCommandRunner; results: Map<string, CommandResult> } {
-  const results = new Map<string, CommandResult>([[VERSION, exited(0, BANNER)]]);
+  const results = new Map<string, CommandResult>([
+    [VERSION, exited(0, BANNER)],
+    [LOG, exited(0, '')],
+  ]);
   for (const canned of extra) {
     results.set(canned.key, canned.result);
   }

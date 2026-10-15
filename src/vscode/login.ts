@@ -6,7 +6,8 @@
  * waits until the step passed (core/poll.ts, asking the probe again every 3 s for up to 5 min),
  * refreshes the view (E83), says so, and goes round again; once the probe says ready, it runs the
  * action it was given. The by-hand "Set Up git-spice" command (src/extension.ts) is its first
- * caller; items 20–21 will gate their actions on it.
+ * caller; item 21 will gate `push` on it. Track Stack (item 20b) does not — a local operation, D60
+ * says why.
  *
  * One fix runs at a time per repository: a click while one runs brings that fix's terminal
  * forward instead (§7.5 step 4). Nothing is held while a notification is open — only the click
@@ -21,8 +22,9 @@
  * `ReadinessHost`, which src/extension.ts builds and a test replaces (plan §13.4), so Vitest
  * loads this file with no VS Code and fake timers (test/unit/login.test.ts). Depends on: the
  * `vscode` module (types), core/backend.ts, core/model.ts (`GitRunner`), core/poll.ts,
- * core/readinessFix.ts, vscode/terminal.ts, Node's `node:path`. Depended on by: src/extension.ts,
- * test/helpers/fakeReadinessHost.ts (types), test/unit/login.test.ts, test/ext/login.test.ts.
+ * core/readinessFix.ts, vscode/terminal.ts, Node's `node:path`. Depended on by: src/extension.ts
+ * (`setUpGitSpice`; `trackStack` for `chooseRepository`, item 20b), test/helpers/fakeReadinessHost.ts
+ * (types), test/unit/login.test.ts, test/ext/login.test.ts.
  * Plan: §4.2, §7.5 steps 1–4, §7.6, §7.13.1, §8 E55/E59/E62/E67/E70/E83, §9.4 `ext/login`, §10.1
  * item 19b, §13.2 D58, §13.4 (test-only hooks).
  */
@@ -113,7 +115,7 @@ export interface ReadyRequest {
  * window is closing; `in-flight` — another fix for this repository was running, so its terminal
  * was brought forward (or its page opened again — and nothing at all is shown when that fix is
  * only `git config` lines, or the look again at its click, both over in a moment) and this action
- * did not run. Items 20–21 can say which.
+ * did not run. Item 21 can say which.
  */
 // see primer §10 (union types: exact strings as members)
 export type ReadyOutcome = 'acted' | 'not-ready' | 'gave-up' | 'in-flight';
@@ -439,12 +441,18 @@ export class ReadinessFlows implements Disposable {
 }
 
 /**
- * The repository the setup command is for (src/extension.ts): none → a notification and
- * `undefined`; one → it; several → a quick pick of their folder names, in the view's order (plan
- * §6), or of their full paths when two folder names are the same; Escape → `undefined`.
+ * The repository a command is for (src/extension.ts: the setup command, and Track Stack from item
+ * 20b): none → a notification and `undefined`; one → it; several → a quick pick of their folder
+ * names, in the view's order (plan §6), or of their full paths when two folder names are the same,
+ * under `placeHolder` — the setup command's question unless the caller asks its own; Escape →
+ * `undefined`.
  */
-// see primer §21 (Set: counting distinct names), §25 (arrays: `map`, `indexOf`), §16 (spread: a copy) and §49 (`Pick`)
-export async function chooseRepository(roots: readonly string[], host: Pick<ReadinessHost, 'prompt' | 'pick'>): Promise<string | undefined> {
+// see primer §21 (Set: counting distinct names), §25 (arrays: `map`, `indexOf`), §16 (spread: a copy), §49 (`Pick`) and §13 (a default parameter)
+export async function chooseRepository(
+  roots: readonly string[],
+  host: Pick<ReadinessHost, 'prompt' | 'pick'>,
+  placeHolder: string = 'Set up git-spice for which repository?',
+): Promise<string | undefined> {
   if (roots.length === 0) {
     void host.prompt('information', 'No git repository in this workspace.', []);
     return undefined;
@@ -454,7 +462,7 @@ export async function chooseRepository(roots: readonly string[], host: Pick<Read
   }
   const names = roots.map((root) => path.basename(root));
   const labels = new Set(names).size === names.length ? names : [...roots];
-  const picked = await host.pick(labels, 'Set up git-spice for which repository?');
+  const picked = await host.pick(labels, placeHolder);
   if (picked === undefined) {
     return undefined;
   }

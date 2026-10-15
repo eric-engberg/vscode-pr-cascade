@@ -256,8 +256,9 @@ export class GitSpiceBackend implements StackBackend {
    * The memo is right for an action gated on readiness — five programs per click would be
    * wasted on a repository that was ready a minute ago — but wrong when the user asks by hand
    * (item 19b's "Set Up git-spice"), who may just have run `gs auth logout` or `gs repo init
-   * --reset` in a terminal: that command forgets first (D57). Items 20–21 will do the same
-   * after an operation fails on login or init, then ask again. Not part of `StackBackend`
+   * --reset` in a terminal: that command forgets first (D57). Item 21's gated `push` will do the
+   * same after an operation fails on login or init, then ask again; Track Stack (item 20b) is not
+   * gated and never forgets (D60). Not part of `StackBackend`
    * (core/backend.ts) until something other than this class needs it (D55).
    */
   // see primer §46 (a Map as a cache: `delete`)

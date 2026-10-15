@@ -1,14 +1,17 @@
 /**
  * vscode/tree.ts — the Stack view: turns the RepoStates the core computed into the rows
- * VS Code draws in the Source Control side bar — one row per layer, branch names only,
- * and under each layer one row per file that layer changes against the layer below it.
+ * VS Code draws in the Source Control side bar — one row per layer, branch names only, what
+ * git-spice knows about it beside the count (M5 item 20b), and under each layer one row per
+ * file that layer changes against the layer below it.
  *
  * Layer: vscode adapter (plan §4.1). Depends on: the `vscode` module, core/model.ts (types
- * only), vscode/gitApi.ts (GitUnavailableError, the one failure drawn as a warning), Node's
- * `node:path`. Depended on by: src/extension.ts (creates the view over the provider, hands it
- * the two loaders, and feeds the status bar from `onDidLoadStates`), vscode/commands.ts (the
- * FileNode a file row hands its command) and test/ext/tree.test.ts. Plan: §6, §7.1, §7.2 (the
- * click), §7.14.3, §8 E3/E4/E5/E7/E10/E12/E17/E44/E82, §12 item 3.
+ * only — a layer's `tracking` is read through `StackLayer`, so no gsLog import), vscode/gitApi.ts
+ * (GitUnavailableError, the one failure drawn as a warning), Node's `node:path`. Depended on by:
+ * src/extension.ts (creates the view over the provider, hands it the two loaders, and feeds the
+ * status bar and the `prCascade.hasUntracked` context key from `onDidLoadStates`),
+ * vscode/commands.ts (the FileNode a file row hands its command) and test/ext/tree.test.ts. Plan:
+ * §6, §7.1, §7.2 (the click), §7.2.1 (the `contextValue` vocabulary), §7.8 (the local tier's
+ * texts), §7.14.3, §8 E3/E4/E5/E7/E10/E12/E17/E44/E56/E57/E82, §12 item 3, §13.2 D60.
  */
 
 // see primer §1 (import / export), §2 (the vscode module) and §9 (`import type`)
@@ -41,33 +44,90 @@ export class LayerNode {
     // them only when the user opens the row, so a stack of ten layers costs one diff per
     // layer *looked at*, not ten diffs up front.
     const item = new vscode.TreeItem(this.layer.name, vscode.TreeItemCollapsibleState.Collapsed);
-    // The dimmer text after the label: how far the layer is from trunk, and whether HEAD
-    // is here. The icon and the contextValue change with it: `$(target)` for the branch
-    // the user is on, `$(git-branch)` for the rest (plan §7.1), and `stackBranchCurrent`
-    // so later PRs' context menus can hide "Check Out Branch" on the branch already
-    // checked out (plan §7.2.1).
-    let description = commitCountLabel(this.layer.commitCount);
-    let icon = 'git-branch';
-    let contextValue = 'stackBranch';
-    if (this.layer.isCurrent) {
-      description = description + ' · current';
-      icon = 'target';
-      contextValue = 'stackBranchCurrent';
+    // The dimmer text after the label, in parts joined by ` · `: how far the layer is from
+    // trunk; then what git-spice knows (plan §7.8, item 20b) — the pull request's id as
+    // git-spice spells it (`#12` on GitHub, `!12` on GitLab), the to-dos in the order to do
+    // them (`needs restack`, then `needs push`), or `not tracked`; then `current`, last as
+    // before (plan §7.1.0). Nothing from git-spice while `tracking` is absent — not enriched,
+    // or unknown — for a tracked layer with nothing to say, or for git-spice's own trunk line,
+    // so a repository without git-spice draws exactly as it did before item 20.
+    // see primer §25 (arrays: `push`, `join`) and §70 (`?.` on a field that may be `null` or
+    // `undefined`: one chain serves "not enriched" and "untracked" alike)
+    const parts = [commitCountLabel(this.layer.commitCount)];
+    const tracking = this.layer.tracking;
+    if (tracking?.change !== undefined) {
+      parts.push(tracking.change.id);
     }
-    item.description = description;
+    if (tracking?.down?.needsRestack === true) {
+      parts.push('needs restack');
+    }
+    if (tracking?.push?.needsPush === true) {
+      parts.push('needs push');
+    }
+    if (tracking === null) {
+      parts.push('not tracked');
+    }
+    // The icon and the contextValue change with the state: `$(target)` for the branch the
+    // user is on, `$(git-branch)` for the rest (plan §7.1); `stackBranchWithPR` when git-spice
+    // knows a pull request for the layer, else `stackBranch`, with `Current` appended on the
+    // branch checked out — the vocabulary the context menus key on (plan §7.2.1; a draft is
+    // M7's, from gh). `· current` is the last part, as before.
+    // see primer §48 (the conditional expression) and §12 (template strings)
+    let icon = 'git-branch';
+    let contextValue = tracking?.change !== undefined ? 'stackBranchWithPR' : 'stackBranch';
+    if (this.layer.isCurrent) {
+      parts.push('current');
+      icon = 'target';
+      contextValue = `${contextValue}Current`;
+    }
+    item.description = parts.join(' · ');
     item.iconPath = new vscode.ThemeIcon(icon);
     item.contextValue = contextValue;
     // Hovering is where the SHAs are: this layer's commit, and what it sits on — the
     // layer below, or trunk for the bottom layer (plan §7.1). Seven characters is where
     // git's own abbreviation starts (`core.abbrev=auto` begins at seven and grows with
     // the repository); in a repository of the size a stack lives in, that is enough to
-    // paste into a git command.
-    // see primer §12 (template strings)
-    item.tooltip =
-      `${this.layer.name} @ ${shortSha(this.layer.sha)}\n` +
-      `base: ${this.layer.parent} @ ${shortSha(this.layer.parentSha)}`;
+    // paste into a git command. Then what git-spice knows, one or two lines (trackingLines).
+    // see primer §16 (arrays: spread — the lines appended)
+    const lines = [`${this.layer.name} @ ${shortSha(this.layer.sha)}`, `base: ${this.layer.parent} @ ${shortSha(this.layer.parentSha)}`, ...trackingLines(this.layer)];
+    item.tooltip = lines.join('\n');
     return item;
   }
+}
+
+/**
+ * The tooltip's lines from git-spice (plan §7.8): none while nothing is known; `git-spice: not
+ * tracked`; `git-spice: trunk` for git-spice's own trunk line; else `git-spice: tracked on <base>`
+ * — the base as git-spice names it, which for the bottom layer is the trunk's *local* branch
+ * (`main`) beside line 2's `origin/main`: the same branch, two spellings, not drift (M6's
+ * `baseDrift` computes real drift) — with the to-dos again, because a narrow side bar cuts the
+ * description short from the right and hovering must recover them; and, when git-spice knows a
+ * pull request, its id and link on a line of their own.
+ */
+// see primer §25 (arrays: `push`, `join`, a typed empty array) and §70 (`?.`)
+function trackingLines(layer: StackLayer): string[] {
+  const tracking = layer.tracking;
+  if (tracking === undefined) {
+    return [];
+  }
+  if (tracking === null) {
+    return ['git-spice: not tracked'];
+  }
+  if (tracking.down === undefined) {
+    return ['git-spice: trunk'];
+  }
+  const parts = [`git-spice: tracked on ${tracking.down.name}`];
+  if (tracking.down.needsRestack) {
+    parts.push('needs restack');
+  }
+  if (tracking.push?.needsPush === true) {
+    parts.push('needs push');
+  }
+  const lines = [parts.join(' · ')];
+  if (tracking.change !== undefined) {
+    lines.push(`${tracking.change.id} ${tracking.change.url}`);
+  }
+  return lines;
 }
 
 /**
