@@ -13,10 +13,9 @@
  * Layer: core (no VS Code imports; plan §4.1). Depends on: core/backend.ts (the contract and
  * the answers), core/command.ts (how programs are run), core/digest.ts (`readRefDigest`,
  * `isInitialised`), core/forge.ts (detectForge), core/gsLog.ts (`parseGsLog`), core/model.ts
- * (GitRunner, RepoState, StackLayer, Enrichment), core/readinessFix.ts (`TrunkBranch`, as a
- * type only — that file imports `parseVersion` from here at runtime, so this side stays a type
- * and nothing runs in a circle), core/shell.ts (`shellCommandLine`, for the sentence that names
- * a git command). Depended on by: core/readinessFix.ts (item 19a, `parseVersion`) and
+ * (GitRunner, RepoState, StackLayer, Enrichment), core/readinessFix.ts (`TrunkBranch`, a type),
+ * core/shell.ts (`shellCommandLine`, for the sentence that names a git command), core/version.ts
+ * (the floor compare — its own module since item 23a, shared with the gh reader). Depended on by:
  * src/extension.ts (item 19b, which builds one per window and calls `forget` before the setup
  * command's look; the flow in src/vscode/login.ts sees only a probe function and the `Readiness`
  * types from core/backend.ts; item 20b calls `enrich` on every load and `track` from Track
@@ -36,6 +35,8 @@ import { parseGsLog } from '../gsLog';
 import type { Enrichment, EnrichmentCause, GitRunner, RepoState, StackLayer } from '../model';
 import type { TrunkBranch } from '../readinessFix';
 import { shellCommandLine } from '../shell';
+import { formatVersion, isAtLeast, parseVersion } from '../version';
+import type { Version } from '../version';
 
 /**
  * The names tried, in order, when `prCascade.gsPath` is empty. `git-spice` first: it has been
@@ -126,61 +127,13 @@ const SPICE_DATA_REF: readonly string[] = ['rev-parse', '--verify', '--quiet', '
 /** The one phrase for a repository without `refs/spice/data`: `enrich`'s reason and `track`'s problem alike. */
 const NOT_INITIALISED = 'the repository is not initialised for git-spice (no refs/spice/data)';
 
-/** A version as the three numbers the probe compares. */
-// see primer §9 (interface) and §14 (readonly)
-export interface Version {
-  readonly major: number;
-  readonly minor: number;
-  readonly patch: number;
-}
-
 /**
  * The oldest git-spice the extension drives: 0.31 (plan §7.13.1), the version whose
- * `--no-prompt`, `auth status --forge` and `log --json` the plan documents.
+ * `--no-prompt`, `auth status --forge` and `log --json` the plan documents. The `Version` shape
+ * and the helpers that read and compare one are core/version.ts's (item 23a; gh's floor is
+ * core/ghstatus.ts's).
  */
 export const MINIMUM_GS_VERSION: Version = { major: 0, minor: 31, patch: 0 };
-
-/**
- * `v?major.minor.patch` at the start of the text; anything after the three numbers — `-rc1`,
- * `-dev`, a build report — is ignored, because the floor is a floor on features, and a
- * pre-release or development build of a version has that version's commands. (A library
- * would rank `0.31.0-rc1` below `0.31.0`; that is not the question here.)
- */
-// see primer §20 (regular expression literals: `v?` an optional character, three capturing groups)
-const VERSION = /^v?(\d+)\.(\d+)\.(\d+)/;
-
-/**
- * Reads a version out of text such as `0.31.2`, `v0.31.2` or `0.32.0-dev`, or `null` for text
- * that does not start with three numbers (`dev`, `0.31`, a Ghostscript banner).
- */
-// see primer §27 (`Number`: text to number — the groups hold digits only, so never NaN)
-export function parseVersion(text: string): Version | null {
-  const match = VERSION.exec(text.trim());
-  if (match === null) {
-    return null;
-  }
-  return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) };
-}
-
-/**
- * Whether `found` is `minimum` or later: the three numbers compared in order, as numbers —
- * `0.9.99` is below `0.31.0` though it would sort after it as text.
- */
-export function isAtLeast(found: Version, minimum: Version): boolean {
-  if (found.major !== minimum.major) {
-    return found.major > minimum.major;
-  }
-  if (found.minor !== minimum.minor) {
-    return found.minor > minimum.minor;
-  }
-  return found.patch >= minimum.patch;
-}
-
-/** `0.31.0` — a version the way a message quotes it. */
-// see primer §12 (template strings)
-export function formatVersion(version: Version): string {
-  return `${version.major}.${version.minor}.${version.patch}`;
-}
 
 /**
  * git-spice's `--version` banner: the program's name, a space, the version token, then
@@ -705,9 +658,10 @@ function notEnriched(state: RepoState, cause: EnrichmentCause, reason: string): 
  * notification agree wherever this file can tell the cases apart: the setting set (`prCascade.
  * gsPath is …`) or not (`not found in VS Code's PATH`); the offer's third sentence, for a
  * Homebrew git-spice the probe could not reach, needs the disk, which only the VS Code side
- * reads. test/unit/enrich.test.ts pins the agreement. Spelled here rather than imported:
- * readinessFix.ts imports `parseVersion` from this file at runtime, and an import the other way
- * would run in a circle.
+ * reads. test/unit/enrich.test.ts pins the agreement. Spelled here rather than imported: the
+ * offer functions are private to readinessFix.ts, and this file imports it as a type only (until
+ * item 23a moved `parseVersion` to core/version.ts, an import the other way would also have run
+ * in a circle).
  */
 // see primer §59 (narrowing a tagged union with `===` on `kind`)
 function notLocatedReason(answer: NotLocated, gsPath: string): string {

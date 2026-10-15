@@ -19,8 +19,9 @@
  * the remote spells it (git-spice compares the spelling, D54).
  *
  * Layer: core (no VS Code imports; plan §4.1). Depends on: core/backend.ts (`NotReady`,
- * `Ready`), core/backends/gitspice.ts (`parseVersion`), core/forge.ts (types), core/model.ts
- * (`GitRunner`), core/shell.ts (a command quoted inside a sentence), Node's `node:path`.
+ * `Ready`), core/forge.ts (types), core/model.ts (`GitRunner`), core/shell.ts (a command quoted
+ * inside a sentence), core/version.ts (`parseVersion` — from core/backends/gitspice.ts until
+ * item 23a moved it; nothing here runs the backend), Node's `node:path`.
  * Depended on by: src/vscode/login.ts and src/extension.ts (item 19b),
  * test/unit/readinessFix.test.ts, test/git/trunkBranch.git.test.ts. Plan: §7.6, §7.13.1, §8
  * E21/E25/E55/E59/E60/E62/E62b/E67/E70/E75, §10.1 item 19a, §13.2 D57.
@@ -29,10 +30,10 @@
 // see primer §1 (import / export) and §9 (`import type`)
 import * as path from 'node:path';
 import type { NotReady, Ready } from './backend';
-import { parseVersion } from './backends/gitspice';
 import type { Forge, ForgeConfig, ForgeKind, HostAddress } from './forge';
 import type { GitRunner } from './model';
 import { shellCommandLine } from './shell';
+import { parseVersion } from './version';
 
 /** git-spice's install page — the offer when Homebrew is not there, or the git-spice found is not Homebrew's. */
 // see primer §4 (const)

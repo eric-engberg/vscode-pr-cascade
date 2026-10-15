@@ -14,16 +14,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CommandResult } from '../../src/core/command';
 import type { ForgeConfig } from '../../src/core/forge';
-import {
-  formatVersion,
-  GitSpiceBackend,
-  gitSpiceVersion,
-  GS_ENV,
-  isAtLeast,
-  MINIMUM_GS_VERSION,
-  parseVersion,
-  PROBE_TIMEOUT_MS,
-} from '../../src/core/backends/gitspice';
+import { GitSpiceBackend, gitSpiceVersion, GS_ENV, PROBE_TIMEOUT_MS } from '../../src/core/backends/gitspice';
 import { exited, FakeCommandRunner, neverStarted, timedOut } from '../helpers/fakeCommand';
 import { FakeGitRunner } from '../helpers/fakeGit';
 
@@ -740,55 +731,9 @@ describe('GitSpiceBackend.readiness', () => {
   });
 });
 
-describe('the version helpers', () => {
-  // Text → the three numbers, or null. One test per row, so a failure names the text.
-  // see primer §10 (union types: `Version | null` as a row's expectation)
-  const parsed: { text: string; expected: { major: number; minor: number; patch: number } | null }[] = [
-    { text: '0.31.2', expected: { major: 0, minor: 31, patch: 2 } },
-    { text: 'v1.2.3-rc1', expected: { major: 1, minor: 2, patch: 3 } },
-    { text: '0.32.0-dev (abc1234 2026-07-21)', expected: { major: 0, minor: 32, patch: 0 } },
-    { text: '0.31', expected: null },
-    { text: 'dev', expected: null },
-    { text: '', expected: null },
-    { text: 'GPL Ghostscript 10.08.0', expected: null },
-  ];
-
-  for (const row of parsed) {
-    it(`parseVersion reads ${JSON.stringify(row.text)} as ${row.expected === null ? 'no version' : 'three numbers, ignoring what follows'}`, () => {
-      // act
-      const version = parseVersion(row.text);
-
-      // assert
-      expect(version).toStrictEqual(row.expected);
-    });
-  }
-
-  const compared: { major: number; minor: number; patch: number; atLeast: boolean }[] = [
-    { major: 0, minor: 31, patch: 0, atLeast: true },
-    { major: 0, minor: 31, patch: 1, atLeast: true },
-    { major: 1, minor: 0, patch: 0, atLeast: true },
-    { major: 0, minor: 30, patch: 99, atLeast: false },
-    { major: 0, minor: 9, patch: 99, atLeast: false },
-  ];
-
-  for (const row of compared) {
-    it(`isAtLeast puts ${row.major}.${row.minor}.${row.patch} ${row.atLeast ? 'at or above' : 'below'} the 0.31.0 floor — numbers, not text`, () => {
-      // act
-      const result = isAtLeast({ major: row.major, minor: row.minor, patch: row.patch }, MINIMUM_GS_VERSION);
-
-      // assert
-      expect(result).toBe(row.atLeast);
-    });
-  }
-
-  it('formatVersion writes the floor the way a message quotes it', () => {
-    // act
-    const text = formatVersion(MINIMUM_GS_VERSION);
-
-    // assert
-    expect(text).toBe('0.31.0');
-  });
-
+// The version helpers' rows (`parseVersion`, `isAtLeast`, `formatVersion`) are test/unit/version.test.ts's
+// since item 23a moved them to core/version.ts; the banner reader is the backend's and stays here.
+describe('gitSpiceVersion — the banner reader', () => {
   // Program output → git-spice's version token, or null for any other program's.
   const banners: { stdout: string; token: string | null; note: string }[] = [
     { stdout: BANNER, token: '0.31.2', note: 'the release banner' },
