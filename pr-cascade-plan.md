@@ -2866,7 +2866,9 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
   0.42 s, track 0.45 s, `gs log` 0.38 s, push ×3 1.6 s, conflict restack 0.6 s, `rebase continue` 1.6 s, `upstack restack`
   1.2 s, `buildStack()` 1 s; `test:git` 11 → 24 s wall locally (171 + 1 skipped). Skip/require: `PRCASCADE_TEST_GS=/no/such`
   → all skipped, exit 0; with `PRCASCADE_REQUIRE_GS=1` one named failure (`git-spice not found (tried /no/such)`), exit 1.
-  CI: install time and `npm test` wall per runner — <recorded after the first CI run>. Nine commits, each green; a
+  CI (first run, 2026-10-15, git-spice 0.32.0 from the tarball): the install step 2 s on both runners; `npm test` 23 s on
+  ubuntu-latest and 51 s on macos-latest, of which the `git` project 16.4 s and 40.8 s (24 s on this Mac) — all three files
+  ran and passed on both. Nine commits, each green; a
   four-lens review with sceptics (22 confirmed, 9 refuted) before the last two: `initAndTrack` now proves every layer
   tracked, git-spice's own pause ended by `gs rebase abort` is a tenth ops test, three assertions pinned exactly, and the
   rest words — `it.runIf` registers a skipped test rather than none, the SIGKILL-era `pipefail` reason, "never skipped"
