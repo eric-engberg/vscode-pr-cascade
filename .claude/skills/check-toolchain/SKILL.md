@@ -1,6 +1,6 @@
 ---
 name: check-toolchain
-description: Verify that every tool PR Cascade needs to build, test and run is installed and new enough — git, Node, npm, VS Code, git-spice, gh and its gh-stack extension, plus login state. Use when setting up on a new machine or a fresh clone, before starting a milestone that adds a new tool, or when npm ci / npm test / npm run test:ext / F5 fails in a way that looks like a missing, broken or outdated tool rather than a bug in the code, or when `npm run test:git` reports the `gitspice*.git.test.ts` files as skipped.
+description: Verify that every tool PR Cascade needs to build, test and run is installed and new enough — git, Node, npm, VS Code, git-spice, gh and its gh-stack extension, plus login state. Use when setting up on a new machine or a fresh clone, before starting a milestone that adds a new tool, or when npm ci / npm test / npm run test:ext / F5 fails in a way that looks like a missing, broken or outdated tool rather than a bug in the code, or when `npm run test:git` reports the `gitspice*.git.test.ts` files or `gh.git.test.ts` as skipped.
 ---
 
 # Check the toolchain
@@ -36,8 +36,10 @@ Checks are grouped by when you actually need them, and that grouping is the poin
    them when none is — so git-spice is a warning, not a failure: `npm test` passes without it,
    but a green run on such a machine has not run those files. CI installs a pinned git-spice
    (`GIT_SPICE_VERSION` in `.github/workflows/ci.yml`) and sets `PRCASCADE_REQUIRE_GS=1`, so a
-   missing git-spice fails the run there rather than passing as a skip. Use `--strict` when
-   setting a machine up properly.
+   missing git-spice fails the run there rather than passing as a skip. `npm run test:git` also
+   runs one file against the real gh (`test/git/gh.git.test.ts`), read-only against an empty gh
+   config of its own, skipped when gh is absent; CI has gh on its runner images and sets
+   `PRCASCADE_REQUIRE_GH=1`. Use `--strict` when setting a machine up properly.
 
 A `[FAIL]` means required and absent or too old. A `[warn]` means you can work today but
 something is missing. A `[skip]` means the check did not apply, for example `package.json`
@@ -83,6 +85,12 @@ Two specific rules on this project:
   git-spice test differs between your machine and CI, compare `git-spice --version` with
   `GIT_SPICE_VERSION` in `ci.yml` before suspecting the code; `PRCASCADE_TEST_GS=<path>` runs
   the files against another build.
+- **`gh extension list` exits 4 when gh is not logged in and no `GH_HOST` is set** (and 0 with
+  one), so it cannot say whether gh-stack is installed; the doctor and the extension ask
+  `gh stack --version`, which needs neither login nor network. And `gh auth status` exits 1 for
+  "not logged in", "token revoked" and "offline" alike — and with `GH_HOST` set, "not logged in"
+  is itself a network call (gh validates an empty default token for the host) — read its stderr
+  yourself, the extension reads only the code.
 
 ## What it does not check
 
