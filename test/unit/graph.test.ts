@@ -14,7 +14,7 @@
 // see primer §1 (import / export)
 import { describe, expect, it } from 'vitest';
 import { REFS_ARGS, dagArgs, layoutGraph, parseDag, parseRefs, parseTrunkTip, readGraphInput, trunkTipArgs } from '../../src/core/graph';
-import type { GraphRow, NodeKind } from '../../src/core/graph';
+import type { GraphLayout, GraphRow, NodeKind } from '../../src/core/graph';
 import { FakeGitRunner } from '../helpers/fakeGit';
 
 // The repository every test asks about, and the trunk detectTrunk would have found for it.
@@ -767,6 +767,18 @@ describe('layoutGraph', () => {
     });
   });
 
+  describe('lanes never cross', () => {
+    // The same table, run through the rules every layout obeys whatever its shape — the
+    // properties the renderer (item 23e) relies on, stated once rather than read off each row.
+    it.each(E78_CASES)('lanes never cross, parents sit below, one node is filled: $title', ({ refs, dag, head, dirty, onlyStackOf }) => {
+      // act
+      const layout = layoutGraph({ refs, dag, trunkTip: TRUNK_TIP }, { trunk: TRUNK, head, dirty, onlyStackOf });
+
+      // assert
+      expectWellFormed(layout, { refs, dag, head, onlyStackOf });
+    });
+  });
+
   describe('the fields the table leaves out', () => {
     it("copies each layer's SHA and date from the refs text and gives the trunk row trunk's tip and its own date", () => {
       // act
@@ -856,3 +868,94 @@ describe('layoutGraph', () => {
     });
   });
 });
+
+/**
+ * The seven rules every layout obeys. Each is one `expect(value, message)` (primer §76), so a
+ * failure names the rule and the row rather than printing two long arrays.
+ */
+// see primer §21 (Set: has, add, delete) and §22 (for ... of)
+function expectWellFormed(layout: GraphLayout, inputs: { refs: string; dag: string; head: string | null; onlyStackOf?: string }): void {
+  const rows = layout.rows;
+
+  // 1. The last row is the trunk row, and no other row is one.
+  expect(rows[rows.length - 1]?.kind, 'the last row is the trunk row').toBe('trunk');
+  expect(rows.filter((row) => row.kind === 'trunk').length, 'exactly one trunk row').toBe(1);
+
+  // 2. `lanes` is the greatest lane plus one.
+  let greatestLane = 0;
+  for (const row of rows) {
+    if (row.lane > greatestLane) {
+      greatestLane = row.lane;
+    }
+  }
+  expect(layout.lanes, 'lanes = the greatest lane + 1').toBe(greatestLane + 1);
+
+  // 3. Every curve moves one lane left: `joinsLane` is always `lane − 1`.
+  for (const row of rows) {
+    if (row.kind === 'layer' && row.joinsLane !== undefined) {
+      expect(row.joinsLane, `${row.name}'s joinsLane is its lane − 1`).toBe(row.lane - 1);
+    }
+  }
+
+  // 4. Walking top to bottom with the set of open lanes (lane 0 open from the start): a row on a
+  // lane that is not open opens it, and at that moment no greater lane may be open — "a stack
+  // always sits right of everything drawn above it" — and every lane below the row's is open,
+  // so the lines the renderer draws straight through the row are real. A row with `joinsLane`
+  // closes its lane after itself; the lane is free for the next sibling.
+  const open = new Set<number>([0]);
+  for (const row of rows) {
+    const label = row.kind === 'layer' ? row.name : row.kind;
+    if (!open.has(row.lane)) {
+      for (const lane of open) {
+        expect(lane < row.lane, `${label} opens lane ${row.lane} while lane ${lane} is still open`).toBe(true);
+      }
+      open.add(row.lane);
+    }
+    for (let lane = 0; lane < row.lane; lane++) {
+      expect(open.has(lane), `lane ${lane} runs through ${label} on lane ${row.lane}`).toBe(true);
+    }
+    if (row.kind === 'layer' && row.joinsLane !== undefined) {
+      open.delete(row.lane);
+    }
+  }
+
+  // 5. Every layer's parent is the trunk or a layer drawn below it.
+  const seenAbove = new Set<string>();
+  for (const row of rows) {
+    if (row.kind === 'layer') {
+      expect(row.parent === TRUNK || !seenAbove.has(row.parent), `${row.name}'s parent ${row.parent} is drawn below it`).toBe(true);
+      seenAbove.add(row.name);
+    }
+  }
+  const layerNames = new Set(rows.filter((row) => row.kind === 'layer').map((row) => (row.kind === 'layer' ? row.name : '')));
+  for (const row of rows) {
+    if (row.kind === 'layer') {
+      expect(row.parent === TRUNK || layerNames.has(row.parent), `${row.name}'s parent ${row.parent} is a drawn layer or the trunk`).toBe(true);
+    }
+  }
+
+  // 6. At most one row is filled; a working-tree row is directly above a filled row on its own
+  // lane and names `head`; `dashed` is the working-tree row's alone.
+  const filledCount = rows.filter((row) => (row.kind === 'layer' || row.kind === 'trunk') && row.node === 'filled').length;
+  expect(filledCount, 'at most one filled node').toBeLessThanOrEqual(1);
+  rows.forEach((row, index) => {
+    if (row.kind === 'workingTree') {
+      const below = rows[index + 1];
+      expect(below !== undefined && (below.kind === 'layer' || below.kind === 'trunk') && below.node === 'filled', 'the working tree sits directly above the filled row').toBe(true);
+      if (below !== undefined && (below.kind === 'layer' || below.kind === 'trunk')) {
+        expect(below.lane, 'the working tree is on the filled row\'s lane').toBe(row.lane);
+      }
+      expect(row.parent, 'the working tree names the branch HEAD is on').toBe(inputs.head);
+    }
+  });
+
+  // 7. Without the filter, every branch whose commit starts a DAG line is a layer row exactly
+  // once, and no other branch is a row.
+  if (inputs.onlyStackOf === undefined) {
+    const commits = parseDag(inputs.dag);
+    const expected = parseRefs(inputs.refs).filter((entry) => commits.has(entry.sha)).map((entry) => entry.name).sort();
+    const drawn = Array.from(layerNames).sort();
+    expect(drawn, 'the layer rows are exactly the members').toEqual(expected);
+    expect(rows.filter((row) => row.kind === 'layer').length, 'each member once').toBe(expected.length);
+  }
+}
