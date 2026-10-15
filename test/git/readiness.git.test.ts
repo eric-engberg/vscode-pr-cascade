@@ -2,9 +2,9 @@
  * test/git/readiness.git.test.ts — the probe's git side against a real repository: that
  * `rev-parse --verify --quiet refs/spice/data` answers what step 2 assumes before and after
  * the ref exists, that the real detectForge runs on the fixture once it does, and that a
- * failing answer is not remembered. git-spice itself is faked — CI has none until item 22
- * (plan D5), and `git update-ref refs/spice/data HEAD` stands in for what `gs repo init`
- * writes.
+ * failing answer is not remembered. git-spice itself is faked here — the real one runs in
+ * test/git/gitspice.git.test.ts (M5 item 22b, which gave CI one; plan D5) — and
+ * `git update-ref refs/spice/data HEAD` stands in for what `gs repo init` writes.
  *
  * Layer: test, git integration (plan §9.1 layer 2; Vitest, real git in a throwaway directory,
  * no git-spice, no VS Code). Depends on: src/core/backends/gitspice.ts, src/core/git.ts,

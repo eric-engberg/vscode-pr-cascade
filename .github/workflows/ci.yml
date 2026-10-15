@@ -4,8 +4,9 @@
 # Layer: tooling. Mirrors what a developer runs locally: `npm test` (typecheck, lint, unit,
 # git tests — the git tests run a real git-spice, installed below), `npm run package` (so a
 # manifest or README problem vsce would refuse shows up here, not at tag time — release.yml is
-# the one that ships the .vsix) and then the extension-host tests, on both Linux and macOS. VS Code needs a display; on Linux `xvfb-run`
-# fakes one. The VS Code download is cached so it is not fetched on every run. Plan: §9.5.
+# the one that ships the .vsix) and then the extension-host tests, on both Linux and macOS.
+# VS Code needs a display; on Linux `xvfb-run` fakes one. The VS Code download is cached so it
+# is not fetched on every run. Plan: §9.5.
 name: CI
 
 # Pull requests cover every stacked branch; the push trigger is for main only, so a push to
@@ -31,8 +32,9 @@ jobs:
       # unit tests hold through fakes — it is the version a user installing today gets, and one of
       # the two the item-22 facts were measured on.
       GIT_SPICE_VERSION: 0.32.0
-      # With this set the real-git-spice files fail, by name, when git-spice is not on PATH,
-      # instead of skipping: a broken install step cannot pass as "skipped" here.
+      # With this set a missing git-spice fails the run: the three files still skip, but the
+      # require test in gitspiceFacts.git.test.ts fails by name, so a broken install step cannot
+      # pass as "skipped" here.
       PRCASCADE_REQUIRE_GS: '1'
     steps:
       - uses: actions/checkout@v5
@@ -52,10 +54,12 @@ jobs:
       # sha256 is checked against the release's own checksums.txt before anything is unpacked: a
       # truncated or tampered download fails the job here, not in a test. Everything lands in
       # $RUNNER_TEMP, outside the checkout, so no tarball sits in the working tree for vsce or a
-      # test to find. `shell: bash` is spelled out for `pipefail` — the default `bash -e` would
-      # let a failing `grep` hide behind `shasum`. $GITHUB_PATH prepends the directory for every
-      # later step, so `npm test` finds `git-spice` by name, the way the extension does from
-      # VS Code's PATH. Not cached: the download is as quick as a cache restore would be.
+      # test to find. `shell: bash` is spelled out for `pipefail`, which the last line needs:
+      # under the default `bash -e` the `--version | head -1` pipe takes head's exit status, so a
+      # binary that cannot run would pass (the checksum line fails either way — `shasum --check`
+      # exits 1 on the empty input a missing line gives). $GITHUB_PATH prepends the directory for
+      # every later step, so `npm test` finds `git-spice` by name, the way the extension does
+      # from VS Code's PATH. Not cached: the download is as quick as a cache restore would be.
       - name: Install git-spice
         shell: bash
         run: |
