@@ -13,7 +13,8 @@
 
 // see primer §1 (import / export)
 import { describe, expect, it } from 'vitest';
-import { REFS_ARGS, dagArgs, parseDag, parseRefs, parseTrunkTip, readGraphInput, trunkTipArgs } from '../../src/core/graph';
+import { REFS_ARGS, dagArgs, layoutGraph, parseDag, parseRefs, parseTrunkTip, readGraphInput, trunkTipArgs } from '../../src/core/graph';
+import type { GraphRow, NodeKind } from '../../src/core/graph';
 import { FakeGitRunner } from '../helpers/fakeGit';
 
 // The repository every test asks about, and the trunk detectTrunk would have found for it.
@@ -30,10 +31,12 @@ const TRUNK_DATE = 1760000900;
 // stands for the branch of that letter below; T is trunk's tip, OLD and OLDER two trunk commits
 // behind it — the fork points of stale stacks (a parent that is not itself a DAG line, F1).
 const SHA_T = '0000000000000000000000000000000000000000';
+const SHA_OLD = '9999999999999999999999999999999999999999';
 const SHA_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const SHA_B = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const SHA_C = 'cccccccccccccccccccccccccccccccccccccccc';
 const SHA_D = 'dddddddddddddddddddddddddddddddddddddddd';
+const SHA_E = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 const SHA_F = 'ffffffffffffffffffffffffffffffffffffffff';
 
 // What `rev-list -1 --no-commit-header --format='%H %ct'` prints for trunk: its tip and the date.
@@ -206,5 +209,181 @@ describe('parseTrunkTip', () => {
 
   it('throws, naming the text, when git printed anything but one `<sha> <date>` line — the command is `run`, so an empty text is git misbehaving, not an answer', () => {
     expect(() => parseTrunkTip('')).toThrow('parseTrunkTip');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// layoutGraph: plan E78 as a table of shapes. Each case is the two texts as git would print them
+// for that repository, the options the caller would pass, and every row the rail must draw, top
+// first and trunk last. The texts use the SHA constants above; a row's `parent` is a layer's name
+// or the trunk ref.
+// ---------------------------------------------------------------------------------------------
+
+/** The fields E78 names, in one flat shape, so a table row reads as the rail will draw it. */
+// see primer §80 (`GraphRow['kind']`: the type of one field, read off a union) and §11 (optional fields)
+interface RowSkeleton {
+  kind: GraphRow['kind'];
+  name?: string;
+  lane: number;
+  node?: NodeKind;
+  joinsLane?: number;
+  /** A layer's parent, or the branch the working-tree row's changes sit on. */
+  parent?: string;
+  depth?: number;
+}
+
+/**
+ * What the table pins per row. `sha`, `committedAt`, `isTip` and `forks` are pinned once each in
+ * "the fields the table leaves out" below, not on every row — a table that repeated them would
+ * be a page of SHAs saying nothing about lanes.
+ */
+// see primer §59 (tagged unions: narrowing on `kind`)
+function skeleton(row: GraphRow): RowSkeleton {
+  if (row.kind === 'layer') {
+    return { kind: row.kind, name: row.name, lane: row.lane, node: row.node, joinsLane: row.joinsLane, parent: row.parent, depth: row.depth };
+  }
+  if (row.kind === 'trunk') {
+    return { kind: row.kind, name: row.name, lane: row.lane, node: row.node };
+  }
+  if (row.kind === 'workingTree') {
+    return { kind: row.kind, parent: row.parent, lane: row.lane, node: row.node };
+  }
+  return { kind: row.kind, lane: row.lane };
+}
+
+/** One shape of the E78 table: the inputs, and the rows and lane count they must produce. */
+interface LayoutCase {
+  title: string;
+  refs: string;
+  dag: string;
+  head: string | null;
+  dirty: boolean;
+  onlyStackOf?: string;
+  /** Top first, trunk last. */
+  rows: RowSkeleton[];
+  lanes: number;
+}
+
+// The rows that read the same in every shape.
+const TRUNK_HOLLOW: RowSkeleton = { kind: 'trunk', name: TRUNK, lane: 0, node: 'hollow' };
+const TRUNK_FILLED: RowSkeleton = { kind: 'trunk', name: TRUNK, lane: 0, node: 'filled' };
+
+// The three Appendix A layers as rows, with HEAD on the top one: the shape every other case varies.
+const APPENDIX_A_ROWS: RowSkeleton[] = [
+  { kind: 'layer', name: 'retry-metrics', lane: 0, node: 'filled', parent: 'add-retries', depth: 3 },
+  { kind: 'layer', name: 'add-retries', lane: 0, node: 'hollow', parent: 'api-refactor', depth: 2 },
+  { kind: 'layer', name: 'api-refactor', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+];
+
+/** The same rows with every node hollow — HEAD somewhere else. */
+function allHollow(rows: RowSkeleton[]): RowSkeleton[] {
+  // see primer §16 (object literals: spread — a copy with one field changed)
+  return rows.map((row) => (row.node === 'filled' ? { ...row, node: 'hollow' } : row));
+}
+
+// L3's texts: `side-fix` one commit on top of the middle layer, beside `retry-metrics`.
+const SIDE_FIX_REFS = refs(['add-retries', SHA_B], ['api-refactor', SHA_A], ['main', SHA_T], ['retry-metrics', SHA_C], ['side-fix', SHA_E]);
+const SIDE_FIX_DAG = dag([SHA_E, SHA_B]) + APPENDIX_A_DAG;
+
+const E78_CASES: LayoutCase[] = [
+  {
+    title: 'one stack → one lane: the Appendix A stack straight on lane 0, the checked-out top filled, trunk last',
+    refs: APPENDIX_A_REFS,
+    dag: APPENDIX_A_DAG,
+    head: 'retry-metrics',
+    dirty: false,
+    rows: [...APPENDIX_A_ROWS, TRUNK_HOLLOW],
+    lanes: 1,
+  },
+  {
+    title: 'trunk-only repository → just the trunk row, filled because HEAD is on main at the tip',
+    refs: refs(['main', SHA_T]),
+    dag: '',
+    head: 'main',
+    dirty: false,
+    rows: [TRUNK_FILLED],
+    lanes: 1,
+  },
+  {
+    title: "HEAD on trunk's tip (E5): the trunk row is filled, every layer hollow",
+    refs: APPENDIX_A_REFS,
+    dag: APPENDIX_A_DAG,
+    head: 'main',
+    dirty: false,
+    rows: [...allHollow(APPENDIX_A_ROWS), TRUNK_FILLED],
+    lanes: 1,
+  },
+  {
+    title: 'two names on one commit (E6): a chain in name order, api-refactor-backup on api-refactor, add-retries on the backup — as computeStack lists them',
+    refs: refs(['add-retries', SHA_B], ['api-refactor', SHA_A], ['api-refactor-backup', SHA_A], ['main', SHA_T], ['retry-metrics', SHA_C]),
+    dag: APPENDIX_A_DAG,
+    head: 'add-retries',
+    dirty: false,
+    rows: [
+      { kind: 'layer', name: 'retry-metrics', lane: 0, node: 'hollow', parent: 'add-retries', depth: 3 },
+      { kind: 'layer', name: 'add-retries', lane: 0, node: 'filled', parent: 'api-refactor-backup', depth: 2 },
+      { kind: 'layer', name: 'api-refactor-backup', lane: 0, node: 'hollow', parent: 'api-refactor', depth: 1 },
+      { kind: 'layer', name: 'api-refactor', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 1,
+  },
+  {
+    title: 'a branch whose tip is in trunk (F5) is listed by for-each-ref but gets no row',
+    refs: refs(['add-retries', SHA_B], ['api-refactor', SHA_A], ['main', SHA_T], ['merged-already', SHA_OLD], ['retry-metrics', SHA_C]),
+    dag: APPENDIX_A_DAG,
+    head: 'retry-metrics',
+    dirty: false,
+    rows: [...APPENDIX_A_ROWS, TRUNK_HOLLOW],
+    lanes: 1,
+  },
+  {
+    title: 'no local branches at all: just the trunk row, hollow',
+    refs: '',
+    dag: '',
+    head: null,
+    dirty: false,
+    rows: [TRUNK_HOLLOW],
+    lanes: 1,
+  },
+];
+
+describe('layoutGraph', () => {
+  describe('the E78 table', () => {
+    // see primer §78 (`it.each` over object rows: `$title` reads a field off the row)
+    it.each(E78_CASES)('$title', ({ refs, dag, head, dirty, onlyStackOf, rows, lanes }) => {
+      // arrange: the three texts as git prints them, HEAD from computeStack, dirty from the Git extension
+      const input = { refs, dag, trunkTip: TRUNK_TIP };
+
+      // act
+      const layout = layoutGraph(input, { trunk: TRUNK, head, dirty, onlyStackOf });
+
+      // assert: every row in drawing order, top first and trunk last, and how many lanes the rail needs
+      expect(layout.rows.map(skeleton)).toEqual(rows);
+      expect(layout.lanes).toBe(lanes);
+    });
+  });
+
+  describe('the fields the table leaves out', () => {
+    it("copies each layer's SHA and date from the refs text and gives the trunk row trunk's tip and its own date", () => {
+      // act
+      const layout = layoutGraph({ refs: SIDE_FIX_REFS, dag: SIDE_FIX_DAG, trunkTip: TRUNK_TIP }, { trunk: TRUNK, head: 'retry-metrics', dirty: false });
+
+      // assert: the rows in drawing order carry their own commits; the trunk row, last, carries the tip
+      // see primer §25 (arrays: map, filter)
+      const shas = layout.rows.map((row) => (row.kind === 'layer' || row.kind === 'trunk' ? row.sha : null));
+      expect(shas).toEqual([SHA_C, SHA_E, SHA_B, SHA_A, SHA_T]);
+      const dates = layout.rows.map((row) => (row.kind === 'layer' || row.kind === 'trunk' ? row.committedAt : null));
+      expect(dates).toEqual([DATE, DATE, DATE, DATE, TRUNK_DATE]);
+    });
+
+    it('marks a layer isTip when no row has it as its parent', () => {
+      // act
+      const layout = layoutGraph({ refs: SIDE_FIX_REFS, dag: SIDE_FIX_DAG, trunkTip: TRUNK_TIP }, { trunk: TRUNK, head: 'retry-metrics', dirty: false });
+
+      // assert: retry-metrics and side-fix are tips; add-retries and api-refactor carry them
+      const tips = layout.rows.filter((row) => row.kind === 'layer').map((row) => (row.kind === 'layer' ? row.isTip : null));
+      expect(tips).toEqual([true, true, false, false]);
+    });
   });
 });

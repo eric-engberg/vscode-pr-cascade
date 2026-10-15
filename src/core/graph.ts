@@ -305,13 +305,285 @@ export interface GraphLayout {
 }
 
 /**
- * Lays out every stack in the repository. Pure: the same texts and options always give the same
- * rows, whatever order git printed the lines in. In this commit it knows only the trunk row —
- * the stacks, the lanes, the working tree and the elided history arrive in the next three
- * commits, each with its rows of the E78 table.
+ * What the layout knows about one layer while it is being placed — the half-built shape, as
+ * computeStack's MeasuredBranch is for the stack under HEAD; nothing outside this file sees it.
+ * `depth`, `forks`, `onTip` and `candidates` come from the member's own walk (layoutGraph step 3),
+ * `parent` from comparing it with the others (step 4), `children` once every member has its
+ * parent (step 5).
  */
+// see primer §9 (interface) and §14 (readonly)
+interface Member {
+  readonly name: string;
+  readonly sha: string;
+  readonly committedAt: number;
+  readonly depth: number;
+  readonly forks: readonly string[];
+  /** Whether `forks` includes trunk's tip: the stack sits on today's trunk, nothing elided below it. */
+  readonly onTip: boolean;
+  /** The names of every member this one's history reaches — the layers below it, in no order. */
+  readonly candidates: readonly string[];
+  /** A layer's name, or the trunk ref — set once every member is measured. */
+  parent: string;
+  /** The members whose `parent` is this one — filled once every member has its parent. */
+  readonly children: Member[];
+}
+
+/**
+ * Lays out every stack in the repository: the rows of plan §7.1.1's rail in drawing order (top
+ * first, trunk last) with a lane each. Pure — the same texts and options always give the same
+ * rows, whatever order git printed the lines in — and built in numbered steps, each a function
+ * below with its reason (D67 numbers them the same way):
+ *
+ * 1. parse the three texts (nothing else touches them);
+ * 2. membership: a branch is a layer iff its commit starts a DAG line;
+ * 3. one walk per member down its history, for its depth and its fork commits;
+ * 4. its parent: the deepest member its history reaches, else trunk;
+ * 5. the tree: children, roots, tips;
+ * 9. the rows, depth-first: a layer's children above it, trunk last;
+ * 11. the checked-out row is filled — a layer, or the trunk row when HEAD is on a branch trunk
+ *     already contains.
+ *
+ * (Steps 6–8, 10 and 12–14 — the §7.2.1 filter, which child continues a lane, side lanes, the
+ * working-tree and elided rows — arrive in the next commits.)
+ */
+// see primer §19 (Map), §21 (Set) and §22 (for ... of)
 export function layoutGraph(input: GraphInput, options: GraphOptions): GraphLayout {
+  // 1. Parse.
+  const entries = parseRefs(input.refs);
+  const commits = parseDag(input.dag);
   const trunkTip = parseTrunkTip(input.trunkTip);
-  const trunkRow: TrunkRow = { kind: 'trunk', name: options.trunk, sha: trunkTip.sha, committedAt: trunkTip.committedAt, lane: 0, node: 'hollow' };
-  return { rows: [trunkRow], lanes: 1 };
+
+  // 2–5. The members with their parents, then the tree.
+  const members = measureMembers(entries, commits, trunkTip.sha, options.trunk);
+  const roots = buildTree(members, options.trunk);
+
+  // 11. Which row is checked out. A layer: the member `head` names. Otherwise the trunk row, when
+  // `head` names a branch that exists and is not a member — by step 2 exactly "a branch trunk
+  // already contains": the local trunk at or behind the tip, a merged branch, a branch with no
+  // commits of its own yet. A detached HEAD (`null`, E3) or a branch no refs line names (unborn)
+  // fills nothing: there is no row for it.
+  const branchNames = new Set(entries.map((entry) => entry.name));
+  const memberNames = new Set(members.map((member) => member.name));
+  const trunkFilled = options.head !== null && branchNames.has(options.head) && !memberNames.has(options.head);
+
+  // 9. The rows, built top-down by a function that draws a layer's children before the layer
+  // itself (primer §81 arrives with the lanes; for now every row is on lane 0).
+  const rows: GraphRow[] = [];
+  // see primer §5 (arrow functions: a function that closes over `rows` and `options`)
+  const draw = (member: Member, lane: number): void => {
+    for (const child of orderChildren(member.children)) {
+      draw(child, lane);
+    }
+    rows.push({
+      kind: 'layer',
+      name: member.name,
+      sha: member.sha,
+      committedAt: member.committedAt,
+      parent: member.parent,
+      depth: member.depth,
+      isTip: member.children.length === 0,
+      forks: member.forks,
+      lane,
+      node: member.name === options.head ? 'filled' : 'hollow',
+    });
+  };
+  for (const root of orderChildren(roots)) {
+    draw(root, 0);
+  }
+  rows.push({
+    kind: 'trunk',
+    name: options.trunk,
+    sha: trunkTip.sha,
+    committedAt: trunkTip.committedAt,
+    lane: 0,
+    node: trunkFilled ? 'filled' : 'hollow',
+  });
+  return { rows, lanes: 1 };
+}
+
+/**
+ * Steps 2–4: which branches are layers, what each one's walk finds, and which layer each sits on.
+ *
+ * Membership (2): a branch is a layer iff its SHA starts a DAG line — a commit some local branch
+ * has and trunk lacks. That leaves out trunk's own local branch while trunk contains it, every
+ * merged branch (listed by `for-each-ref`, no line), a branch with no commits of its own yet and
+ * anything behind trunk; it keeps a local `main` ahead of `origin/main` — a member like any other,
+ * usually a one-row stack (D59's quirk, which computeStack has too: "what git says", gone on
+ * push). Two names on one commit are two members with one SHA (E6).
+ *
+ * The parent (4) is the greatest candidate by (depth, name): the layer directly below is the
+ * deepest layer the history reaches, and for two names on one commit the later name is the
+ * chain's upper link — computeStack's E6 chain, `api-refactor → api-refactor-backup →
+ * add-retries`. Names are unique, so the order is total and every member gets exactly one
+ * parent; no candidate means the layer sits on trunk. After a merge of two named lines the
+ * deepest named ancestor wins whichever side of the merge it came from — first-parent order is
+ * never consulted, because one parent per member needs a total order, and first-parent is none
+ * once two named ancestors tie on depth — so either the merged-in branch or the merging branch's
+ * own base is left a stack of its own: what git says, as E14/E15, and the one shape where
+ * computeStack's count order chains differently (the file header; test/git/graph.git.test.ts).
+ */
+// see primer §25 (arrays: map, filter, push), §30 (`??`) and §46 (a Map of arrays: get, then push)
+function measureMembers(entries: RefEntry[], commits: Map<string, readonly string[]>, trunkSha: string, trunk: string): Member[] {
+  // Every member's names by its SHA, known before any walk: two names on one commit share a list.
+  const namesBySha = new Map<string, string[]>();
+  for (const entry of entries) {
+    if (commits.has(entry.sha)) {
+      const names = namesBySha.get(entry.sha) ?? [];
+      names.push(entry.name);
+      namesBySha.set(entry.sha, names);
+    }
+  }
+
+  // 3. One walk per member.
+  const members: Member[] = [];
+  for (const entry of entries) {
+    if (!commits.has(entry.sha)) {
+      continue;
+    }
+    const walk = walkHistory(entry.sha, commits);
+    // The candidates: every member on a commit the walk visited — other than this member itself,
+    // and on its own commit only the names that sort before it, so that of two names on one
+    // commit the earlier is the ancestor and never the reverse.
+    const candidates: string[] = [];
+    for (const sha of walk.visited) {
+      for (const name of namesBySha.get(sha) ?? []) {
+        if (sha !== entry.sha || name < entry.name) {
+          candidates.push(name);
+        }
+      }
+    }
+    members.push({
+      name: entry.name,
+      sha: entry.sha,
+      committedAt: entry.committedAt,
+      depth: walk.depth,
+      forks: walk.forks,
+      onTip: walk.forks.includes(trunkSha),
+      candidates,
+      parent: trunk,
+      children: [],
+    });
+  }
+
+  // 4. The parent, once every member's depth is known.
+  const byName = new Map(members.map((member) => [member.name, member]));
+  for (const member of members) {
+    member.parent = chooseParent(member.candidates, byName, trunk);
+  }
+  return members;
+}
+
+/** What one walk down a member's history finds (step 3). */
+interface Walk {
+  /** The commits visited: this member's `rev-list --count <trunk>..<name>`. */
+  readonly depth: number;
+  /** The trunk commits the walk stopped at — parents that are no DAG line — sorted. */
+  readonly forks: readonly string[];
+  /** Every commit visited, for finding the layers below. */
+  readonly visited: ReadonlySet<string>;
+}
+
+/**
+ * Step 3: from `start`, follow parents while they are DAG lines; a parent that is not one is a
+ * trunk commit — recorded as a fork, not followed. An explicit worklist (an array used as a stack:
+ * `push` and `pop` at the same end; primer §38's queue took from the other) rather than a
+ * recursive call, because a branch can be a thousand commits long and an orphan branch its whole
+ * history, and each commit would be one more paused call. The visited Set is what makes the walk
+ * end on any text, a hand-typed cycle included: every commit is looked at once. The visited count
+ * is the member's depth — exactly `rev-list --count <trunk>..<name>`, since both count the commits
+ * reachable from the branch and not from trunk; a merge from trunk counts the merge commit only,
+ * its trunk-side parent being a fork, not a line. The forks are sorted so the result is the same
+ * whatever order the parents were met in (`sort()` with no comparison function orders strings by
+ * their character codes, which is all two SHAs need).
+ */
+// see primer §38 (while loops and a worklist), §21 (Set: has, add, size) and §26 (sort)
+function walkHistory(start: string, commits: Map<string, readonly string[]>): Walk {
+  const visited = new Set<string>();
+  const forks = new Set<string>();
+  const worklist = [start];
+  while (worklist.length > 0) {
+    const sha = worklist.pop();
+    if (sha === undefined || visited.has(sha)) {
+      continue;
+    }
+    visited.add(sha);
+    // `start` is a DAG line by construction (membership), and only lines are pushed; `?? []` is
+    // for the compiler, which cannot know that.
+    for (const parent of commits.get(sha) ?? []) {
+      if (commits.has(parent)) {
+        worklist.push(parent);
+      } else {
+        forks.add(parent);
+      }
+    }
+  }
+  return { depth: visited.size, forks: Array.from(forks).sort(), visited };
+}
+
+/**
+ * Step 4: the greatest candidate by (depth, name), or `trunk` when there is none. `candidates`
+ * came from `namesBySha`, which was built from the same members as `byName`, so every name is
+ * found; the `undefined` branch is for the compiler.
+ */
+function chooseParent(candidates: readonly string[], byName: Map<string, Member>, trunk: string): string {
+  let best: Member | null = null;
+  for (const name of candidates) {
+    const candidate = byName.get(name);
+    if (candidate !== undefined && (best === null || isDeeper(candidate, best))) {
+      best = candidate;
+    }
+  }
+  return best === null ? trunk : best.name;
+}
+
+/**
+ * Whether `first` comes later in the (depth, name) order than `second`: deeper, or as deep with
+ * the greater name. Names are compared with `<` and `>` — by character codes, the same on every
+ * machine — for the reason computeStack's compareByDistanceThenName gives: `localeCompare` could
+ * put two branches in a different order on two developers' machines.
+ */
+function isDeeper(first: Member, second: Member): boolean {
+  if (first.depth !== second.depth) {
+    return first.depth > second.depth;
+  }
+  return first.name > second.name;
+}
+
+/**
+ * Step 5: the tree. Every member joins its parent's `children`; the members whose parent is trunk
+ * are the roots, returned. A member with no children is a tip — the top of a stack, what `gs stack
+ * submit` submits up to.
+ */
+function buildTree(members: Member[], trunk: string): Member[] {
+  const byName = new Map(members.map((member) => [member.name, member]));
+  const roots: Member[] = [];
+  for (const member of members) {
+    const parent = byName.get(member.parent);
+    if (parent === undefined) {
+      roots.push(member);
+    } else {
+      parent.children.push(member);
+    }
+  }
+  if (roots.length === 0 && members.length > 0) {
+    // Cannot happen — a member whose parent is no member has `trunk` as its parent — but the
+    // compiler is not told that, and a tree with members and no roots would draw nothing.
+    throw new Error(`layoutGraph: ${members.length} layers and none sits on ${trunk}`);
+  }
+  return roots;
+}
+
+/**
+ * The order a layer's children are drawn in: by name, with `<` and `>` (see isDeeper), so two
+ * machines draw the same rows. (The lanes, in the next commit, decide which child continues its
+ * parent's lane and in what order the rest stand beside it.)
+ */
+// see primer §26 (sort and comparison functions) and §16 (arrays: spread — a sorted copy, not a sort in place)
+function orderChildren(children: readonly Member[]): Member[] {
+  return [...children].sort((first, second) => {
+    if (first.name < second.name) {
+      return -1;
+    }
+    return first.name > second.name ? 1 : 0;
+  });
 }
