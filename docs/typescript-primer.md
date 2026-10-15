@@ -210,6 +210,11 @@ the compiler so; from that line on, `extension` is known to be an `Extension`. A
 (extension === undefined) { return; }` guard narrows the same way. Both are ordinary code —
 the compiler simply follows the control flow.
 
+One guard can narrow several values at once: `if (ghVersion === null || ghPath === null) { return
+… }` in `ghMissingOffer` (`src/core/readinessFix.ts`, M5 item 23b) leaves both destructured consts
+(§54) as `string` below it — the member sets them to `null` as a pair, and the one `||` is why the
+function can hand `ghPath` to helpers typed `string` without a second test.
+
 ## 9. interface
 
 *First seen in `src/core/model.ts`.*
@@ -2403,7 +2408,9 @@ shape may itself hold a union: `Extract<Readiness, { kind: 'gs-missing' | 'gs-to
 fits — the two answers step 1 of the probe can give — so a function taking one has no case to
 write for every other member. `GhStepAnswer` in the same file (M5 item 23a) is one more `Extract`
 over `Readiness` — the two members step 5 can answer — with a member of the function's own
-(`passed`) joined to it by `|`, as `locateGitSpice`'s `located` is joined to `NotLocated`.
+(`passed`) joined to it by `|`, as `locateGitSpice`'s `located` is joined to `NotLocated`; and
+`GhMissing` in `src/core/readinessFix.ts` (M5 item 23b) picks the one member its three gh install
+offers share, so `ghMissingOffer` takes the member whole instead of its fields one by one.
 
 ## 50. `JSON.stringify` and `JSON.parse`
 
@@ -2948,11 +2955,12 @@ the logic, not enforcing it.
 config` lines, or a web page) — and two patterns. A value that is either *something* or *nothing* is
 a nullable field, not a member: `Offer.fix` is `OfferedFix | null`, because "no button" carries
 no data of its own. And completeness without a `switch`: `offerFor` takes `NotReady` (§49) and
-tests `readiness.kind` against eight values, each `if` returning, so after the eighth the
-compiler has narrowed `readiness` to the one member left, `gh-missing`, and the last line reads
-its `missing`, `ghVersion` and `ghMinimum` with no test at all. A member added to `Readiness`
-later lands in that last line too, which then no longer compiles — those fields are not on the
-new member — and that error is the reminder to write its offer.
+tests `readiness.kind` against nine values (eight before M5 item 23a), each `if` returning, so
+after the ninth the compiler has narrowed `readiness` to the one member left, `gh-missing`, and the
+last line hands it whole to `ghMissingOffer`, whose parameter type `GhMissing` (§49) accepts
+nothing else (until item 23b the line read the member's fields directly, with no test at all). A
+member added to `Readiness` later lands in that last line too, which then no longer compiles — the
+new member is not a `GhMissing` — and that error is the reminder to write its offer.
 
 `Enrichment` in `src/core/model.ts` (M5, item 20a) is a two-member union — `enriched { ranGsLog,
 malformed }` and `not-enriched { cause, reason }` — because the two outcomes carry different

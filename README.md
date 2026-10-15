@@ -28,6 +28,10 @@ reload. To build the file yourself, see Development below.
 - git-spice ≥ 0.31 for **PR Cascade: Set Up git-spice**, **Track Stack with git-spice** and
   **Push Whole Stack**, and for the pull-request features the next versions build on it
   (`brew install git-spice` on macOS; the setup command offers that).
+- GitHub CLI (`gh`) ≥ 2.90 with its `gh-stack` extension, logged in to the repository's host, for
+  the pull-request features on GitHub repositories (the next versions); **PR Cascade: Set Up
+  git-spice** checks all three on a GitHub repository and offers each (`brew install gh`,
+  `gh extension install github/gh-stack`, `gh auth login --web`). GitLab repositories need none of it.
 - In a remote window (SSH, a container, WSL) install the extension on the remote side, as
   with any extension that runs processes there.
 
@@ -91,8 +95,10 @@ Two cases need the **Refresh** button in the view's title bar:
 
 **PR Cascade: Set Up git-spice** in the Command Palette checks, in order, that git-spice is
 installed and new enough, that the repository is initialised for it, that its remote is a
-GitHub or GitLab repository git-spice recognises, and that you are logged in — and offers the
-fix for the first thing missing. With several repositories open it asks which one. A fix that
+GitHub or GitLab repository git-spice recognises, and that you are logged in — and, on a GitHub
+repository, that GitHub CLI (`gh`) 2.90 or newer and its `gh-stack` extension are installed and
+that `gh` is logged in to the host — and offers the fix for the first thing missing. With several
+repositories open it asks which one. A fix that
 needs you runs in a terminal named `PR Cascade: <folder>` at the repository root, so you can
 answer git-spice's questions there; PR Cascade checks again every 3 seconds, for up to 5
 minutes, and once the step has taken it refreshes the view, says so, and offers the next one.
@@ -116,15 +122,33 @@ answered long after it appeared does nothing when the step was done meanwhile. T
   would otherwise look for in the wrong place). GitLab likewise.
 - **Log in** — `git-spice auth login --forge github` (or `gitlab`) in the terminal. git-spice
   asks how; the main choices:
-  - *GitHub:* **GitHub CLI** if `gh` is logged in — nothing more to do, and PR Cascade will want
-    `gh` for GitHub's native stacks anyway; else **OAuth** (a code to paste in the browser), or a
-    **Personal Access Token** where an organisation does not allow the git-spice OAuth app.
+  - *GitHub:* **GitHub CLI** if `gh` is already logged in — nothing more to do (the setup command
+    checks gh next, so log gh in first in a terminal if you want this choice); else **OAuth** (a
+    code to paste in the browser), or a **Personal Access Token** where an organisation does not
+    allow the git-spice OAuth app.
   - *GitLab:* **GitLab CLI** if `glab` is logged in, else **OAuth** (a self-hosted GitLab needs
     an administrator to set up the git-spice OAuth app first) or a **Personal Access Token**.
 
   A `GITHUB_TOKEN` (or `GITLAB_TOKEN`) in your shell's environment counts as a login to
   git-spice and makes `auth login` refuse, so the line unsets it for that one command and a
   real login is stored.
+- **Install gh** / **Upgrade gh** — on GitHub repositories only: `brew install gh` (or `brew
+  upgrade gh` when the one found is Homebrew's) in the terminal, else gh's install page. As for
+  git-spice, a gh a terminal finds and PR Cascade does not means VS Code's PATH misses its
+  directory: set `prCascade.ghPath` to its full path — the message names it when Homebrew has one.
+- **Install gh-stack** — `gh extension install github/gh-stack` in the terminal; no login needed.
+- **Log in to gh** — `gh auth login --hostname <host> --web --git-protocol <prCascade.gitProtocol>`
+  in the terminal: gh prints a one-time code, opens the host in your browser, and you paste it —
+  no token to copy anywhere. gh still asks in the terminal before it opens the browser — with
+  `https` whether it may act as git's credential helper for the host, with `ssh` about an SSH key —
+  then `Press Enter to open …`. A `GH_TOKEN` or `GITHUB_TOKEN` in your shell makes gh refuse to log
+  in, so the line unsets both for that one command (`GH_ENTERPRISE_TOKEN`/`GITHUB_ENTERPRISE_TOKEN`
+  for a GitHub Enterprise Server host); if VS Code itself was started with such a token that no
+  longer works, PR Cascade keeps reading gh as not logged in even after you log in — unset it and
+  reload the window. Offline, PR Cascade cannot tell "not logged in" from
+  "cannot reach <host>" — gh answers both the same way — so it offers the login either way; close
+  the notification if you are offline. Once everything is there the final line names both tools:
+  "git-spice 0.31.2 and gh 2.102.0 are ready for <repo> (<host>)."
 
 **Tracking.** When a layer reads `not tracked`, the view's `…` menu offers **Track Stack with
 git-spice** (also in the Command Palette): it runs `git-spice branch track <branch> --base <layer
@@ -183,6 +207,8 @@ again on each refresh, so a change takes effect without reloading the window.
 | `remote` | `"origin"` | The remote whose default branch is consulted first — change it if you work on a fork. |
 | `statusBar` | `true` | Show the `<branch> · n of N` status bar item: the branch HEAD is on and its place in the stack, counted from the bottom. Click it to open the Stack view. |
 | `gsPath` | `""` | The git-spice executable. Empty = `git-spice`, then `gs`, from VS Code's PATH; a full path when VS Code's PATH misses it (see "git-spice setup"). A set value is the only one tried. |
+| `ghPath` | `""` | The GitHub CLI executable. Empty = `gh` from VS Code's PATH; a full path when VS Code's PATH misses it (see "git-spice setup"). A set value is the only one tried. GitHub repositories only. |
+| `gitProtocol` | `"https"` | What gh uses for git on the host after the setup command logs it in (`gh auth login --git-protocol`): its own clones and its credential helper — not PR Cascade's pushes, which use your remote's URL as it is. `ssh` makes gh ask about an SSH key. |
 
 Which repositories the view shows is the built-in Git extension's decision, so its settings
 apply, exactly as in the Source Control view: `git.autoRepositoryDetection`,
@@ -197,8 +223,9 @@ Control stays closed here too, across reloads.
 v0.1 is the viewer. The milestones after it, each one stack of PRs, are laid out in
 [`pr-cascade-plan.md`](pr-cascade-plan.md):
 
-5. git-spice backend: readiness and setup, tracking and push (the commands above — done); then
-   `gh` for GitHub's native stacks.
+5. git-spice backend: readiness and setup, tracking and push (the commands above — done), and
+   gh's readiness and login on GitHub repositories (done); the native stack link itself is
+   milestone 7.
 6. Two views of every stack in the repository: a compact smartlog rail in the Explorer and a
    detailed graph in the extension's own container; the v0.1 tree goes once the rail matches it.
 7. Create PRs for the whole stack, linked as a native GitHub stack.

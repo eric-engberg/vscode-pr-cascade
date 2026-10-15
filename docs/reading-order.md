@@ -23,11 +23,13 @@ the repository root; its §13 is the running log of decisions and deviations mad
    `src/extension.ts` sets after every load, primer §74), the **Push Whole Stack** command
    (`prCascade.pushStack`, M5 item 21b — `2_stack@1`, the first entry in that menu, always
    shown; `enablement: !prCascade.rebaseInProgress`, a second key from the same listener, greys
-   it and Track Stack while a rebase is paused: primer §74, item 59), and the five
+   it and Track Stack while a rebase is paused: primer §74, item 59), and the seven
    settings (`configuration`: `prCascade.trunk`, `prCascade.gitPath` — empty by default,
    meaning "the git the built-in Git extension found", item 61 — `prCascade.remote`,
-   `prCascade.statusBar`, item 63, and `prCascade.gsPath`, the git-spice executable, empty for
-   "`git-spice`, then `gs`", item 35).
+   `prCascade.statusBar`, item 63, `prCascade.gsPath`, the git-spice executable, empty for
+   "`git-spice`, then `gs`", item 35, and — both M5 item 23b — `prCascade.ghPath`, the gh
+   executable, empty for `gh` (item 36), and `prCascade.gitProtocol`, an `enum` of `https` and
+   `ssh` the Settings editor offers as a list (item 44, the login line)).
    There is deliberately no
    `extensionDependencies` entry for the Git extension (plan §7.14.1 says why). Everything
    declared here is given code in `src/extension.ts`. `version` is the release's tag without
@@ -66,8 +68,8 @@ the repository root; its §13 is the running log of decisions and deviations mad
    — read its doc comment for why the `--`, why never trimmed, and why `tryRun`. M5 item 19b's
    wiring is in two places: above `activate`, `realTerminalHost`, `realReadinessHost` (VS Code
    itself as items 66 and 67 take it) and `readinessDeps` (the seams, handed to tests only);
-   at the bottom, `backendFor` (one git-spice backend per window, rebuilt when the git, the
-   setting or — in a test — the runner changes), `probeFor` and `setUpGitSpice`, the command.
+   at the bottom, `backendFor` (one git-spice backend per window, rebuilt when the git, either
+   executable setting or — in a test — the runner changes), `probeFor` and `setUpGitSpice`, the command.
    Then M5 item 20b's: `lastStates` and `hasUntracked`, `notEnrichedMessage` (the sentence for a
    repository `enrich` could not serve, with the setup command named only where it would help),
    and `trackStack` in three parts — `untrackedRepositories` (the refusals before a repository is
@@ -527,11 +529,14 @@ the repository root; its §13 is the running log of decisions and deviations mad
     once the step passed. Read the header for the rules every sentence follows (no "PR
     Cascade:" prefix, warning only when there is something to do, never a Cancel button),
     then the types — `TrunkBranch`, `OfferFacts` (what the sentences need beyond the probe's
-    answer: the folder, the remote, the trunk's local branch, the setting, where Homebrew is and
-    whether it has git-spice), `ConfigEntry`, `Fix` (a terminal command, some `git config` lines,
-    or a web page), `OfferedFix`, `Offer` — then `offerFor`, which only picks (and why its chain of
-    `if`s needs no final case: primer §59): four members are worded right there (`gh-not-logged-in`
-    among them until M5 item 23b brings its line), the other six have a helper below. Three repay a slower read: `trunkBranchFor`, the one question asked of
+    answer: the folder, the remote, the trunk's local branch, the two executable settings, where
+    Homebrew is and whether it has git-spice and gh, the git protocol), `ConfigEntry`, `Fix` (a
+    terminal command, some `git config` lines, or a web page), `OfferedFix`, `Offer` — then
+    `offerFor`, which only picks (and why its chain of `if`s needs no final case: primer §59):
+    three members are worded right there, the other seven have a helper below — since M5 item
+    23b `ghMissingOffer` picks among three for gh (not found, too old, the extension alone) and
+    `ghLoginOffer` builds the one terminal line that unsets a token pair chosen by host class
+    (`ghTokenVariables`, a tuple type — primer §25). Three repay a slower read: `trunkBranchFor`, the one question asked of
     git before an init offer — `gs repo init --trunk` wants a *local* branch, and the trunk is
     usually `origin/main`; `gsTooOldOffer`, for how a Homebrew install is told from the others
     now that every official package is named `git-spice`; and `unrecognizedOffer` with
@@ -545,7 +550,8 @@ the repository root; its §13 is the running log of decisions and deviations mad
     cases after it pin the field they are about — each `Readiness` member and its variants, then
     `readyMessage`, then `trunkBranchFor` against the git fake — a local trunk, a remote-tracking
     one with and without its local branch, a fork's trunk on another remote, a tag, a commit, a
-    name git does not know.
+    name git does not know. Since M5 item 23b the gh offers too: the three install offers' every
+    branch, the login line's pair and protocol, `ghTokenVariables` as a table.
 46. **`test/git/trunkBranch.git.test.ts`** — the same question asked of real git, once per
     kind of trunk — `origin/HEAD`, an ambiguous name and one that looks like an option included —
     because what `--symbolic-full-name` prints for each is exactly the kind of detail another git
@@ -640,9 +646,9 @@ the repository root; its §13 is the running log of decisions and deviations mad
     `auth` row runs through a dead proxy, so the file is the same offline and on CI. Skipped without
     `gh`; CI requires it (`PRCASCADE_REQUIRE_GH`) and installs nothing — the runner images ship gh.
     Read it beside item 55, whose shape it borrows.
-58. **`src/vscode/config.ts`** — the first file in `src/vscode/`: the five `prCascade.*`
-    settings — four strings, `gsPath` the newest (M5 item 19b), and the `statusBar` boolean
-    (item 63) — read out of VS Code
+58. **`src/vscode/config.ts`** — the first file in `src/vscode/`: the seven `prCascade.*`
+    settings — six strings, `ghPath` and `gitProtocol` the newest (M5 item 23b), and the
+    `statusBar` boolean (item 63) — read out of VS Code
     into a plain object (`PrCascadeSettings`). Read it for
     the boundary it draws — settings live in VS Code's configuration API, and nothing in
     `src/core` ever sees that API — and for what happened to `gitPath` in M4: its default
@@ -787,13 +793,14 @@ the repository root; its §13 is the running log of decisions and deviations mad
     the action runs. `runFix` for the three kinds of fix (a page the user will not let VS Code
     open ends it), `waitForStep` for the wait — the poll of item 42 over the probe, passed only
     when the probe gets *further* (`progressOf`, a `Record` over every `Readiness` kind since M5
-    item 23a — primer §80 — so a member without a number does not compile), or for an install when
-    Homebrew's git-spice
-    appears; stopped by the close of the fix's own terminal, then one last look — and `dispose`
-    for the window closing. At the bottom, `chooseRepository` (the setup command's pick, and since
-    M5 item 20b Track Stack's too, since 21b Push Whole Stack's — each asks its own question
-    through the third parameter) and `machineFacts` (where Homebrew is, and whether it has
-    git-spice).
+    item 23a — primer §80 — so a member without a number does not compile; since item 23b
+    `gh-missing` holds three steps — gh not found, too old, then its extension — and the look
+    again at the click tells them apart), or for an install when Homebrew's
+    git-spice — or gh — appears (`installAppeared`, M5 item 23b); stopped by the close of the
+    fix's own terminal, then one last look — and `dispose` for the window closing. At the bottom,
+    `chooseRepository` (the setup command's pick, and since M5 item 20b Track Stack's too, since
+    21b Push Whole Stack's — each asks its own question through the third parameter) and
+    `machineFacts` (where Homebrew is, and whether it has git-spice and gh).
 68. **`test/helpers/fakeReadinessHost.ts`** — the fakes for item 67's host: terminals that
     remember every line they were sent and every `show`, count their close listeners and take
     terminals that were there before (`addExisting`), and notifications
@@ -811,7 +818,10 @@ the repository root; its §13 is the running log of decisions and deviations mad
     a `git config` fix with no wait, Homebrew and the install page (declined, and opened again
     for a second click), the loop guard, what counts as passed (a stale click, a step that went
     backwards, Homebrew's git-spice appearing, how far the probe got for each kind of fix), what
-    the offer is told, a probe that rejects, the window closing at each point; then
+    the offer is told, a probe that rejects, the window closing at each point — and, since M5
+    item 23b, the gh rows: an install counted done at the extension step, the extension's at gh's
+    login, gh's login at ready, Homebrew's gh ending only an install's wait, both logins in one
+    terminal; then
     `chooseRepository` and `machineFacts`.
 71. **`test/ext/activate.test.ts`** — inside a real VS Code: the extension is found by its
     id, activates, returns `{ provider, refresh }` (plan §9.1), and has its view and command
@@ -939,7 +949,10 @@ the repository root; its §13 is the running log of decisions and deviations mad
     ending in "ready"; a second click; a logout noticed when asked again; a changed
     `prCascade.gsPath` making a new backend; VS Code's own terminals reused. Every case ends its
     flow before it restores the fixture. Since M5 item 23a the fake answers gh too — every GitHub
-    row reaches step 5 — and the ready line names both tools.
+    row reaches step 5 — and the ready line names both tools. Since M5 item 23b five more rows:
+    a changed `prCascade.ghPath` making a new backend, gh-stack then gh's login in one terminal,
+    gh installed with Homebrew, the two gh settings on the line, a GitLab repository asking nothing
+    of gh.
 77. **`test/ext/commands.test.ts`** — "Track Stack with git-spice" live (M5 item 20b), through
     `executeCommand('prCascade.trackStack')` on the fixture with a fake git-spice and a fake host
     in the seams: registered, and the manifest's `…` entry word for word with its `when` (and,
