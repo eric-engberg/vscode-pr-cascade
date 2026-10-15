@@ -15,7 +15,9 @@
  * pair per host); and the three directories still empty afterwards (telemetry off). Every `auth
  * status` and `auth login` row goes through a dead proxy with `no_proxy` emptied, so the file is
  * deterministic and offline on CI too; the OS keyring is kept out as well (a fresh HOME on macOS,
- * a dead session-bus address on Linux — the comment above `beforeAll` says why that matters).
+ * a dead session-bus address on Linux — the comment above `beforeAll` says why that matters), and so
+ * are Actions' own `CI` and `GITHUB_ACTIONS`, under which gh installs the very extension this file
+ * pins as absent (the comment in `beforeAll`).
  *
  * Layer: test, git integration (plan §9.1 layer 2; Vitest, a real gh, no VS Code, no network
  * reached). Depends on: src/core/ghstatus.ts, src/core/command.ts, src/core/forge.ts,
@@ -96,7 +98,12 @@ beforeAll(async () => {
   vi.stubEnv('XDG_STATE_HOME', stateDir);
   vi.stubEnv('GH_CONFIG_DIR', configDir);
   vi.stubEnv('DBUS_SESSION_BUS_ADDRESS', `unix:path=${path.join(homeDir, 'no-bus')}`);
-  for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN', 'GH_HOST', 'GH_DEBUG']) {
+  // `CI` and `GITHUB_ACTIONS` go too: every Actions job sets both, and under `CI=true` gh treats
+  // itself as automation and installs an official extension it is asked about rather than printing
+  // the hint — `gh stack --version` downloaded gh-stack v0.2.1 into the data directory and exited 0
+  // on both runners (the first CI run of this file; measured here with `CI=true` alone) — while
+  // `GITHUB_ACTIONS=true` words exit 4 as a workflow hint. The rows pin a developer's gh.
+  for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN', 'GH_HOST', 'GH_DEBUG', 'CI', 'GITHUB_ACTIONS']) {
     vi.stubEnv(name, undefined);
   }
 });

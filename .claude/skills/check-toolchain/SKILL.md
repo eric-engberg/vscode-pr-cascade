@@ -90,7 +90,10 @@ Two specific rules on this project:
   `gh stack --version`, which needs neither login nor network. And `gh auth status` exits 1 for
   "not logged in", "token revoked" and "offline" alike — and with `GH_HOST` set, "not logged in"
   is itself a network call (gh validates an empty default token for the host) — read its stderr
-  yourself, the extension reads only the code.
+  yourself, the extension reads only the code. And under `CI=true` gh **installs** an official
+  extension it is asked about (`gh stack --version` fetched gh-stack on both runners) instead of
+  printing the install hint, so a `CI=true` shell is not a developer's gh; `test/git/gh.git.test.ts`
+  deletes `CI` and `GITHUB_ACTIONS` for that reason.
 
 ## What it does not check
 
