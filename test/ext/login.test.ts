@@ -22,7 +22,7 @@
  * Depends on: the running extension (what activate() returns in test mode), the fixture
  * workspace, test/helpers/fakeCommand.ts, test/helpers/fakeReadinessHost.ts,
  * src/vscode/terminal.ts. Depended on by: nothing. Plan: §7.5, §7.6, §7.13.1, §8
- * E21/E55/E59/E67/E83, §9.4 `ext/login`, §10.1 item 19b, §13.2 D58, §13.4.
+ * E21/E23/E24/E55/E59/E62b/E67/E83, §9.4 `ext/login`, §10.1 items 19b and 23b, §13.2 D58, D66, §13.4.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -434,6 +434,7 @@ describe('PR Cascade: Set Up git-spice (plan §7.13.1, D58)', () => {
       const install = await host.terminals.nextSent();
       results.set(GH_STACK, exited(0, 'gh stack version 0.2.1\n'));
       const login = await host.terminals.nextSent();
+      const beforeWait = runner.calls.length;
       results.set(GH_AUTH, exited(0));
       const outcome = await flow;
 
@@ -451,9 +452,11 @@ describe('PR Cascade: Set Up git-spice (plan §7.13.1, D58)', () => {
       ]);
       assert.strictEqual(treeChanges, 2);
       assert.strictEqual(host.terminals.created.length, 1);
-      // asked at least twice while waiting for the login, and nothing of ours ever installed or logged in
+      // asked once the login line was typed — the wait's poll that found the login, then the next pass's
+      // probe before the ready line: two, where a wait that never polled would give one — and nothing of
+      // ours ever installed or logged in
       const ghCalls = runner.calls.filter((call) => call.executable === 'gh');
-      assert.ok(ghCalls.filter((call) => call.args.join(' ') === 'auth status --hostname github.com').length >= 2);
+      assert.ok(runner.calls.slice(beforeWait).filter((call) => `${call.executable} ${call.args.join(' ')}` === GH_AUTH).length >= 2);
       assert.ok(ghCalls.every((call) => !call.args.includes('login') && !call.args.includes('install')));
       // every gh spawn from the repository, for its host, with the probe's hygiene and timeout
       for (const call of ghCalls) {

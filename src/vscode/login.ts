@@ -159,10 +159,12 @@ type FixResult = 'passed' | 'failed' | 'changed';
  * does not wait. A `Record` over every `kind`, so a member added to `Readiness` does not compile
  * here until it has a number — the `if` chain this replaced (item 19b) ended in `return 3`, and
  * item 23a's new member would have silently taken the forge step's place, so that a git-spice
- * login's wait could never have passed into it. `gh-missing` holds two steps — gh, then its
- * extension — because E62b wants both named in one answer: after `brew install gh` the probe
- * answers `gh-missing` again with only `gh-stack` listed, and that is further (item 23b); without
- * the split every gh install's wait would have timed out in silence with gh installed.
+ * login's wait could never have passed into it. `gh-missing` holds three steps — gh not found,
+ * gh too old, then its extension — because E62b wants everything named in one answer: after
+ * `brew install gh` the probe answers `gh-missing` again, with a version (an old gh) or with only
+ * `gh-stack` listed, and either is further (item 23b), as `gs-missing` → `gs-too-old` is for
+ * git-spice's two members; without the split every gh install's wait would have timed out in
+ * silence with gh installed.
  */
 // see primer §43 (`Record<K, V>`: one value for each member of a union of keys) and §80 (`Readiness['kind']`: the type of one field, read off the union)
 const PROGRESS: Record<Readiness['kind'], number> = {
@@ -175,17 +177,20 @@ const PROGRESS: Record<Readiness['kind'], number> = {
   'forge-unsupported': 3,
   'not-logged-in': 4,
   'gh-missing': 5,
-  'gh-not-logged-in': 7,
-  ready: 8,
+  'gh-not-logged-in': 8,
+  ready: 9,
 };
 
-/** `gh-missing` with gh itself present and only its extension missing: the step after a gh install, inside the same member. */
-const GH_STACK_STEP = 6;
+/** `gh-missing` with a gh that answered but is below the floor: the step after a gh install, inside the same member. */
+const GH_TOO_OLD_STEP = 6;
 
-// see primer §25 (arrays: `includes`)
+/** `gh-missing` with gh itself fine and only its extension missing: the step after a gh upgrade, inside the same member. */
+const GH_STACK_STEP = 7;
+
+// see primer §25 (arrays: `includes`) and §48 (the conditional expression)
 function progressOf(answer: Readiness): number {
-  if (answer.kind === 'gh-missing' && !answer.missing.includes('gh')) {
-    return GH_STACK_STEP;
+  if (answer.kind === 'gh-missing' && answer.ghVersion !== null) {
+    return answer.missing.includes('gh') ? GH_TOO_OLD_STEP : GH_STACK_STEP;
   }
   return PROGRESS[answer.kind];
 }
@@ -346,15 +351,17 @@ export class ReadinessFlows implements Disposable {
    * centre while the user did the step another way — and running `gs repo init` a second time
    * with another `--trunk` would quietly replace the trunk they chose (git-spice 0.31.2 does not
    * ask). When the probe's answer is still the member offered, runs the fix. Compared by `kind`
-   * only: the same step failing with other details (another host, another version) still runs
-   * the offer that was clicked.
+   * and by step (`progressOf`), never by field: the same step failing with other details (another
+   * host, another version) still runs the offer that was clicked, while the one kind that holds
+   * three steps, `gh-missing` (item 23b), does not run `brew install gh` for a second gh once the
+   * probe says only the extension — or an upgrade — is wanted.
    */
   private async fixIfStillNeeded(request: ReadyRequest, failing: NotReady, fix: Fix, flight: Flight): Promise<FixResult> {
     const now = await request.probe();
     if (this.disposed) {
       return 'failed';
     }
-    if (now.kind !== failing.kind) {
+    if (now.kind !== failing.kind || progressOf(now) !== progressOf(failing)) {
       return 'changed';
     }
     return (await this.runFix(request, failing, fix, flight)) ? 'passed' : 'failed';

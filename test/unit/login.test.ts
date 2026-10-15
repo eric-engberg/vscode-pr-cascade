@@ -9,8 +9,8 @@
  * types from `vscode`, so it loads without VS Code, and five minutes of waiting take
  * milliseconds). The flow wired into a real VS Code is test/ext/login.test.ts. Depends on:
  * src/vscode/login.ts, test/helpers/fakeReadinessHost.ts, test/helpers/fakeGit.ts. Depended on
- * by: nothing. Plan: §7.5 steps 1–4, §7.6, §7.13.1, §8 E55/E59/E62/E67/E70/E83, §9.4
- * `ext/login`, §10.1 item 19b, §13.2 D58.
+ * by: nothing. Plan: §7.5 steps 1–4, §7.6, §7.13.1, §8 E23/E55/E59/E62/E62b/E67/E70/E83, §9.4
+ * `ext/login`, §10.1 items 19b and 23b, §13.2 D58, D65 (the `progressOf` rows), D66 (the gh rows).
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -519,6 +519,23 @@ describe('ReadinessFlows.ensureReady', () => {
       expect(h.refreshes).toBe(0);
     });
 
+    it('runs nothing for a stale Install with Homebrew once gh is there — the look-again tells the two steps of gh-missing apart (item 23b)', async () => {
+      // arrange: the notification sat while the user installed gh by hand; at the click the probe
+      // already says only the extension is missing — the same kind, another step
+      const probe = scripted([GH_BOTH, GH_STACK_ONLY]);
+      const h = harness({ answers: ['Install with Homebrew', undefined], machine: { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: null, brewGh: null } });
+
+      // act
+      const flow = watch(h.flows.ensureReady(requestFor(probe, [])));
+      await vi.advanceTimersByTimeAsync(0);
+
+      // assert: no `brew install gh` for a second gh, no refresh, the next step offered afresh
+      expect(h.host.terminals.sent).toStrictEqual([]);
+      expect(h.refreshes).toBe(0);
+      expect(h.host.asked.map((asked) => asked.message)).toStrictEqual([GH_INSTALL_SENTENCE, GH_STACK_SENTENCE]);
+      expect(flow.outcome).toBe('not-ready');
+    });
+
     it('does not count a step that went backwards as a pass for gh either (item 23b)', async () => {
       // arrange: at 3 s git-spice itself is gone
       const probe = scripted([GH_NOT_LOGGED_IN, GH_NOT_LOGGED_IN, GS_MISSING]);
@@ -614,7 +631,23 @@ describe('ReadinessFlows.ensureReady', () => {
       expect(h.host.asked.map((asked) => asked.message)).toStrictEqual([LOGIN_OFFER.message, LOGGED_IN.message, 'gh is not logged in to github.com.']);
     });
 
-    it('counts a gh install as done when the probe moves from both missing to the extension alone — one member, two steps (item 23b)', async () => {
+    it('counts a gh install as done when the probe finds gh too old — it is installed, then offers the upgrade (item 23b)', async () => {
+      // arrange: the gh that `brew install gh` brings is an old one (a stale tap, say); Homebrew's
+      // gh is not on disk, so the page is offered next and `installAppeared` has no say
+      const probe = scripted([GH_BOTH, GH_BOTH, GH_TOO_OLD]);
+      const h = harness({ answers: ['Install with Homebrew', undefined], machine: { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: null, brewGh: null } });
+
+      // act
+      const flow = watch(h.flows.ensureReady(requestFor(probe, [])));
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      // assert: "not found" and "too old" are two steps of the one member, as they are two members for git-spice
+      expect(h.host.asked.map((asked) => asked.message).slice(1)).toStrictEqual(['gh installed.', 'gh 2.40.1 is older than 2.90.0, the oldest PR Cascade works with.']);
+      expect(flow.outcome).toBe('not-ready');
+      expect(h.refreshes).toBe(1);
+    });
+
+    it('counts a gh install as done when the probe moves from both missing to the extension alone — one member, three steps (item 23b)', async () => {
       // arrange: `brew install gh` done by 3 s; the extension's offer after it is closed
       const probe = scripted([GH_BOTH, GH_BOTH, GH_STACK_ONLY]);
       const h = harness({ answers: ['Install with Homebrew', undefined], machine: { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: null, brewGh: null } });
@@ -1035,17 +1068,33 @@ describe('ReadinessFlows.ensureReady', () => {
       expect(h.host.asked.map((asked) => asked.buttons)).toStrictEqual([['Open install docs'], ['Install with Homebrew']]);
     });
 
-    it("the protocol and the gh setting reach the login line, Homebrew's gh the install sentence (item 23b)", async () => {
-      // arrange: the setting names Homebrew's gh, which is the gh that answered; the protocol is ssh
+    it('passes prCascade.gitProtocol to the gh login line, run by the gh that answered (item 23b)', async () => {
+      // arrange: the line takes the executable from the probe's member, not from the setting; the protocol is ssh
       const notLoggedIn: Readiness = { kind: 'gh-not-logged-in', forge: GITHUB, ghPath: '/opt/homebrew/bin/gh' };
-      const h = harness({ answers: ['Log in'], machine: HOMEBREW });
+      const h = harness({ answers: ['Log in'] });
 
       // act
-      watch(h.flows.ensureReady(requestFor(scripted([notLoggedIn]), [], ROOT, gitFor(), '/opt/homebrew/bin/gh', 'ssh')));
+      watch(h.flows.ensureReady(requestFor(scripted([notLoggedIn]), [], ROOT, gitFor(), '', 'ssh')));
       const sent = await h.host.terminals.nextSent();
 
       // assert
       expect(sent.text).toBe('cd /w/repo && env -u GH_TOKEN -u GITHUB_TOKEN /opt/homebrew/bin/gh auth login --hostname github.com --web --git-protocol ssh');
+    });
+
+    it('points at prCascade.ghPath when it is set and did not answer as gh (item 23b)', async () => {
+      // arrange: the setting is tried alone and fails; Homebrew's gh is there too, and still not offered
+      const h = harness({ machine: HOMEBREW });
+
+      // act
+      watch(h.flows.ensureReady(requestFor(scripted([GH_BOTH]), [], ROOT, gitFor(), '/usr/local/bin/gh')));
+      await vi.advanceTimersByTimeAsync(0);
+
+      // assert
+      expect(h.host.asked[0]).toStrictEqual({
+        severity: 'warning',
+        message: "prCascade.ghPath is /usr/local/bin/gh, which did not answer as gh. Point it at gh, or clear it to try gh from VS Code's PATH.",
+        buttons: [],
+      });
     });
 
     it("names Homebrew's gh for prCascade.ghPath when VS Code did not find gh (item 23b)", async () => {

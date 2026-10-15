@@ -23,7 +23,9 @@
  * (`GitRunner`), core/shell.ts (a command quoted inside a sentence), core/version.ts
  * (`parseVersion` — from core/backends/gitspice.ts until item 23a moved it; nothing here runs the
  * backend), Node's `node:path`. Depended on by: src/vscode/login.ts and src/extension.ts (item
- * 19b), test/unit/readinessFix.test.ts, test/git/trunkBranch.git.test.ts. Plan: §7.5 (the gh login
+ * 19b); core/backend.ts and core/backends/gitspice.ts (`TrunkBranch`, a type); test/unit/readinessFix.test.ts,
+ * test/git/trunkBranch.git.test.ts, and the tests that build an `OfferFacts` or ask the trunk question
+ * (unit/enrich, unit/push, unit/login, unit/track, test/helpers/gitspice.ts, git/gitspice.git). Plan: §7.5 (the gh login
  * line), §7.6, §7.13.1, §8 E21/E23/E25/E55/E59/E60/E62/E62b/E67/E70/E75, §10.1 items 19a, 23a and
  * 23b, §13.2 D57/D65/D66.
  */
@@ -54,8 +56,10 @@ export const GH_INSTALL_DOCS_URL = 'https://github.com/cli/cli#installation';
 const TOKEN_VARIABLE: Record<'github' | 'gitlab', string> = { github: 'GITHUB_TOKEN', gitlab: 'GITLAB_TOKEN' };
 
 /**
- * The environment variables gh reads as a login, by host class (`gh help environment`): the first
- * pair for github.com, its subdomains and *.ghe.com, the second for GitHub Enterprise Server. While
+ * The environment variables gh reads as a login, by host class: `gh help environment` names
+ * github.com and a subdomain of ghe.com for the first pair and a GitHub Enterprise Server host for
+ * the second; a `*.github.com` host (ssh.github.com) is github.com to gh, which folds it before
+ * looking a host up (plan §13.4, item 23a), so it takes the first pair here too. While
  * one of the pair for the host is set, gh refuses `auth login` outright ("The value of the GH_TOKEN
  * environment variable is being used for authentication", exit 1 — measured 2.102.0), so the login
  * offer unsets both for that one command, as the git-spice line unsets GITHUB_TOKEN. The other pair
@@ -512,7 +516,7 @@ type GhMissing = Extract<NotReady, { kind: 'gh-missing' }>;
  * Every sentence a warning: there is something to do (D57). Item 19a's information sentence,
  * produced by item 23a for one PR of interim, is gone (D65, D66).
  */
-// see primer §54 (destructuring) and §59 (narrowing two nullable fields at once)
+// see primer §54 (destructuring) and §8 (one guard narrowing two nullable values)
 function ghMissingOffer(member: GhMissing, facts: OfferFacts): Offer {
   const { forge, missing, ghVersion, ghPath, ghMinimum } = member;
   if (ghVersion === null || ghPath === null) {

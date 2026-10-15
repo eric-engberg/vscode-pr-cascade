@@ -11,7 +11,8 @@
  * Layer: test, unit (plan §9.1 layer 1; Vitest, no git, no git-spice, no VS Code). Depends on:
  * src/core/readinessFix.ts, test/helpers/fakeGit.ts. The trunk question on real git is
  * test/git/trunkBranch.git.test.ts. Depended on by: nothing. Plan: §7.6, §7.13.1, §8 E21/E25/E55/
- * E59/E60/E62/E62b/E67/E70/E75, §10.1 item 19a, §13.2 D57.
+ * E59/E60/E62/E62b/E67/E70/E75, §7.5 (the gh login line), E23, §10.1 items 19a, 23a and 23b, §13.2
+ * D57/D65/D66.
  */
 
 // see primer §1 (import / export), §9 (`import type`) and §49 (`Ready`, `NotReady`: Extract and Exclude)
@@ -697,6 +698,15 @@ describe('offerFor', () => {
       // assert
       expect(offer.fix?.button).toBe('Open install docs');
       expect(offer.message).toBe('gh 2.40.1 at /usr/local/bin/gh is older than 2.90.0, the oldest PR Cascade works with.');
+    });
+
+    it('offers the page for a too-old gh found by name while Homebrew has no gh — `brew upgrade gh` would fail there', () => {
+      // act: brew is there, its gh is not; the bare `gh` that answered came from somewhere else
+      const offer = offerFor(GH_TOO_OLD, FACTS);
+
+      // assert
+      expect(offer.fix?.button).toBe('Open install docs');
+      expect(offer.message).toBe('gh 2.40.1 is older than 2.90.0, the oldest PR Cascade works with.');
     });
 
     it('offers the page for a gh whose version cannot be read, and says so', () => {
