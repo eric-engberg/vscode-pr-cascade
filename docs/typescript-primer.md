@@ -349,6 +349,12 @@ export type StartFailure = 'not-found' | 'not-executable' | 'unusable-directory'
   type). Like `interface` (§9), a `type` produces nothing at run time. The difference:
   an `interface` describes an object's shape; `type` can name *any* type, a union included.
 
+A literal type may be a number as well as a string: `readonly lane: 0` on `TrunkRow` and
+`ElidedRow` in `src/core/graph.ts` (M6 item 23a) says the field holds exactly 0 — trunk's line is
+lane 0 by definition — and `lane: 1` there is a compile error, where `lane: number` would have let
+any lane through. The union `LayerRow | TrunkRow | …` then narrows the same way as on strings
+(§59).
+
 ## 11. Optional fields
 
 *First seen in `src/core/git.ts` (`GitFailure`).*
@@ -536,6 +542,10 @@ The same promise exists for a Map (§19): `ReadonlyMap<K, V>` has `get`, `has`, 
 edit; for the second the parser fills a plain `Map` and hands it over as a `ReadonlyMap`, which
 is the same "giving up rights" direction as the arrays above, and nothing that reads a
 `ForgeConfig` can change it afterwards.
+
+`ReadonlySet<T>` is the same promise for a Set (§21): `has`, `size` and `for … of`, and no `add`,
+`delete` or `clear`. `Walk.visited` in `src/core/graph.ts` (M6 item 23a) is declared that way:
+`walkHistory` fills a plain `Set` and hands it over, and nothing reading a `Walk` can change it.
 
 ## 15. new Promise
 
@@ -769,8 +779,9 @@ The angle brackets are **type parameters**: `Map<string, string | Error>` says t
 particular map's keys are strings and its values are strings or Errors, so the compiler
 knows `.get` returns `string | Error | undefined`. `Promise<string>` (§7) is the same idea:
 "a Promise of a string". This codebase mostly *uses* generic types like these; the one it
-declares itself — a function with a type parameter — is §62 (plan §11.1: generics wherever
-they are the natural tool, and nowhere else).
+declares itself — a function with a type parameter — is §62's `nextEvent`, with `held<T>` in
+`test/unit/login.test.ts` (M5 item 19b) its one sibling (plan §11.1: generics wherever they are
+the natural tool, and nowhere else).
 
 Usually the compiler works the parameters out from the pairs you pass, and
 `new Map([['--version', 'git version 2.50.1\n']])` needs nothing more. When the pairs mix
@@ -1103,6 +1114,9 @@ codebase uses, all of them the same idea as a shell pipeline stage: a list goes 
   newline, a separator that ends the text leaves an empty last piece, which is what the
   next method is there for.
 - `list.pop()` — removes the last element and returns it: `push` in reverse.
+- `list.reverse()` — turns the array back to front, in place, and returns that same array:
+  `chain.reverse()` in `test/git/graph.git.test.ts` (M6 item 23a) — the rows come top first,
+  computeStack lists bottom first, so the one is read as the other.
   `core/changes.ts` uses it to drop that empty last piece; the returned value is not
   wanted, so the whole line is `fields.pop();`.
 - `columns.slice(2).join('\t')` — `slice` on an *array* (§23 said arrays have it too):
@@ -1129,8 +1143,8 @@ codebase uses, all of them the same idea as a shell pipeline stage: a list goes 
   turns the editor groups into one list of every open tab — what two nested `for … of`
   loops and a `push` would build by hand.
 
-Which of these change the array they are called on: `push`, `pop`, `shift` (§38) and `sort`
-(§26) do; `filter`, `map`, `slice`, `join`, `includes`, `find` and `flatMap` never do — they
+Which of these change the array they are called on: `push`, `pop`, `shift` (§38), `sort`
+(§26) and `reverse` do; `filter`, `map`, `slice`, `join`, `includes`, `find` and `flatMap` never do — they
 return something new and leave the original as it was, the same rule as for strings in §23.
 
 `push` takes any number of values and adds them in order: `context.subscriptions.push(flows,
@@ -1422,8 +1436,8 @@ hand:
 
 A class can `implements` more than one interface, comma-separated, as
 `StackTreeProvider` does: it is a `TreeDataProvider` *and* a `Disposable` (§32). And as
-§19 said: this codebase mostly *uses* generic types; §62 is the one place it declares a
-type parameter of its own (plan §11.1).
+§19 said: this codebase mostly *uses* generic types; §62 and `held` in `test/unit/login.test.ts`
+(M5 item 19b) are the two places it declares a type parameter of its own (plan §11.1).
 
 ## 32. EventEmitter and Event
 
@@ -2690,8 +2704,10 @@ keeps `layer.` in front of both for that reason. The style rule (plan §11.1) is
 "destructuring where it names things", and that is the whole test.
 
 It works on any object — an interface value like the `StackDiffLocation` above, a class
-instance like the `FileNode` — and on function parameters (`function draw({ root, file }:
-FileNode)`), which this codebase does not use yet. There is also an array form, by position
+instance like the `FileNode` — and on function parameters, first used in `test/unit/graph.test.ts`
+(M6 item 23a): the object form as `it.each`'s row parameter, `({ refs, dag, head, dirty,
+onlyStackOf, trunkTip, rows, lanes }) => …`, and the array form as `entries.map(([name, sha]) => …)`,
+which names the two halves of each pair as the callback receives it. There is also an array form, by position
 instead of by name: `const [patch] = fs.readdirSync(patchDir)` in
 `test/git/rebase.git.test.ts` (M4 item 13a) takes the one file `format-patch -o` wrote,
 where `readdirSync(patchDir)[0]` would say the same thing less clearly — the shell's
@@ -2699,6 +2715,17 @@ where `readdirSync(patchDir)[0]` would say the same thing less clearly — the s
 elements are `[key, value]` pairs: `for (const [key, result] of tracks)` in
 `test/unit/track.test.ts` (M5, item 20a) names both halves of each pair as it goes, where
 `pair[0]` and `pair[1]` would say nothing.
+
+A **rest element** collects what is left: `const [sha, ...parents] = line.split(' ')` in
+`src/core/graph.ts` (`parseDag`, M6 item 23a) takes the first word as `sha` and every word after it
+as the array `parents` — the `...` on the left of `=` is the mirror of §16's spread, as the braces
+above are the mirror of its shorthand keys. `parents` is a `string[]`, however many there are: one
+for an ordinary commit, two for a merge, none for a commit with no parent at all (an orphan
+branch's first commit — the layout draws such a branch as a stack of its own). The same file's
+`draw` takes a sorted list of children as `const [continuing, ...side] =
+orderChildren(member.children)`: the first child, and the rest — and `continuing` is `undefined`
+for a layer with no children (§8), which the next line checks before calling. The shell's `read sha
+parents` is the same idea: the last variable takes the rest of the line.
 
 ## 55. `vscode.Uri.from`, and where percent-encoding happens
 
@@ -3095,8 +3122,9 @@ Why declare one rather than write `event: vscode.Event<unknown>` and return
 `Promise<unknown>`: that version accepts the same arguments but throws the payload's type
 away, and every caller would have to narrow (§18) what the compiler already knew. One
 function, three payload types, no cast — which is what plan §11.1 means by "generics
-wherever they are the natural tool". It is the one type parameter this codebase declares;
-everywhere else it fills in someone else's.
+wherever they are the natural tool". It was the one type parameter this codebase declared until
+`held<T>` in `test/unit/login.test.ts` (M5 item 19b) joined it; everywhere else it fills in someone
+else's.
 
 ## 63. `.then` on a Promise: a continuation without `await`
 
@@ -3889,6 +3917,14 @@ assertion that only it needs; `test/unit/forge.test.ts`'s URL forms chose plain 
 reason, and so does every other file here. The `/m` flag on the regexes (§20) makes `^` and `$`
 match at line breaks, so a line is pinned wherever it sits in stderr.
 
+Rows may be objects instead of tuples: `it.each(E78_CASES)('$title', ({ refs, dag, head, dirty,
+onlyStackOf, trunkTip, rows, lanes }) => { … })` in `test/unit/graph.test.ts` (M6 item 23a). `$title` in the title reads that
+field off the row, and the function receives the row whole — destructured by name (§54) rather
+than by position. A tuple is right for four columns whose order says what they are; a row with
+refs, a DAG, a HEAD, a dirty flag and the rows it must produce is a record, and naming the fields
+is what keeps a reader from counting commas. A missing field is a compile error as before, since
+the array is typed `LayoutCase[]`.
+
 ## 79. `fs.statSync(…, { bigint: true })` and `BigInt`
 
 *First seen in `test/helpers/gitspice.ts` (`snapshotGitDir`, M5 item 22b).*
@@ -3953,3 +3989,45 @@ the compiler knows cannot miss (§43's rule for a `Record` over exact strings). 
 DiscoveryOptions` is the other direction of the same idea — the names of a type's fields rather
 than the type of one field — and the two are often met together as `T[keyof T]`, "the type of any
 field of `T`", which this codebase has not needed yet.
+
+## 81. Recursion: a function that calls itself
+
+*First seen in `src/core/graph.ts` (`measureSize` and `draw`, M6 item 23a).*
+
+```ts
+const draw = (member: Member, lane: number, joins: number | null): void => {
+  const [continuing, ...side] = orderChildren(member.children);
+  if (continuing !== undefined) {
+    draw(continuing, lane, null);
+  }
+  for (const child of side) {
+    draw(child, lane + 1, lane);
+  }
+  rows.push(…);   // the member's own row; the working-tree row and the lane count are left out here
+};
+```
+
+`draw` calls `draw`. Nothing in the language makes that special — a function's name is in scope
+inside its own body, as any other function's is, and so is a `const` holding an arrow function
+(§5) once its line has run, which it has by the time the body runs — but it is a shape worth
+seeing once: **recursion**, a function that does one level of a job and hands the rest to itself.
+Each call runs to its end before the one that made it goes on, so the call that draws a root is
+paused at its `if` while the call for the layer above it runs, which is paused while the call for
+the layer above *that* runs, and so on up to a tip. A tip has no children: `continuing` is
+`undefined` (§8), the loop does nothing, its row is pushed, and the call returns to the one below
+it — the **base case**, the place where the function does not call itself, and the reason the
+chain ends. Then each paused call finishes its own lines, bottom-up. The shell does the same with a
+function that calls itself: `walk() { for f in "$1"/*; do [ -d "$f" ] && walk "$f"; done; }`
+lists a tree without knowing how deep it goes.
+
+Why recursion here and not §38's queue: the order the rows come out in *is* the picture. A layer's
+row is pushed after every row of every child, so the list reads top to bottom as the view draws it
+— tips first, `main` last — and a child's whole subtree sits above its parent, which is what lets a
+side child take `lane + 1` and be sure nothing drawn after it will want that lane. A queue walks one
+level at a time (breadth-first) and would interleave the stacks. `measureSize` in the same file is
+the same shape, a post-order walk that adds its children's answers before its own. The cost is one
+paused call per level of nesting — a stack sitting on a layer of a stack sitting on trunk is three
+— never one per commit: the commit walk of the same file (`walkHistory`) is a loop with an explicit
+worklist (§38's queue, taken from the other end) because a branch can be a thousand commits long
+where a stack is a few layers high. §39's `filesUnder` in `test/helpers/gitspice.ts` is the same
+shape over directories; this is the first in `src/`.
