@@ -11,7 +11,8 @@
  *
  * Three inner describes, each with its own fixture, because two of them change the repository in
  * ways the others must not see. Skipped as a block when no git-spice is installed (README › Tests),
- * except the first test, which exists only under `PRCASCADE_REQUIRE_GS=1` — ci.yml sets it.
+ * except the first test, which runs only under `PRCASCADE_REQUIRE_GS=1` (ci.yml sets it) and is
+ * skipped everywhere else.
  *
  * Layer: test, git integration (plan §9.1 layer 2; Vitest, real git and real git-spice in a
  * throwaway directory, no VS Code, no network). Depends on: src/core/backends/gitspice.ts,
@@ -74,7 +75,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 describe('git-spice on this machine', () => {
-  // see primer §76 (it.runIf: a test that exists only under a condition decided when the file loads; `expect(value, message)`)
+  // see primer §76 (it.runIf: a test that runs only when a load-time condition holds, skipped otherwise; `expect(value, message)`)
   it.runIf(GIT_SPICE_REQUIRED)('is installed — PRCASCADE_REQUIRE_GS=1 makes a missing git-spice a failure, not a skip', () => {
     // assert: what the locator tried, so the failure names the names (not always the two defaults)
     expect(GIT_SPICE, `git-spice not found (tried ${GS_TRIED.join(', ')})`).not.toBeNull();
@@ -169,8 +170,13 @@ describe.skipIf(GIT_SPICE === null)(`git-spice ${GIT_SPICE?.version ?? ''} run d
     });
 
     it('before any submit no tracked layer has a push field — tracking.push absent means no upstream configured, whatever the remote holds', () => {
-      // assert: the predicate item 26's guard will read beside the digest's refs/remotes line
-      expect(state.layers.map((layer) => layer.tracking?.push)).toStrictEqual([undefined, undefined, undefined]);
+      // assert: the whole entry, so "no push field" cannot pass for "no entry at all" — the
+      // predicate item 26's guard will read beside the digest's refs/remotes line
+      expect(state.layers.map((layer) => layer.tracking)).toStrictEqual([
+        { name: 'api-refactor', down: { name: 'main', needsRestack: false } },
+        { name: 'add-retries', down: { name: 'api-refactor', needsRestack: false } },
+        { name: 'retry-metrics', down: { name: 'add-retries', needsRestack: false } },
+      ]);
     });
 
     it('backend.push pushes all three, says the rename in exactly two notes, and sets the upstream to api-refactor-2', async () => {

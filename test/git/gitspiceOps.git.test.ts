@@ -3,7 +3,8 @@
  * git-spice: a restack interrupted by a conflict (git's `rebase-merge` directory, the `ERR` remedy
  * lines, git-spice's own record, what `computeStack` sees), `rebase continue` and `rebase abort`
  * on git-spice's pause and on a plain git pause (the same remedy for both; only the upstack
- * differs), amending the bottom layer and `upstack restack` (E14), `branch create --below` (E49's
+ * differs, and where HEAD ends: continue returns to the branch the restack began on, abort stays
+ * on the layer git was rebasing), amending the bottom layer and `upstack restack` (E14), `branch create --below` (E49's
  * graph) and `branch onto`. `refs/spice/data:rebase-continue` is among the facts: plan §3 forbids
  * the *extension* reading it; the test reads it so a version that changes it fails here, not in a
  * user's window. Two fixtures: the pauses change the repository in ways the surgery must not see.
@@ -194,6 +195,35 @@ describe.skipIf(GIT_SPICE === null)(`git-spice ${GIT_SPICE?.version ?? ''} opera
       expect(nothingToContinue.stderr.trim()).toBe('FTL git-spice: no rebase in progress');
       expect(nothingToAbort.exitCode).toBe(1);
       expect(nothingToAbort.stderr.trim()).toBe('FTL git-spice: no operation to abort');
+    });
+
+    it('a restack paused by git-spice, then gs rebase abort: exit 0, empty stderr, git\'s rebase ended, HEAD on the layer that was being rebased (not where the restack began), continuations null, a data commit "git-spice rebase abort"', async () => {
+      // arrange: trunk rewrites `a` once more, so a full restack from the top pauses on the bottom layer again
+      fixture.commitOnTrunk('a', 'a as trunk wrote it a second time\n');
+      try {
+        const restack = await runGitSpice(commands, ['stack', 'restack'], fixture.dir);
+        // after the pause's own rebase-continue commit, so "changed" below is the abort's doing
+        const sha = dataRefSha(fixture);
+
+        // act
+        const abort = await runGitSpice(commands, ['rebase', 'abort'], fixture.dir);
+
+        // assert: abort ends where git was, not where the restack was run from (continue's
+        // retry-metrics, the test above)
+        expect(restack.exitCode).toBe(1);
+        expect(abort.exitCode).toBe(0);
+        expect(abort.stderr).toBe('');
+        expect(rebaseHeadName(fixture)).toBeNull();
+        expect(fixture.git(['symbolic-ref', 'HEAD']).trim()).toBe('refs/heads/api-refactor');
+        expect(continuation(fixture)).toStrictEqual({ continuations: null });
+        expect(dataRefSha(fixture)).not.toBe(sha);
+        expect(fixture.git(['log', '-1', '--format=%s', 'refs/spice/data']).trim()).toBe('git-spice rebase abort');
+      } finally {
+        if (rebaseHeadName(fixture) !== null) {
+          fixture.git(['rebase', '--abort']);
+        }
+        fixture.git(['checkout', '-q', 'retry-metrics']);
+      }
     });
 
     it('a plain git rebase paused on the bottom layer: rebase-merge exists, head-name names it, continuations stays null (the discriminator); gs rebase abort exits 0, ends git\'s rebase, puts HEAD back and writes no data commit', async () => {

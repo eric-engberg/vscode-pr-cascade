@@ -112,7 +112,7 @@ export interface RawLogLine {
 }
 
 /** `gs log … --json` stdout by branch name — the lines are sorted by name, so nothing reads them by position. */
-// see primer §19 (`new Map` from an array of pairs) and §50 (`JSON.parse`)
+// see primer §19 (`new Map` from an array of pairs) and §50 (`JSON.parse`, and `as`: an assertion that checks nothing)
 export function logLinesByName(stdout: string): Map<string, RawLogLine> {
   const lines = stdout
     .trim()
@@ -143,7 +143,7 @@ export function snapshotGitDir(fixture: Fixture): GitDirSnapshot {
 }
 
 /** The paths whose line differs, appeared or vanished between two snapshots — sorted, so `toStrictEqual([])` reads as "nothing changed". */
-// see primer §21 (Set) and §22 (for ... of over a Map's entries)
+// see primer §21 (Set), §22 (for ... of over a Map's pairs) and §54 (destructuring each pair by position)
 export function changedPaths(before: GitDirSnapshot, after: GitDirSnapshot): string[] {
   const changed = new Set<string>();
   for (const [file, line] of after) {
@@ -210,5 +210,13 @@ export async function initAndTrack(backend: GitSpiceBackend, git: GitRunner, com
   if (tracked.problem !== null) {
     throw new Error(`initAndTrack: ${tracked.problem}`);
   }
-  return backend.enrich(await loadState(git, fixture));
+  // The one check that proves the arrangement took: every layer carries git-spice's entry. A
+  // first enrich that failed quietly (nothing `null`, so nothing tracked) would otherwise hand
+  // back a state the tests could not tell from a tracked one.
+  // see primer §70 (`?.`) and §25 (arrays: `some`)
+  const after = await backend.enrich(await loadState(git, fixture));
+  if (after.enrichment?.kind !== 'enriched' || after.layers.some((layer) => layer.tracking === null || layer.tracking === undefined)) {
+    throw new Error(`initAndTrack: not every layer is tracked after track (${JSON.stringify(after.enrichment)})`);
+  }
+  return after;
 }

@@ -32,6 +32,7 @@ import type { GitSpiceBackend } from '../../src/core/backends/gitspice';
 import { RealCommandRunner } from '../../src/core/command';
 import { isInitialised, readRefDigest } from '../../src/core/digest';
 import { RealGitRunner } from '../../src/core/git';
+import type { GsLogEntry } from '../../src/core/gsLog';
 import type { RepoState } from '../../src/core/model';
 import { trunkBranchFor } from '../../src/core/readinessFix';
 import { buildStack } from '../helpers/fixture';
@@ -79,8 +80,8 @@ afterAll(async () => {
 const LAYERS = ['api-refactor', 'add-retries', 'retry-metrics'];
 
 /** The `tracking` of every layer, bottom to top — `undefined` for a layer never enriched, `null` for one git-spice does not track. */
-// see primer §25 (arrays: `map`) and §70 (`?.`)
-function trackingOf(state: RepoState): (unknown | null | undefined)[] {
+// see primer §25 (arrays: `map`) and §10 (union types: the three things a `tracking` can be)
+function trackingOf(state: RepoState): (GsLogEntry | null | undefined)[] {
   return state.layers.map((layer) => layer.tracking);
 }
 
@@ -94,7 +95,7 @@ function originHeads(): string[] {
     .sort();
 }
 
-// see primer §76 (describe.skipIf: a block decided when the file loads)
+// see primer §76 (describe.skipIf: a block decided when the file loads), §70 (`?.`) and §30 (`??`): no version to name when none is installed
 describe.skipIf(GIT_SPICE === null)(`GitSpiceBackend against real git-spice ${GIT_SPICE?.version ?? ''} (offline, bare origin; skipped when none is installed — README › Tests)`, () => {
   // The state the story carries from one `it` to the next: the last enriched RepoState.
   let enriched: RepoState;
@@ -113,6 +114,7 @@ describe.skipIf(GIT_SPICE === null)(`GitSpiceBackend against real git-spice ${GI
 
     // assert: the §7.6 gate — nothing was spawned, nothing is known
     expect(state.enrichment).toStrictEqual({ kind: 'not-enriched', cause: 'not-initialised', reason: 'the repository is not initialised for git-spice (no refs/spice/data)' });
+    // see primer §51 (`in`: whether an object has the key at all)
     expect(state.layers.every((layer) => !('tracking' in layer))).toBe(true);
   });
 
@@ -148,9 +150,14 @@ describe.skipIf(GIT_SPICE === null)(`GitSpiceBackend against real git-spice ${GI
     expect(lines[0]).toBe('INF Using remote: origin');
     expect(lines[1]).toMatch(/^INF Initialized repository\s+trunk=main$/);
     expect(isInitialised(after)).toBe(true);
-    // `for-each-ref` sorts by name and refs/spice sorts last, so the new line is appended
+    // `for-each-ref` sorts by name and refs/spice sorts last, so the new line is appended — and
+    // it is the only one
     expect(after.startsWith(before)).toBe(true);
+    const added = after.slice(before.length).split('\n').filter((line) => line !== '');
+    expect(added).toHaveLength(1);
+    expect(added[0]).toMatch(/^refs\/spice\/data [0-9a-f]{40}$/);
     expect(again.exitCode).toBe(0);
+    expect(await readRefDigest(git, fixture.dir)).toBe(after);
   });
 
   it('readiness after init runs on to detectForge: remote-unparseable for the bare origin (E21)', async () => {
@@ -221,7 +228,7 @@ describe.skipIf(GIT_SPICE === null)(`GitSpiceBackend against real git-spice ${GI
     const forms = [GS_LOG_ARGS, [...GS_LOG_ARGS, '--cr-status'], ['log', 'long', '--all', '--json']];
 
     // act + assert, one form at a time
-    // see primer §22 (for ... of)
+    // see primer §22 (for ... of) and §76 (expect(value, message): the second argument becomes the failure's message)
     for (const args of forms) {
       const before = snapshotGitDir(fixture);
       expect(before.size).toBeGreaterThan(10);
@@ -277,10 +284,15 @@ describe.skipIf(GIT_SPICE === null)(`GitSpiceBackend against real git-spice ${GI
     }
   });
 
-  it('a commit on trunk marks the bottom layer needsRestack; push refuses before any spawn; stack restack clears it', async () => {
+  it('a commit on trunk marks the bottom layer needsRestack; push refuses before the submit; stack restack clears it', async () => {
     // arrange: a pushed trunk commit, so `origin/main` moves with it and the stack stays three layers
     fixture.commitOnTrunk('trunk-note', 'note\n');
     enriched = await backend.enrich(await loadState(git, fixture));
+    expect(enriched.layers.map((layer) => layer.tracking?.down)).toStrictEqual([
+      { name: 'main', needsRestack: true },
+      { name: 'api-refactor', needsRestack: false },
+      { name: 'add-retries', needsRestack: false },
+    ]);
     const headsBefore = originHeads();
 
     // act
