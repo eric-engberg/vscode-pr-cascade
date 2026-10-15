@@ -633,13 +633,14 @@ describe('offerFor', () => {
 
   describe('gh-not-logged-in (E23 — the words now, the button in item 23b)', () => {
     it('names the host and the command to run, with no button — a warning, since there is something to do', () => {
-      // act
-      const offer = offerFor({ kind: 'gh-not-logged-in', forge: GITHUB, ghPath: 'gh' }, FACTS);
+      // act: a remote that spells the host in capitals
+      const offer = offerFor({ kind: 'gh-not-logged-in', forge: { ...GITHUB, host: 'GitHub.com' }, ghPath: 'gh' }, FACTS);
 
-      // assert: the host lower-cased after --hostname, as gh wants it (it does not fold the case itself)
+      // assert: the remote's spelling in the sentence, the host lower-cased after --hostname, as gh
+      // wants it (it does not fold the flag's case itself)
       expect(offer).toStrictEqual({
         severity: 'warning',
-        message: 'gh is not logged in to github.com. Run gh auth login --hostname github.com --web in a terminal.',
+        message: 'gh is not logged in to GitHub.com. Run gh auth login --hostname github.com --web in a terminal.',
         fix: null,
       });
     });
@@ -648,14 +649,14 @@ describe('offerFor', () => {
 
 describe('readyMessage', () => {
   it('names the version, the repository and the host — for a repository where gh plays no part', () => {
-    // arrange: a GitLab host, say — step 5 asked nothing, so there is no gh to name
-    const ready: Ready = { kind: 'ready', gsPath: 'git-spice', gsVersion: '0.31.2', forge: GITHUB, gh: null };
+    // arrange: a GitLab host — step 5 asked nothing, so there is no gh to name (on GitHub `gh` is never null)
+    const ready: Ready = { kind: 'ready', gsPath: 'git-spice', gsVersion: '0.31.2', forge: { ...GITHUB, host: 'gitlab.com', kind: 'gitlab' }, gh: null };
 
     // act
     const message = readyMessage(ready, ROOT);
 
     // assert
-    expect(message).toBe('git-spice 0.31.2 is ready for app (github.com).');
+    expect(message).toBe('git-spice 0.31.2 is ready for app (gitlab.com).');
   });
 
   it('names both tools on GitHub — the gh the probe found, with its version (item 23a)', () => {

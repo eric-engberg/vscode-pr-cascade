@@ -13,8 +13,9 @@
  * — the same exit 1 again, the ambiguity D65 reads by exit code; `auth login` refused while a token
  * variable for the host is set, and not refused by the other pair (why the login line unsets a
  * pair per host); and the three directories still empty afterwards (telemetry off). Every `auth
- * status` and `auth login` row goes through a dead proxy, so the file is deterministic and offline
- * on CI too.
+ * status` and `auth login` row goes through a dead proxy with `no_proxy` emptied, so the file is
+ * deterministic and offline on CI too; the OS keyring is kept out as well (a fresh HOME on macOS,
+ * a dead session-bus address on Linux — the comment above `beforeAll` says why that matters).
  *
  * Layer: test, git integration (plan §9.1 layer 2; Vitest, a real gh, no VS Code, no network
  * reached). Depends on: src/core/ghstatus.ts, src/core/command.ts, src/core/forge.ts,
@@ -57,16 +58,23 @@ const commands = new RealCommandRunner();
  * A proxy nothing listens on: port 9 (discard) on the loopback address refuses at once, on a Mac
  * and on both runner images, so every row that would reach a host fails there deterministically —
  * and the file never touches GitHub from CI, where an unauthenticated call could meet a shared-IP
- * rate limit and change a pinned text.
+ * rate limit and change a pinned text. `no_proxy` is emptied beside it: Go's proxy rules honour
+ * it, and a shell's `no_proxy=*` (common behind a corporate proxy) would otherwise send these rows
+ * to the real hosts (measured: with it, row g2 reached api.github.com).
  */
 // see primer §43 (`Record<string, string>`)
-const DEAD_PROXY: Record<string, string> = { https_proxy: 'http://127.0.0.1:9', HTTPS_PROXY: 'http://127.0.0.1:9' };
+const DEAD_PROXY: Record<string, string> = { https_proxy: 'http://127.0.0.1:9', HTTPS_PROXY: 'http://127.0.0.1:9', no_proxy: '', NO_PROXY: '' };
 
 // A HOME of its own with the XDG directories under it (the real git-spice files do the same), the
 // gh config directory named explicitly — a developer's exported GH_CONFIG_DIR would otherwise win
 // over XDG_CONFIG_HOME — and the variables gh reads as a login, a host or a debug switch deleted,
 // so no job token or shell export reaches a pin. gh creates none of the directories for a
-// read-only command (measured); row l checks.
+// read-only command (measured); row l checks. The fresh HOME is load-bearing on macOS in a second
+// way: for a host GH_HOST puts on gh's list but the (empty) hosts.yml does not know, gh looks in
+// the OS keyring (`gh:<host>`) before falling back to an empty default token — and with the real
+// HOME this logged-in Mac's keychain answered for github.com and the real token went to the proxy,
+// source `(keyring)` (measured 2.102.0). On Linux the keyring is the Secret Service over D-Bus, so
+// its address is pointed at a socket that does not exist.
 let homeDir: string;
 let configDir: string;
 let dataDir: string;
@@ -87,6 +95,7 @@ beforeAll(async () => {
   vi.stubEnv('XDG_DATA_HOME', dataDir);
   vi.stubEnv('XDG_STATE_HOME', stateDir);
   vi.stubEnv('GH_CONFIG_DIR', configDir);
+  vi.stubEnv('DBUS_SESSION_BUS_ADDRESS', `unix:path=${path.join(homeDir, 'no-bus')}`);
   for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN', 'GH_HOST', 'GH_DEBUG']) {
     vi.stubEnv(name, undefined);
   }

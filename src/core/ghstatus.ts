@@ -36,9 +36,10 @@ export const GH_STACK_EXTENSION = 'github/gh-stack';
  * as git-spice's PROBE_TIMEOUT_MS, for the same reason (a keychain dialog, a slow disk), under its
  * own name because this module must not import the backend that imports it. The three calls
  * measured take 56 ms, 75 ms and — `auth status`, which validates the token over the network —
- * 0.4 s for a real account, about 0.25 s for a host with no account (GH_HOST makes gh validate an
- * empty default token rather than answer locally; plan §13.4), and on a black-holed network as
- * long as this timeout allows.
+ * 0.4 s for a real account, about 0.25 s for a host with no account (GH_HOST puts the host on
+ * gh's list, and gh then looks it up — in the OS keyring, else as an empty default token — and
+ * validates what it found rather than answer locally; plan §13.4), and on a black-holed network
+ * as long as this timeout allows.
  */
 // see primer §27 (`_` between digits)
 export const GH_TIMEOUT_MS = 15_000;
@@ -107,12 +108,12 @@ export type GhReadiness =
  * is read (a setting that points at the wrong program says so rather than being worked around).
  * `auth status` is asked only once nothing is missing, and read by exit code alone: gh exits 1 for
  * no account, for a revoked token and offline alike, telling them apart only on stderr — and
- * under GH_HOST even "no account" is a network call, gh validating the empty default token it
- * finds for the host (plan §13.4) — and the fix is the same login for the two that have one
+ * under GH_HOST even "no account" is a network call, gh validating whatever it finds for the
+ * host, the OS keyring's entry or an empty default token (plan §13.4) — and the fix is the same login for the two that have one
  * (D65). Rejects only when the root cannot be used as a directory (the first spawn says so) — a
  * fault, not a state, as locateGitSpice treats it.
  */
-// see primer §48 (the conditional expression), §25 (arrays: `push`) and §12 (template strings)
+// see primer §6 (async / await), §48 (the conditional expression), §25 (arrays: `push`), §23 (`toLowerCase`) and §12 (template strings)
 export async function ghReadiness(commands: CommandRunner, ghPath: string, root: string, host: string): Promise<GhReadiness> {
   const executable = ghPath.trim() === '' ? GH_CANDIDATE : ghPath;
   const ghMinimum = formatVersion(MINIMUM_GH_VERSION);

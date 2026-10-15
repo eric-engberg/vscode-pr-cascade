@@ -39,10 +39,10 @@ export interface CommandRequest {
   /**
    * Variables pinned on top of the caller's environment. Each tool's module owns its own:
    * git-spice's `NO_COLOR`, `LC_ALL`, `GIT_OPTIONAL_LOCKS` and, from item 21a, `GIT_TERMINAL_PROMPT` (plan §7.13.1); gh's `GH_HOST` and
-   * hygiene (item 23). Absent means "the environment as it is". A value typed as an
+   * hygiene (item 23a). Absent means "the environment as it is". A value typed as an
    * `interface` — core/forge.ts's `GhEnv` — is not accepted here as it is (an interface has no
-   * index signature, primer §43); item 23 spreads it into a literal, `{ ...ghEnv(host), … }`,
-   * which it does anyway to add the hygiene variables.
+   * index signature, primer §43); core/ghstatus.ts spreads it into a literal,
+   * `{ ...GH_ENV, ...ghEnv(host) }`, which it does anyway to add the hygiene variables.
    */
   readonly env?: Record<string, string>;
   /**
@@ -89,7 +89,7 @@ export interface CommandResult {
 }
 
 /**
- * How core runs git-spice (and, from item 23, gh). An interface, like GitRunner (core/model.ts),
+ * How core runs git-spice (and, since item 23a, gh). An interface, like GitRunner (core/model.ts),
  * so two things can satisfy it: RealCommandRunner below and test/helpers/fakeCommand.ts, which
  * answers from canned results — the readiness probe is tested without a git-spice on the
  * machine. Unlike GitRunner it is not bound to one executable: the probe tries two names for

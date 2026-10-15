@@ -164,6 +164,7 @@ describe('ghReadiness', () => {
 
         // assert
         expect(answer.kind).toBe(row.outcome);
+        // see primer §59 (narrowing on `kind` before reading a member's own fields)
         if (answer.kind === 'gh-missing') {
           // too old, not absent: the token as printed, the path that answered, gh alone listed
           expect(answer.missing).toStrictEqual(['gh']);
@@ -349,6 +350,14 @@ describe('ghReadiness', () => {
       // assert
       expect(four).toStrictEqual({ kind: 'gh-not-logged-in', ghPath: 'gh' });
       expect(hung).toStrictEqual({ kind: 'gh-not-logged-in', ghPath: 'gh' });
+    });
+
+    it('reads an `auth status` that never started as not logged in — gh gone between the first spawn and the third', async () => {
+      // act: no exit code at all (`exitCode: null`) is still not exit 0
+      const answer = await ready(runnerFor([{ key: authKey('gh', HOST), result: neverStarted('not-found') }]));
+
+      // assert
+      expect(answer).toStrictEqual({ kind: 'gh-not-logged-in', ghPath: 'gh' });
     });
   });
 

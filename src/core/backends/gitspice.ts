@@ -520,8 +520,10 @@ type GhStepAnswer = Extract<Readiness, { kind: 'gh-missing' | 'gh-not-logged-in'
  * Step 5 (item 23a), GitHub only: core/ghstatus.ts's three questions, read-only, after the
  * git-spice login — so a logged-out git-spice never spawns gh. Its own function so that `probe`
  * stays readable as its steps (and under SonarCloud's complexity rule, which asked for
- * locateGitSpice's split); the fields are copied one by one rather than spread so a field added to
- * either union is a compile error here, where the two are joined.
+ * locateGitSpice's split); the fields are copied one by one rather than spread, so nothing of
+ * GhReadiness's crosses unnamed and a field added to one of the two Readiness members is a compile
+ * error here, where the two are joined (a field added only on the GhReadiness side is not — it
+ * stays behind until something reads it).
  */
 async function ghStep(commands: CommandRunner, ghPath: string, root: string, forge: Forge): Promise<GhStepAnswer> {
   if (forge.kind !== 'github') {

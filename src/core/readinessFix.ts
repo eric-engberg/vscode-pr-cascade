@@ -476,9 +476,10 @@ function loginOffer(gsPath: string, forge: Forge): Offer {
 }
 
 /**
- * E62b, produced from item 23: what is missing for pull requests on GitHub, with the version of
- * a gh that is there but too old. Information — pushing and every local operation still work —
- * and no button until item 23 decides how gh is installed.
+ * E62b, produced for real since item 23a (the probe's step 5): what is missing for pull requests
+ * on GitHub, with the version of a gh that is there but too old. Information — pushing and every
+ * local operation still work — and no button until item 23b brings the three install offers
+ * (D65 records the one PR of interim).
  */
 // see primer §25 (arrays: `map`), §48 (the conditional expression) and §59 (`readonly ('gh' | 'gh-stack')[]`)
 function ghMissingOffer(host: string, missing: readonly ('gh' | 'gh-stack')[], ghVersion: string | null, ghMinimum: string): Offer {

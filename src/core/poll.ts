@@ -4,16 +4,17 @@
  * for `gs auth login` or `gs repo init` (item 19b), nothing tells it when the user has finished
  * there; the only way to know is to ask again — plan §7.5 step 3's poll, "every 3 s for up to
  * 5 min". The question is the readiness probe itself (core/backends/gitspice.ts never
- * remembers a failure, so each ask is a fresh look, D56); for the gh login of item 23 it will
- * be `gh auth status`. This file knows neither: it asks whatever `check` it is handed.
+ * remembers a failure, so each ask is a fresh look, D56) — since item 23a its step 5 asks
+ * `gh auth status` too, so a gh login's wait (item 23b gives that member its button) is the same
+ * question. This file knows neither: it asks whatever `check` it is handed.
  *
  * Layer: core (plan §4.1) — plain timers, no VS Code, no git. Hand-rolled (plan §11.3). Depends
  * on: the global `setTimeout`/`clearTimeout` and `AbortSignal` — the globals and never
  * `node:timers/promises`, because the globals are what Vitest's fake timers replace (primer
  * §65), and the tests count every question in fake time. Depended on by: src/vscode/login.ts
- * (item 19b), item 23's core/ghstatus.ts, test/unit/poll.test.ts. Plan: §4.2 (the poll half of
- * the `ghstatus.ts` line, generalised to both tools), §7.5 step 3, §7.6, §9.4, §10.1 item 19a,
- * §13.2 D57.
+ * (item 19b; the one caller of `waitUntil`), src/extension.ts and test/unit/login.test.ts
+ * (`DEFAULT_POLL`), test/unit/poll.test.ts. Plan: §4.2 (the poll half of the `ghstatus.ts` line,
+ * generalised to both tools), §7.5 step 3, §7.6, §9.4, §10.1 item 19a, §13.2 D57.
  */
 
 /** How often to ask again, and for how long to keep asking, both in milliseconds. */

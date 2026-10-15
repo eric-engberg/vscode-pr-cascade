@@ -6,7 +6,8 @@
  * so the gh reader can compare without importing the backend that imports it (D65).
  *
  * Layer: core (no VS Code imports; plan §4.1). Depends on: nothing. Depended on by:
- * core/backends/gitspice.ts, core/ghstatus.ts, core/readinessFix.ts, test/unit/version.test.ts.
+ * core/backends/gitspice.ts, core/ghstatus.ts, core/readinessFix.ts, test/unit/version.test.ts,
+ * test/git/gh.git.test.ts (the floor met on the machine).
  * Plan: §4.2, §7.13.1, §11.3 (the `semver` row), §13.2 D56/D65.
  */
 

@@ -21,6 +21,17 @@ import type { RepoState, StackLayer } from './model';
 import type { TrunkBranch } from './readinessFix';
 
 /**
+ * The gh step 5 found on a GitHub repository (item 23a): the executable that answered `--version`
+ * as gh — `gh`, or `prCascade.ghPath` — and its version token. Read by `readyMessage` now and by
+ * M7's `gh stack link` (core/nativeStack.ts) later; `null` on `ready` where gh plays no part (GitLab).
+ */
+// see primer §9 (interface) and §14 (readonly)
+export interface GhFound {
+  readonly path: string;
+  readonly version: string;
+}
+
+/**
  * The readiness probe's answer (plan §7.13.1): one object, never a throw. A tagged union on
  * `kind` (primer §59), one member per step that can fail, listed in PROBE ORDER — the first
  * failure is the answer, because every step needs the one before it: no version without an
@@ -37,17 +48,6 @@ import type { TrunkBranch } from './readinessFix';
  * case; the offer names the kind's own key) — in that order, so an Azure or Bitbucket host is
  * reported as unsupported, never as "set `spice.forge.*`".
  */
-/**
- * The gh step 5 found on a GitHub repository (item 23a): the executable that answered `--version`
- * as gh — `gh`, or `prCascade.ghPath` — and its version token. Read by `readyMessage` now and by
- * M7's `gh stack link` (core/nativeStack.ts) later; `null` on `ready` where gh plays no part (GitLab).
- */
-// see primer §9 (interface) and §14 (readonly)
-export interface GhFound {
-  readonly path: string;
-  readonly version: string;
-}
-
 // see primer §59 (tagged unions, incl. `readonly ('gh' | 'gh-stack')[]`: an array of a union) and §14 (readonly)
 export type Readiness =
   /**
@@ -187,7 +187,7 @@ export interface StackBackend {
    * The §7.13.1 probe for the repository at `root`, whose forge is read from the remote
    * `remote` names (`prCascade.remote`). Memoized per root and remote until a refresh after a
    * failure — a changed `prCascade.remote` is a new question. Never throws for anything
-   * git-spice or the forge can be in: every such outcome is a Readiness member. It rejects
+   * git-spice, gh (item 23a) or the forge can be in: every such outcome is a Readiness member. It rejects
    * only as every core function does — when git itself cannot run (E17), or the root cannot
    * be used as a directory — faults the caller already draws for the tree (D56).
    */
