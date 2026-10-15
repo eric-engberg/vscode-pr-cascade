@@ -56,7 +56,9 @@ const SHA_D1 = 'd1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1';
 const SHA_P1 = 'f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1';
 const SHA_P2 = 'f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2';
 const SHA_P3 = 'f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3';
-// The view-lab rail (pane B): part1–part4 and chore on digits, the 1610 stack on letters.
+// The view-lab rail (pane B) needs two more digits: part4 on 4 and chore on 6 — the rest reuse the
+// constants above (part1–part3 on 1–3, the 1610 stack a–e on A–E, fix on F, main on T, the old
+// trunk commit on OLD).
 const SHA_4 = '4444444444444444444444444444444444444444';
 const SHA_6 = '6666666666666666666666666666666666666666';
 
@@ -92,7 +94,7 @@ describe('readGraphInput', () => {
   const DAG_KEY = dagArgs(TRUNK).join(' ');
   const TIP_KEY = trunkTipArgs(TRUNK).join(' ');
 
-  it("runs for-each-ref over refs/heads with the date column, rev-list --parents --branches --not <trunk>, then rev-list -1 for trunk's tip — all in the root — and hands the three texts back untouched", async () => {
+  it("runs for-each-ref over refs/heads with the date column, rev-list --parents --branches --not <trunk>, then rev-list -1 for trunk's tip — all run, all in the root — and hands the three texts back untouched", async () => {
     // arrange
     const git = new FakeGitRunner(
       new Map([
@@ -280,6 +282,8 @@ interface LayoutCase {
   head: string | null;
   dirty: boolean;
   onlyStackOf?: string;
+  /** The trunk tip text, when the shape needs a tip other than SHA_T (one case: a tip that does not sort first among the forks). */
+  trunkTip?: string;
   /** Top first, trunk last. */
   rows: RowSkeleton[];
   lanes: number;
@@ -749,14 +753,179 @@ const E78_CASES: LayoutCase[] = [
     rows: [workingTree('fresh', 0), TRUNK_FILLED],
     lanes: 1,
   },
+  // --- the review's rows: the orders the shapes above never exercised, and the claims never pinned ---
+  {
+    title: "a merge whose two parents are named layers of equal depth takes the greater name by code point as its parent: 'alpha' > 'Zeta', where a locale would say the reverse and swap the lanes",
+    refs: refs(['Zeta', SHA_A], ['alpha', SHA_B], ['m', SHA_C], ['main', SHA_T]),
+    dag: dag([SHA_C, SHA_A, SHA_B], [SHA_A, SHA_T], [SHA_B, SHA_T]),
+    head: null,
+    dirty: false,
+    rows: [
+      { kind: 'layer', name: 'm', lane: 0, node: 'hollow', parent: 'alpha', depth: 3 },
+      { kind: 'layer', name: 'alpha', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+      { kind: 'layer', name: 'Zeta', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 2,
+  },
+  {
+    title: 'the same tie with first parent a: the walk meets b second, and still b is the parent — the last candidate seen never wins, and first-parent order is never consulted',
+    refs: refs(['a', SHA_A], ['b', SHA_B], ['m', SHA_C], ['main', SHA_T]),
+    dag: dag([SHA_C, SHA_A, SHA_B], [SHA_A, SHA_T], [SHA_B, SHA_T]),
+    head: null,
+    dirty: false,
+    rows: [
+      { kind: 'layer', name: 'm', lane: 0, node: 'hollow', parent: 'b', depth: 3 },
+      { kind: 'layer', name: 'b', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+      { kind: 'layer', name: 'a', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 2,
+  },
+  {
+    title: "a branch merged into another's deeper line with the merge's first parent the shallower one (design S5): the same rows as with the parents the other way round",
+    refs: refs(['a', SHA_A], ['b', SHA_2], ['b-base', SHA_B], ['main', SHA_T]),
+    dag: dag([SHA_2, SHA_A, SHA_B], [SHA_B, SHA_1], [SHA_1, SHA_T], [SHA_A, SHA_T]),
+    head: null,
+    dirty: false,
+    rows: [
+      { kind: 'layer', name: 'b', lane: 0, node: 'hollow', parent: 'b-base', depth: 4 },
+      { kind: 'layer', name: 'b-base', lane: 0, node: 'hollow', parent: TRUNK, depth: 2 },
+      { kind: 'layer', name: 'a', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 2,
+  },
+  {
+    title: "the three siblings with the refs text in reverse name order: the same rows — the drawing order is the layout's, never git's line order",
+    refs: refs(['ömega', SHA_C], ['zeta', SHA_B], ['alpha', SHA_A], ['main', SHA_T]),
+    dag: dag([SHA_C, SHA_T], [SHA_B, SHA_T], [SHA_A, SHA_T]),
+    head: 'alpha',
+    dirty: false,
+    rows: [
+      { kind: 'layer', name: 'alpha', lane: 0, node: 'filled', parent: TRUNK, depth: 1 },
+      { kind: 'layer', name: 'zeta', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 },
+      { kind: 'layer', name: 'ömega', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 2,
+  },
+  {
+    title: 'two names on one commit with the refs text in reverse name order: the same chain — the earlier name is the ancestor whatever order git listed them in',
+    refs: refs(['retry-metrics', SHA_C], ['main', SHA_T], ['api-refactor-backup', SHA_A], ['api-refactor', SHA_A], ['add-retries', SHA_B]),
+    dag: APPENDIX_A_DAG,
+    head: 'add-retries',
+    dirty: false,
+    rows: [
+      { kind: 'layer', name: 'retry-metrics', lane: 0, node: 'hollow', parent: 'add-retries', depth: 3 },
+      { kind: 'layer', name: 'add-retries', lane: 0, node: 'filled', parent: 'api-refactor-backup', depth: 2 },
+      { kind: 'layer', name: 'api-refactor-backup', lane: 0, node: 'hollow', parent: 'api-refactor', depth: 1 },
+      { kind: 'layer', name: 'api-refactor', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 1,
+  },
+  {
+    title: "two one-row side children under a layer, not trunk, are drawn in code-point order — Zeta above alpha — while the two-row chain continues; under a layer there is no tip key",
+    refs: refs(['Zeta', SHA_E], ['alpha', SHA_A], ['base', SHA_B], ['main', SHA_T], ['p1', SHA_1], ['p2', SHA_2]),
+    dag: dag([SHA_2, SHA_1], [SHA_1, SHA_B], [SHA_E, SHA_B], [SHA_A, SHA_B], [SHA_B, SHA_T]),
+    head: null,
+    dirty: false,
+    rows: [
+      { kind: 'layer', name: 'p2', lane: 0, node: 'hollow', parent: 'p1', depth: 3 },
+      { kind: 'layer', name: 'p1', lane: 0, node: 'hollow', parent: 'base', depth: 2 },
+      { kind: 'layer', name: 'Zeta', lane: 1, node: 'hollow', joinsLane: 0, parent: 'base', depth: 2 },
+      { kind: 'layer', name: 'alpha', lane: 1, node: 'hollow', joinsLane: 0, parent: 'base', depth: 2 },
+      { kind: 'layer', name: 'base', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 2,
+  },
+  {
+    title: 'a wide bush with more rows beats a taller chain for the straight line — most rows, not height, and one lane fewer',
+    refs: refs(['main', SHA_T], ['x', SHA_A], ['x1', SHA_1], ['x2', SHA_2], ['x3', SHA_3], ['y', SHA_B], ['y1', SHA_C], ['y2', SHA_D]),
+    dag: dag([SHA_1, SHA_A], [SHA_2, SHA_A], [SHA_3, SHA_A], [SHA_A, SHA_T], [SHA_D, SHA_C], [SHA_C, SHA_B], [SHA_B, SHA_T]),
+    head: null,
+    dirty: false,
+    rows: [
+      { kind: 'layer', name: 'x1', lane: 0, node: 'hollow', parent: 'x', depth: 2 },
+      { kind: 'layer', name: 'x2', lane: 1, node: 'hollow', joinsLane: 0, parent: 'x', depth: 2 },
+      { kind: 'layer', name: 'x3', lane: 1, node: 'hollow', joinsLane: 0, parent: 'x', depth: 2 },
+      { kind: 'layer', name: 'x', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+      { kind: 'layer', name: 'y2', lane: 1, node: 'hollow', parent: 'y1', depth: 3 },
+      { kind: 'layer', name: 'y1', lane: 1, node: 'hollow', parent: 'y', depth: 2 },
+      { kind: 'layer', name: 'y', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 2,
+  },
+  {
+    title: 'dirty HEAD on the side child of a size tie: the working-tree row is not counted, so side-fix keeps lane 1 and the dashed row sits above it there',
+    refs: SIDE_FIX_REFS,
+    dag: SIDE_FIX_DAG,
+    head: 'side-fix',
+    dirty: true,
+    rows: [
+      { kind: 'layer', name: 'retry-metrics', lane: 0, node: 'hollow', parent: 'add-retries', depth: 3 },
+      workingTree('side-fix', 1),
+      { kind: 'layer', name: 'side-fix', lane: 1, node: 'filled', joinsLane: 0, parent: 'add-retries', depth: 3 },
+      { kind: 'layer', name: 'add-retries', lane: 0, node: 'hollow', parent: 'api-refactor', depth: 2 },
+      { kind: 'layer', name: 'api-refactor', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 2,
+  },
+  {
+    title: "a merge from trunk's tip inside a side stack changes nothing: the tip key orders trunk's side roots only — under any other layer size then name decides",
+    refs: PANE_B_REFS,
+    dag: dag(
+      [SHA_E, SHA_D], [SHA_D, SHA_C], [SHA_C, SHA_B], [SHA_B, SHA_A], [SHA_A, SHA_1],
+      [SHA_4, SHA_3], [SHA_3, SHA_2], [SHA_2, SHA_1, SHA_T], [SHA_1, SHA_OLD],
+      [SHA_F, SHA_T], [SHA_6, SHA_OLD],
+    ),
+    head: 'feat/FWRK-1434-part3',
+    dirty: true,
+    rows: PANE_B_ROWS,
+    lanes: 2,
+  },
+  {
+    title: 'onlyStackOf a tip drops a one-row sibling of its middle layer: the three-row line alone, one lane',
+    refs: SIDE_FIX_REFS,
+    dag: SIDE_FIX_DAG,
+    head: null,
+    dirty: false,
+    onlyStackOf: 'retry-metrics',
+    rows: [...allHollow(APPENDIX_A_ROWS), TRUNK_HOLLOW],
+    lanes: 1,
+  },
+  {
+    title: 'a hand-typed cycle in the DAG text still terminates: the visited set stops the walk, the branch is a stale root of its two commits',
+    refs: refs(['loop', SHA_A], ['main', SHA_T]),
+    dag: dag([SHA_A, SHA_B], [SHA_B, SHA_A]),
+    head: null,
+    dirty: false,
+    rows: [{ kind: 'layer', name: 'loop', lane: 0, node: 'hollow', parent: TRUNK, depth: 2 }, ELIDED, TRUNK_HOLLOW],
+    lanes: 1,
+  },
+  {
+    title: "a root is on the tip when any of its forks is trunk's SHA, not when the first sorted one is: here the tip sorts after the older fork",
+    refs: refs(['main', SHA_OLD], ['other-work', SHA_F]),
+    dag: dag([SHA_F, SHA_D, SHA_OLD], [SHA_D, SHA_OLDER]),
+    head: 'other-work',
+    dirty: false,
+    trunkTip: `${SHA_OLD} ${TRUNK_DATE}\n`,
+    rows: [{ kind: 'layer', name: 'other-work', lane: 0, node: 'filled', parent: TRUNK, depth: 2 }, TRUNK_HOLLOW],
+    lanes: 1,
+  },
 ];
 
 describe('layoutGraph', () => {
   describe('the E78 table', () => {
     // see primer §78 (`it.each` over object rows: `$title` reads a field off the row)
-    it.each(E78_CASES)('$title', ({ refs, dag, head, dirty, onlyStackOf, rows, lanes }) => {
+    it.each(E78_CASES)('$title', ({ refs, dag, head, dirty, onlyStackOf, trunkTip, rows, lanes }) => {
       // arrange: the three texts as git prints them, HEAD from computeStack, dirty from the Git extension
-      const input = { refs, dag, trunkTip: TRUNK_TIP };
+      // see primer §30 (`??`: the one tip every shape but one uses)
+      const input = { refs, dag, trunkTip: trunkTip ?? TRUNK_TIP };
 
       // act
       const layout = layoutGraph(input, { trunk: TRUNK, head, dirty, onlyStackOf });
@@ -770,9 +939,9 @@ describe('layoutGraph', () => {
   describe('lanes never cross', () => {
     // The same table, run through the rules every layout obeys whatever its shape — the
     // properties the renderer (item 23e) relies on, stated once rather than read off each row.
-    it.each(E78_CASES)('lanes never cross, parents sit below, one node is filled: $title', ({ refs, dag, head, dirty, onlyStackOf }) => {
+    it.each(E78_CASES)('lanes never cross, parents sit below, one node is filled: $title', ({ refs, dag, head, dirty, onlyStackOf, trunkTip }) => {
       // act
-      const layout = layoutGraph({ refs, dag, trunkTip: TRUNK_TIP }, { trunk: TRUNK, head, dirty, onlyStackOf });
+      const layout = layoutGraph({ refs, dag, trunkTip: trunkTip ?? TRUNK_TIP }, { trunk: TRUNK, head, dirty, onlyStackOf });
 
       // assert
       expectWellFormed(layout, { refs, dag, head, onlyStackOf });
@@ -780,11 +949,33 @@ describe('layoutGraph', () => {
   });
 
   describe('the fields the table leaves out', () => {
+    it('a straight layer row has no joinsLane key at all, not an undefined one — toStrictEqual sees every field', () => {
+      // act
+      const layout = layoutGraph({ refs: APPENDIX_A_REFS, dag: APPENDIX_A_DAG, trunkTip: TRUNK_TIP }, { trunk: TRUNK, head: 'retry-metrics', dirty: false });
+
+      // assert: the top row, whole
+      expect(layout.rows[0]).toStrictEqual({
+        kind: 'layer',
+        name: 'retry-metrics',
+        sha: SHA_C,
+        committedAt: DATE,
+        parent: 'add-retries',
+        depth: 3,
+        isTip: true,
+        forks: [SHA_T],
+        lane: 0,
+        node: 'filled',
+      });
+    });
+
     it("copies each layer's SHA and date from the refs text and gives the trunk row trunk's tip and its own date", () => {
       // act
       const layout = layoutGraph({ refs: SIDE_FIX_REFS, dag: SIDE_FIX_DAG, trunkTip: TRUNK_TIP }, { trunk: TRUNK, head: 'retry-metrics', dirty: false });
 
-      // assert: the rows in drawing order carry their own commits; the trunk row, last, carries the tip
+      // assert: the rows in drawing order carry their own commits; the trunk row, last, carries the tip.
+      // The `row.kind === …` inside each callback narrows the union (primer §59) where it is read;
+      // a filter cannot carry a narrowing into a later map without a type predicate this codebase
+      // does not use, so the test files read the kind again instead.
       // see primer §25 (arrays: map, filter)
       const shas = layout.rows.map((row) => (row.kind === 'layer' || row.kind === 'trunk' ? row.sha : null));
       expect(shas).toEqual([SHA_C, SHA_E, SHA_B, SHA_A, SHA_T]);
@@ -856,6 +1047,20 @@ describe('layoutGraph', () => {
       expect(forksOf(mergeFromTip, 'other-work')).toEqual([SHA_T, SHA_OLD]);
       expect(forksOf(orphan, 'gh-pages')).toEqual([]);
       expect(forksOf(orphan, 'feat')).toEqual([SHA_T]);
+
+      // Sorted, not in the order met: forked at OLDER, later merged from the newer OLD — the walk
+      // records OLD ('9999…') first, the row says '8888…' first.
+      const mergedFromBehind = layoutGraph(
+        { refs: refs(['main', SHA_T], ['other-work', SHA_F]), dag: dag([SHA_F, SHA_D, SHA_OLD], [SHA_D, SHA_OLDER]), trunkTip: TRUNK_TIP },
+        { trunk: TRUNK, head: null, dirty: false },
+      );
+      expect(forksOf(mergedFromBehind, 'other-work')).toEqual([SHA_OLDER, SHA_OLD]);
+      // A set, not a list: `b`'s history reaches trunk's tip twice (through b-base and through a) and names it once.
+      const mergedLines = layoutGraph(
+        { refs: refs(['a', SHA_A], ['b', SHA_2], ['b-base', SHA_B], ['main', SHA_T]), dag: dag([SHA_2, SHA_B, SHA_A], [SHA_B, SHA_1], [SHA_1, SHA_T], [SHA_A, SHA_T]), trunkTip: TRUNK_TIP },
+        { trunk: TRUNK, head: null, dirty: false },
+      );
+      expect(forksOf(mergedLines, 'b')).toEqual([SHA_T]);
     });
 
     it('marks a layer isTip when no row has it as its parent', () => {
@@ -873,7 +1078,8 @@ describe('layoutGraph', () => {
  * The seven rules every layout obeys. Each is one `expect(value, message)` (primer §76), so a
  * failure names the rule and the row rather than printing two long arrays.
  */
-// see primer §21 (Set: has, add, delete) and §22 (for ... of)
+// see primer §21 (Set: has, add, delete), §22 (for ... of), §29 (counted loops, where the position is
+// the point) and §70 (`?.`: the last row may not exist when there are none)
 function expectWellFormed(layout: GraphLayout, inputs: { refs: string; dag: string; head: string | null; onlyStackOf?: string }): void {
   const rows = layout.rows;
 
@@ -938,16 +1144,17 @@ function expectWellFormed(layout: GraphLayout, inputs: { refs: string; dag: stri
   // lane and names `head`; `dashed` is the working-tree row's alone.
   const filledCount = rows.filter((row) => (row.kind === 'layer' || row.kind === 'trunk') && row.node === 'filled').length;
   expect(filledCount, 'at most one filled node').toBeLessThanOrEqual(1);
-  rows.forEach((row, index) => {
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
     if (row.kind === 'workingTree') {
       const below = rows[index + 1];
       expect(below !== undefined && (below.kind === 'layer' || below.kind === 'trunk') && below.node === 'filled', 'the working tree sits directly above the filled row').toBe(true);
       if (below !== undefined && (below.kind === 'layer' || below.kind === 'trunk')) {
-        expect(below.lane, 'the working tree is on the filled row\'s lane').toBe(row.lane);
+        expect(below.lane, "the working tree is on the filled row's lane").toBe(row.lane);
       }
       expect(row.parent, 'the working tree names the branch HEAD is on').toBe(inputs.head);
     }
-  });
+  }
 
   // 7. Without the filter, every branch whose commit starts a DAG line is a layer row exactly
   // once, and no other branch is a row.

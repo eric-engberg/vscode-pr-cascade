@@ -9,9 +9,9 @@
  * Two things about how it compares. The agreement is checked by projection — the rows whose names
  * computeStack lists, bottom first, as `{ name, parent, depth }` — never by climbing `parent` from
  * `head`: with two names on one commit computeStack lists the name above HEAD too, which a climb
- * would miss. And the argv are pinned by output equality: against RealGitRunner nothing records
- * argv, the unit file pins them through the fake, and `fixture.git` of the exported argv printing
- * the same text is digest.git.test.ts's way.
+ * would miss. And the argv are pinned by output equality — `fixture.git` of the exported argv must
+ * print the text the function hands back — because against RealGitRunner nothing records argv; the
+ * unit file pins them through the fake.
  *
  * Layer: test, git integration (plan §9.1 layer 2; Vitest, real git in throwaway directories, no
  * git-spice, no VS Code). Depends on: src/core/graph.ts, src/core/stack.ts (the agreement rows),
@@ -26,7 +26,7 @@ import * as path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RealGitRunner } from '../../src/core/git';
 import { REFS_ARGS, dagArgs, layoutGraph, parseRefs, parseTrunkTip, readGraphInput, trunkTipArgs } from '../../src/core/graph';
-import type { GraphInput, GraphLayout, GraphRow } from '../../src/core/graph';
+import type { GraphInput, GraphLayout, GraphRow, NodeKind } from '../../src/core/graph';
 import type { RepoState } from '../../src/core/model';
 import { computeStack } from '../../src/core/stack';
 import { buildStack } from '../helpers/fixture';
@@ -85,6 +85,7 @@ function addSideFix(fixture: Fixture): void {
 }
 
 /** The layout over real output, with HEAD taken from computeStack — so the agreement is built into the act. */
+// see primer §13 (a default parameter value: `dirty = false`)
 async function realLayout(fixture: Fixture, dirty = false): Promise<{ layout: GraphLayout; state: RepoState }> {
   const state = await computeStack(git, fixture.dir, TRUNK);
   const input = await readGraphInput(git, fixture.dir, TRUNK);
@@ -125,7 +126,7 @@ interface RowSkeleton {
   kind: GraphRow['kind'];
   name?: string;
   lane: number;
-  node?: 'hollow' | 'filled' | 'dashed';
+  node?: NodeKind;
   joinsLane?: number;
   parent?: string;
   depth?: number;
@@ -202,6 +203,7 @@ describe('readGraphInput (real git)', () => {
     const entries = parseRefs(input.refs);
     expect(entries.map((entry) => entry.name)).toEqual(['add-retries', 'api-refactor', 'main', 'other-work', 'retry-metrics', 'side-fix']);
     // and each one's commit and date, as git reports them by other means
+    // see primer §76 (`expect(value, message)`: the entry's name labels a failure)
     for (const entry of entries) {
       expect(entry.sha, entry.name).toBe(shaOf(fixture, entry.name));
       expect(entry.committedAt, entry.name).toBe(dateOf(fixture, entry.name));
@@ -257,7 +259,9 @@ describe('layoutGraph over real output', () => {
     fixture = buildStack();
     fixture.addUnrelatedStack();
     addSideFix(fixture);
-    ({ layout, state } = await realLayout(fixture));
+    const real = await realLayout(fixture);
+    layout = real.layout;
+    state = real.state;
   });
 
   afterAll(() => {
@@ -316,6 +320,7 @@ describe('trunk moved on (commitOnTrunk)', () => {
   it('adds the one elided row above trunk once every root is behind the tip, and changes no layer row', () => {
     const rows = after.layout.rows;
     expect(rows.filter((row) => row.kind !== 'elided').map(skeleton)).toEqual(before.layout.rows.map(skeleton));
+    // see primer §70 (`?.`: a row that may not be there)
     expect(rows[rows.length - 2]?.kind).toBe('elided');
     // the new trunk commit is not a DAG line; the trunk row moved to it; no stack forks from it
     expect(afterInput.dag).toBe(beforeInput.dag);
@@ -349,6 +354,7 @@ describe('HEAD on trunk (E5)', () => {
 
   it('fills the trunk row and every layer hollow; main itself has no row', async () => {
     // act
+    // see primer §54 (destructuring: the two halves of realLayout's answer by name)
     const { layout, state } = await realLayout(fixture);
 
     // assert
@@ -482,7 +488,8 @@ describe('local trunk ahead of origin/main (F3, D59)', () => {
     const { layout, state } = await realLayout(fixture);
 
     // assert
-    expect(layout.rows.map(skeleton)).toContainEqual({ kind: 'layer', name: 'main', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 });
+    const mainRow = layout.rows.find((row) => row.kind === 'layer' && row.name === 'main');
+    expect(mainRow === undefined ? null : skeleton(mainRow)).toEqual({ kind: 'layer', name: 'main', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 });
     expect(state.layers.map((layer) => layer.name)).not.toContain('main');
     expect(layout.rows.some((row) => row.kind === 'elided')).toBe(false);
   });

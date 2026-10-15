@@ -4,8 +4,9 @@
  * drawn in (plan §7.1.1 "Rail", E78). computeStack (core/stack.ts) answers for the stack under
  * HEAD only; the M6 views draw them all (§12 item 2), so this file reads the whole picture in
  * three git commands and lays it out without asking git anything more per branch: three spawns
- * for any number of branches, where computeStack's way is three per branch (measured 48 ms
- * against 3.25 s for 101 branches on a 10 000-commit line, D67).
+ * for any number of branches, where computeStack asks two questions per branch — the first of
+ * them alone, 101 `rev-list --count` spawns on a 10 000-commit line, measured 3.25 s against the
+ * 48 ms of the three commands here (D67).
  *
  * For a history that is a single line above trunk — the shape stacking guarantees, and every
  * shape test/helpers/fixture.ts builds — the rows name HEAD's layers exactly as computeStack
@@ -159,7 +160,8 @@ export interface TrunkTip {
  * prints exactly `<sha> <date>`; anything else is git misbehaving, and a thrown Error naming the
  * text says so instead of letting a half-read tip into the layout.
  */
-// see primer §18 (throw) and §20 (regular expression literals: `test`)
+// see primer §18 (throw), §20 (regular expression literals: `test`), §30 (`??`: an absent second word
+// read as an empty one) and §50 (`JSON.stringify`: the text quoted, so a stray newline shows)
 export function parseTrunkTip(text: string): TrunkTip {
   const [sha, date] = text.trim().split(' ');
   if (!/^[0-9a-f]{40}$/.test(sha) || !/^\d+$/.test(date ?? '')) {
@@ -335,8 +337,9 @@ interface Member {
 /**
  * Lays out every stack in the repository: the rows of plan §7.1.1's rail in drawing order (top
  * first, trunk last) with a lane each. Pure — the same texts and options always give the same
- * rows, whatever order git printed the lines in — and built in numbered steps, each a function
- * below with its reason (D67 numbers them the same way):
+ * rows, whatever order git printed the lines in — and built in numbered steps, their reasons in
+ * the comments (D67 numbers them the same way; steps 2 to 8 are each a function after this one,
+ * step 1 is the three parsers above, steps 9 to 14 are in this function's body):
  *
  * 1. parse the three texts (nothing else touches them);
  * 2. membership: a branch is a layer iff its commit starts a DAG line;
@@ -401,8 +404,9 @@ export function layoutGraph(input: GraphInput, options: GraphOptions): GraphLayo
   // `lane − 1`. `lanes` is a running maximum: the highest lane any row took, plus one.
   const rows: GraphRow[] = [];
   let lanes = 1;
-  // see primer §5 (arrow functions: a function that closes over `rows`, `lanes` and `options`),
-  // §54 (a rest element: `const [continuing, ...side]`), §8 (`continuing` is undefined for a tip)
+  // see primer §5 (arrow functions), §33 (a closure: `draw` reads `rows`, `lanes` and `options` from the
+  // layoutGraph call around it), §54 (a rest element: `const [continuing, ...side]`), §8 (`continuing` is
+  // undefined for a tip)
   // and §48 (the conditional expression that keeps `joinsLane` absent, not `undefined`)
   const draw = (member: Member, lane: number, joins: number | null): void => {
     const [continuing, ...side] = orderChildren(member.children);
@@ -456,8 +460,10 @@ export function layoutGraph(input: GraphInput, options: GraphOptions): GraphLayo
     rows.push({ kind: 'elided', lane: 0 });
   }
   // 12 again, for trunk: the working tree of a HEAD on a branch trunk contains sits directly above
-  // the trunk row — below the elided history, since the changes are on trunk's tip — and names
-  // that branch, never the trunk ref. `head` is a string here: trunkFilled checked it.
+  // the trunk row — below the elided history: the row hangs on the trunk row whichever of trunk's
+  // commits that branch is at (`main` three behind, a merged branch at `origin/main~1`, a branch
+  // with no commits yet) — and names that branch, never the trunk ref (see WorkingTreeRow.parent).
+  // `head` is a string here: trunkFilled checked it.
   if (options.dirty && trunkFilled && options.head !== null) {
     rows.push({ kind: 'workingTree', parent: options.head, lane: 0, node: 'dashed' });
   }
@@ -493,7 +499,7 @@ export function layoutGraph(input: GraphInput, options: GraphOptions): GraphLayo
  * own base is left a stack of its own: what git says, as E14/E15, and the one shape where
  * computeStack's count order chains differently (the file header; test/git/graph.git.test.ts).
  */
-// see primer §25 (arrays: map, filter, push), §30 (`??`) and §46 (a Map of arrays: get, then push)
+// see primer §25 (arrays: map, filter, push) and §46 (a Map of arrays: get, then push)
 function measureMembers(entries: RefEntry[], commits: Map<string, readonly string[]>, trunkSha: string, trunk: string): Member[] {
   // Every member's names by its SHA, known before any walk: two names on one commit share a list.
   const namesBySha = new Map<string, string[]>();
@@ -547,6 +553,7 @@ function measureMembers(entries: RefEntry[], commits: Map<string, readonly strin
 }
 
 /** What one walk down a member's history finds (step 3). */
+// see primer §14 (`ReadonlySet`: a Set handed out with `has` and `size` but no `add`)
 interface Walk {
   /** The commits visited: this member's `rev-list --count <trunk>..<name>`. */
   readonly depth: number;
@@ -566,8 +573,7 @@ interface Walk {
  * is the member's depth — exactly `rev-list --count <trunk>..<name>`, since both count the commits
  * reachable from the branch and not from trunk; a merge from trunk counts the merge commit only,
  * its trunk-side parent being a fork, not a line. The forks are sorted so the result is the same
- * whatever order the parents were met in (`sort()` with no comparison function orders strings by
- * their character codes, which is all two SHAs need).
+ * whatever order the parents were met in — by character codes, as every order in this file is.
  */
 // see primer §38 (while loops and a worklist), §21 (Set: has, add, size) and §26 (sort)
 function walkHistory(start: string, commits: Map<string, readonly string[]>): Walk {
@@ -590,7 +596,7 @@ function walkHistory(start: string, commits: Map<string, readonly string[]>): Wa
       }
     }
   }
-  return { depth: visited.size, forks: Array.from(forks).sort(), visited };
+  return { depth: visited.size, forks: Array.from(forks).sort(compareByCodePoint), visited };
 }
 
 /**
@@ -611,15 +617,29 @@ function chooseParent(candidates: readonly string[], byName: Map<string, Member>
 
 /**
  * Whether `first` comes later in the (depth, name) order than `second`: deeper, or as deep with
- * the greater name. Names are compared with `<` and `>` — by character codes, the same on every
- * machine — for the reason computeStack's compareByDistanceThenName gives: `localeCompare` could
- * put two branches in a different order on two developers' machines.
+ * the greater name (compareByCodePoint says how names are compared, and why).
  */
 function isDeeper(first: Member, second: Member): boolean {
   if (first.depth !== second.depth) {
     return first.depth > second.depth;
   }
-  return first.name > second.name;
+  return compareByCodePoint(first.name, second.name) > 0;
+}
+
+/**
+ * The one way two names — or two SHAs — are ordered in this file: by their character codes, with
+ * `<` and `>`, which is the same on every machine. Never `localeCompare`, for the reason
+ * computeStack's compareByDistanceThenName gives: it orders by the user's language rules and could
+ * put two branches in a different order on two developers' machines (`'zeta' < 'ömega'` by code
+ * point, the reverse in most locales). Written once so the parent choice, the drawing order and the
+ * forks all agree.
+ */
+// see primer §26 (sort and comparison functions)
+function compareByCodePoint(first: string, second: string): number {
+  if (first < second) {
+    return -1;
+  }
+  return first > second ? 1 : 0;
 }
 
 /**
@@ -702,9 +722,9 @@ function measureSize(member: Member): number {
  * the rest are side children, drawn in this order, the first of them highest. Sorted by subtree
  * size, biggest first, then by name: the subtree with the most rows stays straight (usually the
  * long stack), a HEAD-first rule would swap lanes on every checkout, and the name tie-break keeps
- * two equal siblings in one order on every machine — by `<` and `>`, as isDeeper compares, never
- * `localeCompare`. A sorted copy: a sort in place would reorder `children`, which other steps
- * read.
+ * two equal siblings in one order on every machine (compareByCodePoint). A sorted copy, so
+ * `children` keeps the order step 5 built it in for any later reader that should not depend on
+ * whether `draw` has run.
  */
 // see primer §26 (sort and comparison functions) and §16 (arrays: spread — a copy)
 function orderChildren(children: readonly Member[]): Member[] {
@@ -731,14 +751,11 @@ function orderSideRoots(roots: readonly Member[]): Member[] {
   });
 }
 
-/** Biggest subtree first, then the smaller name first — by `<` and `>`, as isDeeper compares. */
+/** Biggest subtree first, then the smaller name first (compareByCodePoint). */
 function compareBySizeThenName(first: Member, second: Member): number {
   if (first.size !== second.size) {
     // The bigger first: a negative result puts `first` before `second`.
     return second.size - first.size;
   }
-  if (first.name < second.name) {
-    return -1;
-  }
-  return first.name > second.name ? 1 : 0;
+  return compareByCodePoint(first.name, second.name);
 }
