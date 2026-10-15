@@ -1,12 +1,14 @@
 /**
- * core/gsLog.ts — turns the stdout of `gs log short --json` (one JSON object per line) into
- * typed entries, one bad line at a time: every well-formed line is kept, every malformed one is
- * reported once with its line number, and nothing here ever throws (E57).
+ * core/gsLog.ts — turns the stdout of `gs log short --all --json` (one JSON object per line;
+ * `--all` from item 20a, D59: every tracked branch whatever HEAD is on) into typed entries, one
+ * bad line at a time: every well-formed line is kept, every malformed one is reported once with
+ * its line number, and nothing here ever throws (E57).
  *
  * Layer: core, pure (text in, value out; plan §4.1). Depends on: nothing. Depended on by:
- * core/backends/gitspice.ts `enrich` (item 20), which runs the command and hands the text here.
- * Plan: §7.13.2 (the documented schema), §8 E57, §9.4 `unit/gsLog`, §13.2 D55 (hand-rolled
- * after measuring zod; fields nothing reads yet are dropped).
+ * core/model.ts (`GsLogEntry` and `MalformedLine`, as types — a layer carries its line, item
+ * 20a), core/backends/gitspice.ts `enrich` (item 20a), which runs the command and hands the text
+ * here. Plan: §7.13.2 (the documented schema), §8 E57, §9.4 `unit/gsLog`, §13.2 D55 (hand-rolled
+ * after measuring zod; fields nothing reads yet are dropped), D59.
  */
 
 /**
@@ -52,7 +54,7 @@ export interface GsLogPush {
 }
 
 /**
- * One line of `gs log short --json`: the fields `enrich` reads (plan §4.4, §7.8's local tier).
+ * One line of `gs log short --all --json`: the fields `enrich` reads (plan §4.4, §7.8's local tier).
  * The schema's `current`, `worktree`, `ups`, `commits` and `change.comments` are documented
  * (§7.13.2) and dropped here until something reads them — git already tells the extension
  * which branch is current and how the layers stack — and unknown fields are dropped the same
@@ -89,7 +91,7 @@ export interface GsLogParse {
 }
 
 /**
- * Parses the stdout of `gs log short --json` — stdout only: git-spice's `INF` and `WRN` lines
+ * Parses the stdout of `gs log short --all --json` — stdout only: git-spice's `INF` and `WRN` lines
  * go to stderr (verified with 0.31.2), and a caller that mixed the two streams would see them
  * reported here as `not JSON`, once each.
  *
