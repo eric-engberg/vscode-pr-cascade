@@ -595,6 +595,8 @@ async function setUpGitSpice(gitExtension: GitExtensionAdapter, flows: Readiness
     remote: settings.remote,
     trunk,
     gsPathSetting: settings.gsPath,
+    ghPathSetting: settings.ghPath,
+    gitProtocol: settings.gitProtocol,
     probe: probeFor(gitExtension, root, settings.remote, true),
     git,
     action: async (ready) => {

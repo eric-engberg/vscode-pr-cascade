@@ -43,8 +43,8 @@ const TOO_OLD: Readiness = { kind: 'gs-too-old', gsPath: 'git-spice', found: '0.
 const GH_MISSING: Readiness = { kind: 'gh-missing', forge: GITHUB, missing: ['gh-stack'], ghVersion: '2.91.0', ghMinimum: '2.90.0', ghPath: 'gh' };
 const GH_NOT_LOGGED_IN: Readiness = { kind: 'gh-not-logged-in', forge: GITHUB, ghPath: 'gh' };
 const UNPARSEABLE: Readiness = { kind: 'remote-unparseable', remote: 'origin', url: '/srv/git/repo.git' };
-// A Mac whose Homebrew has git-spice.
-const HOMEBREW = { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: '/opt/homebrew/bin/git-spice' };
+// A Mac whose Homebrew has git-spice and gh.
+const HOMEBREW = { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: '/opt/homebrew/bin/git-spice', brewGh: '/opt/homebrew/bin/gh' };
 const E70: Readiness = { kind: 'forge-unrecognized', forge: { ...GITHUB, host: 'corp.ghe.com', recognizedByGitSpice: false }, config: NO_CONFIG };
 
 // The notifications the flow shows for those, as the fake records them.
@@ -119,14 +119,16 @@ function gitFor(): FakeGitRunner {
   );
 }
 
-/** One question for the flow: the repository at `root`, the script's probe, a git fake, and an action that records what it was given. */
+/** One question for the flow: the repository at `root`, the script's probe, a git fake, an action that records what it was given, and the two gh settings (item 23b) as read. */
 // see primer §13 (default parameters)
-function requestFor(probe: ScriptedProbe, actions: Ready[], root = ROOT, git: GitRunner = gitFor()): ReadyRequest {
+function requestFor(probe: ScriptedProbe, actions: Ready[], root = ROOT, git: GitRunner = gitFor(), ghPathSetting = '', gitProtocol = 'https'): ReadyRequest {
   return {
     root,
     remote: 'origin',
     trunk: 'origin/main',
     gsPathSetting: '',
+    ghPathSetting,
+    gitProtocol,
     probe: probe.probe,
     git,
     action: async (ready) => {
@@ -439,12 +441,12 @@ describe('ReadinessFlows.ensureReady', () => {
     it('counts an install as done when Homebrew\'s git-spice appears on disk, though VS Code still cannot find it — and says where it is', async () => {
       // arrange: VS Code's PATH lacks Homebrew's directory, so the probe keeps saying gs-missing
       const probe = scripted([GS_MISSING]);
-      const h = harness({ answers: ['Install with Homebrew'], machine: { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: null } });
+      const h = harness({ answers: ['Install with Homebrew'], machine: { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: null, brewGh: null } });
       const flow = watch(h.flows.ensureReady(requestFor(probe, [])));
       await vi.advanceTimersByTimeAsync(3_000);
 
       // act: `brew install` finishes
-      h.host.machineFacts = { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: '/opt/homebrew/bin/git-spice' };
+      h.host.machineFacts = { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: '/opt/homebrew/bin/git-spice', brewGh: null };
       await vi.advanceTimersByTimeAsync(3_000);
 
       // assert: no 5-minute wait — installed, then the sentence that names the path for the setting
@@ -481,7 +483,7 @@ describe('ReadinessFlows.ensureReady', () => {
     it('counts an install as done when the probe finds git-spice too old — it is installed, then offers the upgrade', async () => {
       // arrange
       const probe = scripted([GS_MISSING, GS_MISSING, TOO_OLD]);
-      const h = harness({ answers: ['Install with Homebrew', undefined], machine: { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: null } });
+      const h = harness({ answers: ['Install with Homebrew', undefined], machine: { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: null, brewGh: null } });
 
       // act
       watch(h.flows.ensureReady(requestFor(probe, [])));
@@ -507,9 +509,9 @@ describe('ReadinessFlows.ensureReady', () => {
     });
 
     it('counts a git-spice login as done when the probe reaches gh\'s step', async () => {
-      // arrange
+      // arrange: the gh-stack offer that follows is declined (since item 23b it has a button)
       const probe = scripted([NOT_LOGGED_IN, NOT_LOGGED_IN, GH_MISSING]);
-      const h = harness({ answers: ['Log in'] });
+      const h = harness({ answers: ['Log in', undefined] });
 
       // act
       const flow = watch(h.flows.ensureReady(requestFor(probe, [])));
@@ -520,26 +522,22 @@ describe('ReadinessFlows.ensureReady', () => {
       expect(h.host.asked.map((asked) => asked.message)).toStrictEqual([
         LOGIN_OFFER.message,
         LOGGED_IN.message,
-        'Pull requests on github.com need gh 2.90.0 or newer and its gh-stack extension; missing: gh-stack. Pushing and the local git-spice operations still work.',
+        'gh 2.91.0 is installed, but its gh-stack extension is not; pull requests on github.com need it. Install it?',
       ]);
     });
 
     it('counts a git-spice login as done when the probe reaches gh\'s login step (item 23a)', async () => {
-      // arrange: gh is installed with its extension, and not logged in — the member after gh-missing
+      // arrange: gh is installed with its extension, and not logged in — the member after gh-missing; its offer declined
       const probe = scripted([NOT_LOGGED_IN, NOT_LOGGED_IN, GH_NOT_LOGGED_IN]);
-      const h = harness({ answers: ['Log in'] });
+      const h = harness({ answers: ['Log in', undefined] });
 
       // act
       const flow = watch(h.flows.ensureReady(requestFor(probe, [])));
       await vi.advanceTimersByTimeAsync(3_000);
 
-      // assert: further than the git-spice login — the wait passed — and the interim sentence has no button
+      // assert: further than the git-spice login — the wait passed — and gh's own login offer follows
       expect(flow.outcome).toBe('not-ready');
-      expect(h.host.asked.map((asked) => asked.message)).toStrictEqual([
-        LOGIN_OFFER.message,
-        LOGGED_IN.message,
-        'gh is not logged in to github.com. Run gh auth login --hostname github.com --web in a terminal.',
-      ]);
+      expect(h.host.asked.map((asked) => asked.message)).toStrictEqual([LOGIN_OFFER.message, LOGGED_IN.message, 'gh is not logged in to github.com.']);
     });
 
     it('does not count a login as done when the probe falls back to the forge step', async () => {
@@ -729,7 +727,7 @@ describe('ReadinessFlows.ensureReady', () => {
     it('installs with the brew it found, waits for git-spice to answer, then goes on to the next offer', async () => {
       // arrange: installed by 6 s; the init offer after it is closed
       const probe = scripted([GS_MISSING, GS_MISSING, GS_MISSING, NOT_INITIALIZED]);
-      const h = harness({ answers: ['Install with Homebrew', undefined], machine: { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: null } });
+      const h = harness({ answers: ['Install with Homebrew', undefined], machine: { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: null, brewGh: null } });
 
       // act
       const flow = watch(h.flows.ensureReady(requestFor(probe, [])));
@@ -864,7 +862,7 @@ describe('ReadinessFlows.ensureReady', () => {
 
     it("names Homebrew's git-spice when it is there and VS Code did not find it", async () => {
       // arrange
-      const h = harness({ machine: { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: '/opt/homebrew/bin/git-spice' } });
+      const h = harness({ machine: { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: '/opt/homebrew/bin/git-spice', brewGh: null } });
 
       // act
       watch(h.flows.ensureReady(requestFor(scripted([GS_MISSING]), [])));
@@ -882,11 +880,37 @@ describe('ReadinessFlows.ensureReady', () => {
       await h.flows.ensureReady(requestFor(scripted([GS_MISSING]), []));
 
       // act
-      h.host.machineFacts = { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: null };
+      h.host.machineFacts = { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: null, brewGh: null };
       await h.flows.ensureReady(requestFor(scripted([GS_MISSING]), []));
 
       // assert
       expect(h.host.asked.map((asked) => asked.buttons)).toStrictEqual([['Open install docs'], ['Install with Homebrew']]);
+    });
+
+    it("the protocol and the gh setting reach the login line, Homebrew's gh the install sentence (item 23b)", async () => {
+      // arrange: the setting names Homebrew's gh, which is the gh that answered; the protocol is ssh
+      const notLoggedIn: Readiness = { kind: 'gh-not-logged-in', forge: GITHUB, ghPath: '/opt/homebrew/bin/gh' };
+      const h = harness({ answers: ['Log in'], machine: HOMEBREW });
+
+      // act
+      watch(h.flows.ensureReady(requestFor(scripted([notLoggedIn]), [], ROOT, gitFor(), '/opt/homebrew/bin/gh', 'ssh')));
+      const sent = await h.host.terminals.nextSent();
+
+      // assert
+      expect(sent.text).toBe('cd /w/repo && env -u GH_TOKEN -u GITHUB_TOKEN /opt/homebrew/bin/gh auth login --hostname github.com --web --git-protocol ssh');
+    });
+
+    it("names Homebrew's gh for prCascade.ghPath when VS Code did not find gh (item 23b)", async () => {
+      // arrange
+      const ghBoth: Readiness = { kind: 'gh-missing', forge: GITHUB, missing: ['gh', 'gh-stack'], ghVersion: null, ghMinimum: '2.90.0', ghPath: null };
+      const h = harness({ machine: HOMEBREW });
+
+      // act
+      watch(h.flows.ensureReady(requestFor(scripted([ghBoth]), [])));
+      await vi.advanceTimersByTimeAsync(0);
+
+      // assert
+      expect(h.host.asked[0].message).toBe('gh is installed at /opt/homebrew/bin/gh, but VS Code did not find it. Set prCascade.ghPath to /opt/homebrew/bin/gh.');
     });
   });
 
@@ -1202,14 +1226,25 @@ describe('chooseRepository', () => {
 describe('machineFacts', () => {
   // see primer §21 (Set)
   it('finds brew in the first of its usual places that exists, and the git-spice Homebrew linked beside it', () => {
-    // arrange: an Intel Mac — no /opt/homebrew
+    // arrange: an Intel Mac — no /opt/homebrew, and no gh from Homebrew
     const present = new Set(['/usr/local/bin/brew', '/usr/local/bin/git-spice']);
 
     // act
     const facts = machineFacts((file) => present.has(file));
 
     // assert
-    expect(facts).toStrictEqual({ brewPath: '/usr/local/bin/brew', brewGitSpice: '/usr/local/bin/git-spice' });
+    expect(facts).toStrictEqual({ brewPath: '/usr/local/bin/brew', brewGitSpice: '/usr/local/bin/git-spice', brewGh: null });
+  });
+
+  it('reports brew with gh and without git-spice (item 23b)', () => {
+    // arrange
+    const present = new Set(['/opt/homebrew/bin/brew', '/opt/homebrew/bin/gh']);
+
+    // act
+    const facts = machineFacts((file) => present.has(file));
+
+    // assert
+    expect(facts).toStrictEqual({ brewPath: '/opt/homebrew/bin/brew', brewGitSpice: null, brewGh: '/opt/homebrew/bin/gh' });
   });
 
   it("prefers Apple silicon's brew when an Intel one is left behind too, as on a migrated Mac", () => {
@@ -1223,11 +1258,11 @@ describe('machineFacts', () => {
     expect(facts.brewPath).toBe('/opt/homebrew/bin/brew');
   });
 
-  it('reports brew without git-spice when Homebrew has none', () => {
-    expect(machineFacts((file) => file === '/opt/homebrew/bin/brew')).toStrictEqual({ brewPath: '/opt/homebrew/bin/brew', brewGitSpice: null });
+  it('reports brew without git-spice or gh when Homebrew has neither', () => {
+    expect(machineFacts((file) => file === '/opt/homebrew/bin/brew')).toStrictEqual({ brewPath: '/opt/homebrew/bin/brew', brewGitSpice: null, brewGh: null });
   });
 
-  it('reports neither when there is no Homebrew — and does not look for git-spice beside nothing', () => {
+  it('reports none when there is no Homebrew — and does not look for git-spice or gh beside nothing', () => {
     // arrange
     const asked: string[] = [];
 
@@ -1238,7 +1273,7 @@ describe('machineFacts', () => {
     });
 
     // assert
-    expect(facts).toStrictEqual({ brewPath: null, brewGitSpice: null });
+    expect(facts).toStrictEqual({ brewPath: null, brewGitSpice: null, brewGh: null });
     expect(asked).toStrictEqual([...BREW_PATHS]);
   });
 

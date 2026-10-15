@@ -41,7 +41,7 @@ const PUSHED_3 = exited(0, '', 'INF Pushed api-refactor\nINF Pushed add-retries\
 const THREE = ['api-refactor', 'add-retries', 'retry-metrics'];
 
 // What the setup flow is handed when it words the same step-1 failures (core/readinessFix.ts).
-const FACTS: OfferFacts = { root: ROOT, remote: 'origin', trunkBranch: { kind: 'none' }, gsPathSetting: '', brewPath: null, brewGitSpice: null };
+const FACTS: OfferFacts = { root: ROOT, remote: 'origin', trunkBranch: { kind: 'none' }, gsPathSetting: '', brewPath: null, brewGitSpice: null, ghPathSetting: '', brewGh: null, gitProtocol: 'https' };
 
 /** The request the fake records for the one submit, spelled out. */
 // see primer §13 (a default parameter)

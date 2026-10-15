@@ -27,7 +27,8 @@
  * (`setUpGitSpice`; `trackStack` for `chooseRepository`, item 20b), test/helpers/fakeReadinessHost.ts
  * (types), test/unit/login.test.ts, test/ext/login.test.ts.
  * Plan: §4.2, §7.5 steps 1–4, §7.6, §7.13.1, §8 E55/E59/E62/E67/E70/E83, §9.4 `ext/login`, §10.1
- * item 19b, §13.2 D58, D65 (item 23a: `progressOf` as a table), §13.4 (test-only hooks).
+ * item 19b, §13.2 D58, D65 (item 23a: `progressOf` as a table), D66 (item 23b: the gh offers through
+ * the same flow — `brewGh`, the two gh settings on the request), §13.4 (test-only hooks).
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -51,22 +52,27 @@ export const BREW_PATHS: readonly string[] = ['/opt/homebrew/bin/brew', '/usr/lo
 export interface MachineFacts {
   readonly brewPath: string | null;
   readonly brewGitSpice: string | null;
+  /** The `gh` beside `brew`, read as `brewGitSpice` is (item 23b). */
+  readonly brewGh: string | null;
 }
 
 /**
- * Where Homebrew is, and whether it has git-spice: the first of BREW_PATHS that exists, and the
- * `git-spice` beside it — where Homebrew links the one it installed. `exists` is handed in
- * (`fs.existsSync` in src/extension.ts) so a test can say what is on the disk.
+ * Where Homebrew is, and whether it has git-spice and gh: the first of BREW_PATHS that exists, and
+ * the `git-spice` and `gh` beside it — where Homebrew links what it installed, under one name each.
+ * `exists` is handed in (`fs.existsSync` in src/extension.ts) so a test can say what is on the disk.
  */
 // see primer §25 (arrays: `find`), §33 (a function as a parameter), §28 (`path.dirname`, `path.join`),
-// §30 (`??`) and §48 (the conditional expression)
+// §30 (`??`), §48 (the conditional expression) and §5 (an arrow function kept in a const)
 export function machineFacts(exists: (file: string) => boolean): MachineFacts {
   const brewPath = BREW_PATHS.find(exists) ?? null;
   if (brewPath === null) {
-    return { brewPath: null, brewGitSpice: null };
+    return { brewPath: null, brewGitSpice: null, brewGh: null };
   }
-  const beside = path.join(path.dirname(brewPath), 'git-spice');
-  return { brewPath, brewGitSpice: exists(beside) ? beside : null };
+  const beside = (name: string): string | null => {
+    const file = path.join(path.dirname(brewPath), name);
+    return exists(file) ? file : null;
+  };
+  return { brewPath, brewGitSpice: beside('git-spice'), brewGh: beside('gh') };
 }
 
 /** Everything the flow asks of VS Code, as one object: the real one in src/extension.ts, a test's from test/helpers/fakeReadinessHost.ts. */
@@ -101,6 +107,10 @@ export interface ReadyRequest {
   readonly trunk: string | null;
   /** `prCascade.gsPath` as read. */
   readonly gsPathSetting: string;
+  /** `prCascade.ghPath` as read (item 23b). */
+  readonly ghPathSetting: string;
+  /** `prCascade.gitProtocol` as read (item 23b) — the gh login line's `--git-protocol`. */
+  readonly gitProtocol: string;
   /** The readiness probe for this repository (src/extension.ts, `probeFor`): asked for the offer, during each wait, and after each fix. */
   readonly probe: () => Promise<Readiness>;
   /** git in this repository: the trunk question before an init offer, and the `git config` fixes. */
@@ -428,6 +438,9 @@ export class ReadinessFlows implements Disposable {
       gsPathSetting: request.gsPathSetting,
       brewPath: machine.brewPath,
       brewGitSpice: machine.brewGitSpice,
+      ghPathSetting: request.ghPathSetting,
+      brewGh: machine.brewGh,
+      gitProtocol: request.gitProtocol,
     };
   }
 

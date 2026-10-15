@@ -18,7 +18,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NotReady, Ready } from '../../src/core/backend';
 import type { Forge, ForgeConfig, HostAddress } from '../../src/core/forge';
-import { INSTALL_DOCS_URL, offerFor, readyMessage, trunkBranchFor } from '../../src/core/readinessFix';
+import { GH_INSTALL_DOCS_URL, ghTokenVariables, INSTALL_DOCS_URL, offerFor, readyMessage, trunkBranchFor } from '../../src/core/readinessFix';
 import type { OfferFacts } from '../../src/core/readinessFix';
 import { FakeGitRunner } from '../helpers/fakeGit';
 
@@ -26,7 +26,7 @@ import { FakeGitRunner } from '../helpers/fakeGit';
 // see primer §4 (const)
 const ROOT = '/work/app';
 
-/** A Mac with Homebrew (but no git-spice from it), git-spice looked for automatically, a local `main` as the trunk. */
+/** A Mac with Homebrew (but no git-spice or gh from it), both tools looked for automatically, a local `main` as the trunk, gh's default protocol. */
 const FACTS: OfferFacts = {
   root: ROOT,
   remote: 'origin',
@@ -34,6 +34,9 @@ const FACTS: OfferFacts = {
   gsPathSetting: '',
   brewPath: '/opt/homebrew/bin/brew',
   brewGitSpice: null,
+  ghPathSetting: '',
+  brewGh: null,
+  gitProtocol: 'https',
 };
 
 /** The same without Homebrew — Linux, or a Mac that never installed it. */
@@ -601,48 +604,206 @@ describe('offerFor', () => {
     });
   });
 
-  describe('gh-missing (E62b — the words of 19a, produced since item 23a)', () => {
-    it('lists both when gh is not there at all', () => {
-      // act: nothing answered `gh --version` as gh, so there is no path to name either
-      const offer = offerFor({ kind: 'gh-missing', forge: GITHUB, missing: ['gh', 'gh-stack'], ghVersion: null, ghMinimum: '2.90.0', ghPath: null }, FACTS);
+  describe('gh-missing (E62b): install gh, upgrade gh, install gh-stack', () => {
+    /** Nothing answered `gh --version` as gh: both listed, no path and no version to name. */
+    const GH_BOTH: NotReady = { kind: 'gh-missing', forge: GITHUB, missing: ['gh', 'gh-stack'], ghVersion: null, ghMinimum: '2.90.0', ghPath: null };
+    /** gh answered, below the floor; the extension is there. */
+    const GH_TOO_OLD: NotReady = { kind: 'gh-missing', forge: GITHUB, missing: ['gh'], ghVersion: '2.40.1', ghMinimum: '2.90.0', ghPath: 'gh' };
+    /** gh answered and is fine; the extension is not there. */
+    const GH_STACK_ONLY: NotReady = { kind: 'gh-missing', forge: GITHUB, missing: ['gh-stack'], ghVersion: '2.102.0', ghMinimum: '2.90.0', ghPath: 'gh' };
+    /** A Mac where Homebrew installed the gh that answered. */
+    const BREW_GH: OfferFacts = { ...FACTS, brewGh: '/opt/homebrew/bin/gh' };
+
+    it('offers Homebrew by its full path when gh is not there at all — the whole offer', () => {
+      // act
+      const offer = offerFor(GH_BOTH, FACTS);
 
       // assert
       expect(offer).toStrictEqual({
-        severity: 'information',
-        message: 'Pull requests on github.com need gh 2.90.0 or newer and its gh-stack extension; missing: gh, gh-stack. Pushing and the local git-spice operations still work.',
+        severity: 'warning',
+        message:
+          "Pull requests on github.com need gh 2.90.0 or newer and its gh-stack extension, and gh was not found in VS Code's PATH. Install it with Homebrew — or, if it is already installed, set prCascade.ghPath to its full path.",
+        fix: { button: 'Install with Homebrew', action: { kind: 'terminal', argv: ['/opt/homebrew/bin/brew', 'install', 'gh'] }, done: 'gh installed.' },
+      });
+    });
+
+    it('offers the install page without Homebrew', () => {
+      // act
+      const offer = offerFor(GH_BOTH, NO_BREW);
+
+      // assert
+      expect(offer.fix?.action).toStrictEqual({ kind: 'open-url', url: GH_INSTALL_DOCS_URL });
+      expect(offer.message.endsWith('Install it — or, if it is already installed, set prCascade.ghPath to its full path.')).toBe(true);
+      expect(GH_INSTALL_DOCS_URL).toBe('https://github.com/cli/cli#installation');
+    });
+
+    it('points at prCascade.ghPath when it is set, with no button — installing would not change what is tried', () => {
+      // act: Homebrew's gh is there too, and still not offered — only the setting is tried
+      const offer = offerFor(GH_BOTH, { ...BREW_GH, ghPathSetting: '/usr/local/bin/gh' });
+
+      // assert
+      expect(offer).toStrictEqual({
+        severity: 'warning',
+        message: "prCascade.ghPath is /usr/local/bin/gh, which did not answer as gh. Point it at gh, or clear it to try gh from VS Code's PATH.",
         fix: null,
       });
     });
 
-    it('quotes the version of a gh that is too old', () => {
+    it("names Homebrew's gh for the setting when VS Code did not find it, with no button — installing again would change nothing", () => {
       // act
-      const offer = offerFor({ kind: 'gh-missing', forge: GITHUB, missing: ['gh'], ghVersion: '2.40.1', ghMinimum: '2.90.0', ghPath: 'gh' }, FACTS);
+      const offer = offerFor(GH_BOTH, BREW_GH);
 
       // assert
-      expect(offer.message).toBe('Pull requests on github.com need gh 2.90.0 or newer and its gh-stack extension; missing: gh (found 2.40.1). Pushing and the local git-spice operations still work.');
+      expect(offer).toStrictEqual({
+        severity: 'warning',
+        message: 'gh is installed at /opt/homebrew/bin/gh, but VS Code did not find it. Set prCascade.ghPath to /opt/homebrew/bin/gh.',
+        fix: null,
+      });
     });
 
-    it('lists only the extension when gh itself is fine', () => {
+    it('treats a blank setting as unset — the Homebrew offer', () => {
       // act
-      const offer = offerFor({ kind: 'gh-missing', forge: GITHUB, missing: ['gh-stack'], ghVersion: '2.91.0', ghMinimum: '2.90.0', ghPath: 'gh' }, FACTS);
+      const offer = offerFor(GH_BOTH, { ...FACTS, ghPathSetting: '  ' });
 
       // assert
-      expect(offer.message).toBe('Pull requests on github.com need gh 2.90.0 or newer and its gh-stack extension; missing: gh-stack. Pushing and the local git-spice operations still work.');
+      expect(offer.fix?.button).toBe('Install with Homebrew');
+    });
+
+    it("upgrades with Homebrew a too-old gh that is Homebrew's, by name", () => {
+      // act
+      const offer = offerFor(GH_TOO_OLD, BREW_GH);
+
+      // assert
+      expect(offer).toStrictEqual({
+        severity: 'warning',
+        message: 'gh 2.40.1 is older than 2.90.0, the oldest PR Cascade works with.',
+        fix: { button: 'Upgrade with Homebrew', action: { kind: 'terminal', argv: ['/opt/homebrew/bin/brew', 'upgrade', 'gh'] }, done: 'gh upgraded.' },
+      });
+    });
+
+    it("upgrades Homebrew's gh set by its path, and says where it is", () => {
+      // act
+      const offer = offerFor({ ...GH_TOO_OLD, ghPath: '/opt/homebrew/bin/gh' }, BREW_GH);
+
+      // assert
+      expect(offer.fix?.button).toBe('Upgrade with Homebrew');
+      expect(offer.message).toBe('gh 2.40.1 at /opt/homebrew/bin/gh is older than 2.90.0, the oldest PR Cascade works with.');
+    });
+
+    it("offers the page for another gh set by hand, though Homebrew's is there too — `brew upgrade` would not touch it", () => {
+      // act
+      const offer = offerFor({ ...GH_TOO_OLD, ghPath: '/usr/local/bin/gh' }, BREW_GH);
+
+      // assert
+      expect(offer.fix?.button).toBe('Open install docs');
+      expect(offer.message).toBe('gh 2.40.1 at /usr/local/bin/gh is older than 2.90.0, the oldest PR Cascade works with.');
+    });
+
+    it('offers the page for a gh whose version cannot be read, and says so', () => {
+      // act: a source build
+      const offer = offerFor({ ...GH_TOO_OLD, ghVersion: 'DEV' }, BREW_GH);
+
+      // assert
+      expect(offer.message).toBe('gh reports version "DEV", so whether it is at least 2.90.0 could not be checked.');
+      expect(offer.fix?.action).toStrictEqual({ kind: 'open-url', url: GH_INSTALL_DOCS_URL });
+    });
+
+    it("offers the extension's install in a terminal when gh itself is fine — the whole offer", () => {
+      // act
+      const offer = offerFor(GH_STACK_ONLY, FACTS);
+
+      // assert: `command` past any alias, as the init line has it; no login is needed for the install
+      expect(offer).toStrictEqual({
+        severity: 'warning',
+        message: 'gh 2.102.0 is installed, but its gh-stack extension is not; pull requests on github.com need it. Install it?',
+        fix: { button: 'Install gh-stack', action: { kind: 'terminal', argv: ['command', 'gh', 'extension', 'install', 'github/gh-stack'] }, done: 'gh-stack installed.' },
+      });
+    });
+
+    it("runs the extension's install with the gh that answered", () => {
+      // act
+      const offer = offerFor({ ...GH_STACK_ONLY, ghPath: '/opt/x/gh' }, FACTS);
+
+      // assert
+      expect(offer.fix?.action).toStrictEqual({ kind: 'terminal', argv: ['command', '/opt/x/gh', 'extension', 'install', 'github/gh-stack'] });
+    });
+
+    it('offers gh first when both gh and its extension are missing but gh answered — the new gh is where the extension installs', () => {
+      // act
+      const offer = offerFor({ ...GH_TOO_OLD, missing: ['gh', 'gh-stack'] }, BREW_GH);
+
+      // assert
+      expect(offer.fix?.button).toBe('Upgrade with Homebrew');
     });
   });
 
-  describe('gh-not-logged-in (E23 — the words now, the button in item 23b)', () => {
-    it('names the host and the command to run, with no button — a warning, since there is something to do', () => {
-      // act: a remote that spells the host in capitals
-      const offer = offerFor({ kind: 'gh-not-logged-in', forge: { ...GITHUB, host: 'GitHub.com' }, ghPath: 'gh' }, FACTS);
+  describe('gh-not-logged-in (E23)', () => {
+    it('offers the login in a terminal, the token pair unset, the host lower-cased in the flag — the whole offer', () => {
+      // act
+      const offer = offerFor({ kind: 'gh-not-logged-in', forge: GITHUB, ghPath: 'gh' }, FACTS);
 
-      // assert: the remote's spelling in the sentence, the host lower-cased after --hostname, as gh
-      // wants it (it does not fold the flag's case itself)
+      // assert: gh refuses `auth login` while GH_TOKEN or GITHUB_TOKEN is set (measured 2.102.0), so both are unset for the one command
       expect(offer).toStrictEqual({
         severity: 'warning',
-        message: 'gh is not logged in to GitHub.com. Run gh auth login --hostname github.com --web in a terminal.',
-        fix: null,
+        message: 'gh is not logged in to github.com.',
+        fix: {
+          button: 'Log in',
+          action: { kind: 'terminal', argv: ['env', '-u', 'GH_TOKEN', '-u', 'GITHUB_TOKEN', 'gh', 'auth', 'login', '--hostname', 'github.com', '--web', '--git-protocol', 'https'] },
+          done: 'gh is logged in to github.com.',
+        },
       });
+    });
+
+    it('passes prCascade.gitProtocol through', () => {
+      // act
+      const offer = offerFor({ kind: 'gh-not-logged-in', forge: GITHUB, ghPath: 'gh' }, { ...FACTS, gitProtocol: 'ssh' });
+
+      // assert
+      // see primer §25 (arrays: `slice` with a negative start — the last two)
+      expect(offer.fix?.action.kind === 'terminal' ? offer.fix.action.argv.slice(-2) : []).toStrictEqual(['--git-protocol', 'ssh']);
+    });
+
+    it('runs the gh that answered', () => {
+      // act
+      const offer = offerFor({ kind: 'gh-not-logged-in', forge: GITHUB, ghPath: '/opt/homebrew/bin/gh' }, FACTS);
+
+      // assert
+      expect(offer.fix?.action.kind === 'terminal' ? offer.fix.action.argv[5] : '').toBe('/opt/homebrew/bin/gh');
+    });
+
+    it("keeps the remote's spelling in the sentences and lower-cases the flag", () => {
+      // act
+      const offer = offerFor({ kind: 'gh-not-logged-in', forge: { ...GITHUB, host: 'GitHub.com' }, ghPath: 'gh' }, FACTS);
+
+      // assert
+      expect(offer.message).toBe('gh is not logged in to GitHub.com.');
+      expect(offer.fix?.action).toStrictEqual({
+        kind: 'terminal',
+        argv: ['env', '-u', 'GH_TOKEN', '-u', 'GITHUB_TOKEN', 'gh', 'auth', 'login', '--hostname', 'github.com', '--web', '--git-protocol', 'https'],
+      });
+      expect(offer.fix?.done).toBe('gh is logged in to GitHub.com.');
+    });
+
+    it('unsets the Enterprise pair for an Enterprise Server host, and the github.com pair for a GHE.com tenant', () => {
+      // act
+      const server = offerFor({ kind: 'gh-not-logged-in', forge: { ...GITHUB, host: 'ghes.corp.com' }, ghPath: 'gh' }, FACTS);
+      const tenant = offerFor({ kind: 'gh-not-logged-in', forge: { ...GITHUB, host: 'corp.ghe.com' }, ghPath: 'gh' }, FACTS);
+
+      // assert
+      expect(server.fix?.action.kind === 'terminal' ? server.fix.action.argv.slice(0, 5) : []).toStrictEqual(['env', '-u', 'GH_ENTERPRISE_TOKEN', '-u', 'GITHUB_ENTERPRISE_TOKEN']);
+      expect(tenant.fix?.action.kind === 'terminal' ? tenant.fix.action.argv.slice(0, 5) : []).toStrictEqual(['env', '-u', 'GH_TOKEN', '-u', 'GITHUB_TOKEN']);
+    });
+
+    it('ghTokenVariables: the github.com pair for github.com, its subdomains and *.ghe.com, whatever the case; the Enterprise pair for the rest', () => {
+      // act / assert: one table — the host classes gh documents (`gh help environment`)
+      const githubPair: readonly [string, string] = ['GH_TOKEN', 'GITHUB_TOKEN'];
+      const enterprisePair: readonly [string, string] = ['GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'];
+      for (const host of ['github.com', 'GitHub.COM', 'api.github.com', 'eu.ghe.com']) {
+        expect(ghTokenVariables(host), host).toStrictEqual(githubPair);
+      }
+      for (const host of ['ghes.corp.com', 'github.com.evil.example']) {
+        expect(ghTokenVariables(host), host).toStrictEqual(enterprisePair);
+      }
     });
   });
 });

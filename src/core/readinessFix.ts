@@ -19,18 +19,20 @@
  * the remote spells it (git-spice compares the spelling, D54).
  *
  * Layer: core (no VS Code imports; plan §4.1). Depends on: core/backend.ts (`NotReady`,
- * `Ready`), core/forge.ts (types), core/model.ts (`GitRunner`), core/shell.ts (a command quoted
- * inside a sentence), core/version.ts (`parseVersion` — from core/backends/gitspice.ts until
- * item 23a moved it; nothing here runs the backend), Node's `node:path`.
- * Depended on by: src/vscode/login.ts and src/extension.ts (item 19b),
- * test/unit/readinessFix.test.ts, test/git/trunkBranch.git.test.ts. Plan: §7.6, §7.13.1, §8
- * E21/E23/E25/E55/E59/E60/E62/E62b/E67/E70/E75, §10.1 items 19a and 23a, §13.2 D57/D65.
+ * `Ready`), core/forge.ts (types), core/ghstatus.ts (`GH_STACK_EXTENSION`, item 23b), core/model.ts
+ * (`GitRunner`), core/shell.ts (a command quoted inside a sentence), core/version.ts
+ * (`parseVersion` — from core/backends/gitspice.ts until item 23a moved it; nothing here runs the
+ * backend), Node's `node:path`. Depended on by: src/vscode/login.ts and src/extension.ts (item
+ * 19b), test/unit/readinessFix.test.ts, test/git/trunkBranch.git.test.ts. Plan: §7.5 (the gh login
+ * line), §7.6, §7.13.1, §8 E21/E23/E25/E55/E59/E60/E62/E62b/E67/E70/E75, §10.1 items 19a, 23a and
+ * 23b, §13.2 D57/D65/D66.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
 import * as path from 'node:path';
 import type { NotReady, Ready } from './backend';
 import type { Forge, ForgeConfig, ForgeKind, HostAddress } from './forge';
+import { GH_STACK_EXTENSION } from './ghstatus';
 import type { GitRunner } from './model';
 import { shellCommandLine } from './shell';
 import { parseVersion } from './version';
@@ -38,6 +40,9 @@ import { parseVersion } from './version';
 /** git-spice's install page — the offer when Homebrew is not there, or the git-spice found is not Homebrew's. */
 // see primer §4 (const)
 export const INSTALL_DOCS_URL = 'https://abhinav.github.io/git-spice/start/install/';
+
+/** gh's install page — the README's installation section, every package manager listed (cli.github.com is one download button). Item 23b. */
+export const GH_INSTALL_DOCS_URL = 'https://github.com/cli/cli#installation';
 
 /**
  * The environment variable git-spice reads as a login, for each forge v1 serves. While it is
@@ -47,6 +52,25 @@ export const INSTALL_DOCS_URL = 'https://abhinav.github.io/git-spice/start/insta
  */
 // see primer §43 (`Record<K, V>`: one value for each member of a union of keys)
 const TOKEN_VARIABLE: Record<'github' | 'gitlab', string> = { github: 'GITHUB_TOKEN', gitlab: 'GITLAB_TOKEN' };
+
+/**
+ * The environment variables gh reads as a login, by host class (`gh help environment`): the first
+ * pair for github.com, its subdomains and *.ghe.com, the second for GitHub Enterprise Server. While
+ * one of the pair for the host is set, gh refuses `auth login` outright ("The value of the GH_TOKEN
+ * environment variable is being used for authentication", exit 1 — measured 2.102.0), so the login
+ * offer unsets both for that one command, as the git-spice line unsets GITHUB_TOKEN. The other pair
+ * changes nothing for the host and is left alone, so the line the user watches stays short. Item 23b.
+ */
+// see primer §25 (a tuple type: an array of exactly these types in these positions) and §14 (readonly)
+const GITHUB_COM_TOKENS: readonly [string, string] = ['GH_TOKEN', 'GITHUB_TOKEN'];
+const ENTERPRISE_TOKENS: readonly [string, string] = ['GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'];
+
+/** Which pair `host` is in; the host compared lower-cased, as gh compares it. Exported for the test's table. */
+// see primer §23 (`endsWith`, `toLowerCase`)
+export function ghTokenVariables(host: string): readonly [string, string] {
+  const lower = host.toLowerCase();
+  return lower === 'github.com' || lower.endsWith('.github.com') || lower.endsWith('.ghe.com') ? GITHUB_COM_TOKENS : ENTERPRISE_TOKENS;
+}
 
 /** The name a sentence gives each forge kind. `unknown` never reaches a sentence that uses it; it is here because a Record must name every key. */
 const FORGE_NAMES: Record<ForgeKind, string> = {
@@ -100,6 +124,12 @@ export interface OfferFacts {
    * `git-spice`, so the name alone proves nothing.
    */
   readonly brewGitSpice: string | null;
+  /** `prCascade.ghPath` as read (item 23b): empty or blank means `gh` from VS Code's PATH (core/ghstatus.ts); set, the only executable tried. */
+  readonly ghPathSetting: string;
+  /** The `gh` beside `brewPath` — where Homebrew links the one it installed — or `null`; tells a Homebrew gh apart, as `brewGitSpice` does for git-spice. Item 23b. */
+  readonly brewGh: string | null;
+  /** `prCascade.gitProtocol` as read (item 23b) — what `gh auth login --git-protocol` is given. */
+  readonly gitProtocol: string;
 }
 
 /** One `git config <key> <value>`, written to the repository's own config file. */
@@ -135,12 +165,12 @@ export interface Offer {
 
 /**
  * The offer for a member that is not `ready` (plan §7.13.1, E55) — one test per variant in
- * test/unit/readinessFix.test.ts. Six members have a function of their own below; the four
- * that are a single sentence (no-remote, remote-unparseable, forge-unsupported, and
- * gh-not-logged-in until item 23b brings its line) are worded here. Taking `NotReady` rather
- * than `Readiness` means `ready` cannot be passed in, and the chain of `if`s is complete: after
- * the nine tests, the compiler has narrowed `readiness` to `gh-missing` (primer §59), so a
- * member added to the union later is a compile error on the last line until it gets a case.
+ * test/unit/readinessFix.test.ts. Seven members have a function of their own below; the three
+ * that are a single sentence (no-remote, remote-unparseable, forge-unsupported) are worded here.
+ * Taking `NotReady` rather than `Readiness` means `ready` cannot be passed in, and the chain of
+ * `if`s is complete: after the nine tests, the compiler has narrowed `readiness` to `gh-missing`
+ * (primer §59), so a member added to the union later is a compile error on the last line until
+ * it gets a case.
  */
 // see primer §59 (tagged unions: narrowing on `kind`) and §28 (`path.basename`)
 export function offerFor(readiness: NotReady, facts: OfferFacts): Offer {
@@ -178,14 +208,9 @@ export function offerFor(readiness: NotReady, facts: OfferFacts): Offer {
     return loginOffer(readiness.gsPath, readiness.forge);
   }
   if (readiness.kind === 'gh-not-logged-in') {
-    // E23. The words only, until item 23b wires the login line (it needs prCascade.gitProtocol).
-    // The host is lower-cased after --hostname because gh does not fold the flag's case (plan §13.4).
-    return textOnly('warning', `gh is not logged in to ${readiness.forge.host}. Run gh auth login --hostname ${readiness.forge.host.toLowerCase()} --web in a terminal.`);
+    return ghLoginOffer(readiness.ghPath, readiness.forge, facts);
   }
-  // E62b. 19a's information sentence, produced for real from this PR: no button and no command
-  // named until item 23b brings the install offers — one PR of interim, recorded in D65 rather
-  // than reworded twice.
-  return ghMissingOffer(readiness.forge.host, readiness.missing, readiness.ghVersion, readiness.ghMinimum);
+  return ghMissingOffer(readiness, facts);
 }
 
 /**
@@ -475,17 +500,108 @@ function loginOffer(gsPath: string, forge: Forge): Offer {
   };
 }
 
+/** The `gh-missing` member alone, for the three gh install offers. */
+// see primer §49 (`Extract`)
+type GhMissing = Extract<NotReady, { kind: 'gh-missing' }>;
+
 /**
- * E62b, produced for real since item 23a (the probe's step 5): what is missing for pull requests
- * on GitHub, with the version of a gh that is there but too old. Information — pushing and every
- * local operation still work — and no button until item 23b brings the three install offers
- * (D65 records the one PR of interim).
+ * E62b (item 23b): which of the three gh offers. gh itself not found (nothing answered `--version`
+ * as gh — `ghVersion` and `ghPath` are null together); gh found and fine but its extension not; gh
+ * found and too old (the extension may be missing too — `missing` says so — but gh comes first: a
+ * new gh is where `gh extension install` runs, and the probe lists the extension again afterwards).
+ * Every sentence a warning: there is something to do (D57). Item 19a's information sentence,
+ * produced by item 23a for one PR of interim, is gone (D65, D66).
  */
-// see primer §25 (arrays: `map`), §48 (the conditional expression) and §59 (`readonly ('gh' | 'gh-stack')[]`)
-function ghMissingOffer(host: string, missing: readonly ('gh' | 'gh-stack')[], ghVersion: string | null, ghMinimum: string): Offer {
-  const listed = missing.map((name) => (name === 'gh' && ghVersion !== null ? `gh (found ${ghVersion})` : name));
-  return textOnly(
-    'information',
-    `Pull requests on ${host} need gh ${ghMinimum} or newer and its gh-stack extension; missing: ${listed.join(', ')}. Pushing and the local git-spice operations still work.`,
-  );
+// see primer §54 (destructuring) and §59 (narrowing two nullable fields at once)
+function ghMissingOffer(member: GhMissing, facts: OfferFacts): Offer {
+  const { forge, missing, ghVersion, ghPath, ghMinimum } = member;
+  if (ghVersion === null || ghPath === null) {
+    return ghNotFoundOffer(forge.host, ghMinimum, facts);
+  }
+  if (!missing.includes('gh')) {
+    return ghStackOffer(ghPath, ghVersion, forge.host);
+  }
+  return ghTooOldOffer(ghPath, ghVersion, ghMinimum, facts);
+}
+
+/** gsMissingOffer's rules for gh: the setting, Homebrew's gh out of VS Code's PATH, Homebrew, the page. */
+function ghNotFoundOffer(host: string, minimum: string, facts: OfferFacts): Offer {
+  if (facts.ghPathSetting.trim() !== '') {
+    return textOnly('warning', `prCascade.ghPath is ${facts.ghPathSetting}, which did not answer as gh. Point it at gh, or clear it to try gh from VS Code's PATH.`);
+  }
+  if (facts.brewGh !== null) {
+    return textOnly('warning', `gh is installed at ${facts.brewGh}, but VS Code did not find it. Set prCascade.ghPath to ${facts.brewGh}.`);
+  }
+  const needed = `Pull requests on ${host} need gh ${minimum} or newer and its gh-stack extension, and gh was not found in VS Code's PATH.`;
+  const installed = 'or, if it is already installed, set prCascade.ghPath to its full path.';
+  if (facts.brewPath !== null) {
+    return {
+      severity: 'warning',
+      message: `${needed} Install it with Homebrew — ${installed}`,
+      fix: { button: 'Install with Homebrew', action: { kind: 'terminal', argv: [facts.brewPath, 'install', 'gh'] }, done: 'gh installed.' },
+    };
+  }
+  return {
+    severity: 'warning',
+    message: `${needed} Install it — ${installed}`,
+    fix: { button: 'Open install docs', action: { kind: 'open-url', url: GH_INSTALL_DOCS_URL }, done: 'gh installed.' },
+  };
+}
+
+/** gsTooOldOffer's rules for gh: `brew upgrade gh` only for Homebrew's gh with a readable version, else the page. */
+function ghTooOldOffer(ghPath: string, found: string, minimum: string, facts: OfferFacts): Offer {
+  const readable = parseVersion(found) !== null;
+  const where = ghPath.includes('/') ? ` at ${ghPath}` : '';
+  const message = readable
+    ? `gh ${found}${where} is older than ${minimum}, the oldest PR Cascade works with.`
+    : `gh${where} reports version "${found}", so whether it is at least ${minimum} could not be checked.`;
+  const fromHomebrew = facts.brewGh !== null && (ghPath === 'gh' || ghPath === facts.brewGh);
+  if (readable && facts.brewPath !== null && fromHomebrew) {
+    return {
+      severity: 'warning',
+      message,
+      fix: { button: 'Upgrade with Homebrew', action: { kind: 'terminal', argv: [facts.brewPath, 'upgrade', 'gh'] }, done: 'gh upgraded.' },
+    };
+  }
+  return {
+    severity: 'warning',
+    message,
+    fix: { button: 'Open install docs', action: { kind: 'open-url', url: GH_INSTALL_DOCS_URL }, done: 'gh upgraded.' },
+  };
+}
+
+/**
+ * E62b, the extension alone. A terminal, not a hidden run: it downloads a release over the network
+ * and prints progress (and a proxy's complaint). No login is needed (measured 2.102.0: the install
+ * succeeds with an empty gh config). `command` as the init line has it, so an alias named `gh`
+ * cannot take the line over.
+ */
+function ghStackOffer(ghPath: string, ghVersion: string, host: string): Offer {
+  return {
+    severity: 'warning',
+    message: `gh ${ghVersion} is installed, but its gh-stack extension is not; pull requests on ${host} need it. Install it?`,
+    fix: { button: 'Install gh-stack', action: { kind: 'terminal', argv: ['command', ghPath, 'extension', 'install', GH_STACK_EXTENSION] }, done: 'gh-stack installed.' },
+  };
+}
+
+/**
+ * E23 (item 23b). `--web` is the device flow — a code printed, the browser opened, no token
+ * anywhere (plan §7.5); `--hostname` always, lower-cased (gh does not fold the flag's case);
+ * `--git-protocol` from prCascade.gitProtocol (what gh itself will use for git on this host —
+ * nothing of PR Cascade's pushes); the host's token pair unset for this one command
+ * (ghTokenVariables says why). The done line names gh because "Logged in to <host>." is already
+ * git-spice's and a GitHub flow can show both.
+ */
+function ghLoginOffer(ghPath: string, forge: Forge, facts: OfferFacts): Offer {
+  const lower = forge.host.toLowerCase();
+  const tokens = ghTokenVariables(lower);
+  return {
+    severity: 'warning',
+    message: `gh is not logged in to ${forge.host}.`,
+    fix: {
+      button: 'Log in',
+      action: { kind: 'terminal', argv: ['env', '-u', tokens[0], '-u', tokens[1], ghPath, 'auth', 'login', '--hostname', lower, '--web', '--git-protocol', facts.gitProtocol] },
+      done: `gh is logged in to ${forge.host}.`,
+    },
+  };
 }

@@ -1138,6 +1138,15 @@ true for every element, or for at least one: `test/ext/login.test.ts` asks wheth
 call ran `auth login` (`every`) and whether one ran the program a setting named (`some`). An
 empty list is `every` true and `some` false.
 
+A **tuple type** is an array type that fixes how many elements there are and the type of each
+position: `[string, string]` is exactly two strings, `[string, number]` a string then a number —
+unlike `string[]`, which is any number of strings. Reading `pair[0]` gives the first position's type;
+`pair[2]` is a compile error, there is no third. `readonly [string, string]` (§14) is a pair that is
+never changed — `src/core/readinessFix.ts`'s `GITHUB_COM_TOKENS` and `ENTERPRISE_TOKENS` (M5 item
+23b) hold the two variable names gh reads for a host class, and `ghTokenVariables` returns one of
+the two pairs. §78 has met tuples already as the row type of an `it.each` table; these are the first
+written as an annotation on a constant in `src/`.
+
 ## 26. sort and comparison functions
 
 *First seen in `src/core/stack.ts`.*

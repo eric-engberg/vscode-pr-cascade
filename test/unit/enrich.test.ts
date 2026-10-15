@@ -72,7 +72,7 @@ const FAILED = 'gs log short --all --json failed: ';
 
 // What the setup flow is handed when it words the same step-1 failures (core/readinessFix.ts):
 // nothing set, no Homebrew — the plainest sentences.
-const FACTS: OfferFacts = { root: ROOT, remote: 'origin', trunkBranch: { kind: 'none' }, gsPathSetting: '', brewPath: null, brewGitSpice: null };
+const FACTS: OfferFacts = { root: ROOT, remote: 'origin', trunkBranch: { kind: 'none' }, gsPathSetting: '', brewPath: null, brewGitSpice: null, ghPathSetting: '', brewGh: null, gitProtocol: 'https' };
 
 /** One layer as computeStack builds it: no `tracking` key at all. */
 // see primer §3 (functions and type annotations) and §13 (default parameters)
