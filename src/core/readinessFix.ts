@@ -188,10 +188,16 @@ export function offerFor(readiness: NotReady, facts: OfferFacts): Offer {
   return ghMissingOffer(readiness.forge.host, readiness.missing, readiness.ghVersion, readiness.ghMinimum);
 }
 
-/** `git-spice 0.31.2 is ready for app (github.com).` — the answer when the user asked by hand and every step passed. */
-// see primer §12 (template strings)
+/**
+ * `git-spice 0.31.2 is ready for app (gitlab.com).` — or, on GitHub, `git-spice 0.31.2 and gh
+ * 2.102.0 are ready for app (github.com).`: the answer when the user asked by hand and every step
+ * passed, naming every tool it checked (item 23a: `ready.gh` is the gh step 5 found, `null` where
+ * there was no step).
+ */
+// see primer §12 (template strings) and §48 (the conditional expression)
 export function readyMessage(ready: Ready, root: string): string {
-  return `git-spice ${ready.gsVersion} is ready for ${path.basename(root)} (${ready.forge.host}).`;
+  const tools = ready.gh === null ? `git-spice ${ready.gsVersion} is` : `git-spice ${ready.gsVersion} and gh ${ready.gh.version} are`;
+  return `${tools} ready for ${path.basename(root)} (${ready.forge.host}).`;
 }
 
 /**

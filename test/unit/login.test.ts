@@ -35,7 +35,7 @@ const NO_CONFIG: ForgeConfig = { kind: null, rejectedKind: null, hosts: new Map(
 
 // The probe's answers the cases script.
 // see primer §59 (tagged unions: building a member) and §16 (object literals: spread)
-const READY: Ready = { kind: 'ready', gsPath: 'git-spice', gsVersion: '0.31.2', forge: GITHUB };
+const READY: Ready = { kind: 'ready', gsPath: 'git-spice', gsVersion: '0.31.2', forge: GITHUB, gh: { path: 'gh', version: '2.102.0' } };
 const NOT_LOGGED_IN: Readiness = { kind: 'not-logged-in', gsPath: 'git-spice', forge: GITHUB };
 const NOT_INITIALIZED: Readiness = { kind: 'not-initialized', gsPath: 'git-spice' };
 const GS_MISSING: Readiness = { kind: 'gs-missing', tried: ['git-spice', 'gs'] };

@@ -3,6 +3,9 @@
  * probe (plan §7.13.1): is git-spice installed and new enough, is this repository initialised
  * for it, which forge does the remote point at, and is the user logged in to it — answered as
  * one `Readiness` member, the first failing step winning, and remembered once it is `ready`.
+ * Item 23a adds the probe's step 5 on GitHub repositories: gh found and new enough, its gh-stack
+ * extension present, gh logged in to the host (core/ghstatus.ts asks; `ghStep` here attaches
+ * the forge).
  * Item 20a adds `enrich` — plan §7.8's local tier, `gs log short --all --json` behind the
  * §7.14.2 digest memo, self-gated on `refs/spice/data` — and `track`, which adopts the layers
  * git-spice does not know, bottom to top. Item 21a adds `push` — `gs stack submit --no-publish
@@ -12,24 +15,28 @@
  *
  * Layer: core (no VS Code imports; plan §4.1). Depends on: core/backend.ts (the contract and
  * the answers), core/command.ts (how programs are run), core/digest.ts (`readRefDigest`,
- * `isInitialised`), core/forge.ts (detectForge), core/gsLog.ts (`parseGsLog`), core/model.ts
- * (GitRunner, RepoState, StackLayer, Enrichment), core/readinessFix.ts (`TrunkBranch`, a type),
+ * `isInitialised`), core/forge.ts (detectForge, and `Forge` as a type), core/ghstatus.ts (step
+ * 5's three questions, item 23a), core/gsLog.ts (`parseGsLog`), core/model.ts (GitRunner,
+ * RepoState, StackLayer, Enrichment), core/readinessFix.ts (`TrunkBranch`, a type),
  * core/shell.ts (`shellCommandLine`, for the sentence that names a git command), core/version.ts
  * (the floor compare — its own module since item 23a, shared with the gh reader). Depended on by:
  * src/extension.ts (item 19b, which builds one per window and calls `forget` before the setup
  * command's look; the flow in src/vscode/login.ts sees only a probe function and the `Readiness`
  * types from core/backend.ts; item 20b calls `enrich` on every load and `track` from Track
- * Stack; item 21b calls `track` then `push` from Push Whole Stack). Plan: §4.4, §7.6, §7.7, §7.8,
- * §7.13, §7.13.1, §7.13.3, §7.14.2, §8 E17/E22/E55/E56/E57/E59/E60/E62/E67/E70/E75/E76/E83,
- * §13.1 (`gs` is Ghostscript on a Homebrew Mac), §13.2 D56/D59/D61/D63 (item 22a: the timeout is a
- * cancel), §13.4 (git-spice 0.31.2 facts, 2026-10-08 and 2026-10-09).
+ * Stack; item 21b calls `track` then `push` from Push Whole Stack). Plan: §4.4, §7.5, §7.6, §7.7,
+ * §7.8, §7.13, §7.13.1, §7.13.3, §7.14.2, §8 E17/E22/E23/E24/E55/E56/E57/E59/E60/E62/E62b/E67/E70/
+ * E75/E76/E83, §13.1 (`gs` is Ghostscript on a Homebrew Mac), §13.2 D56/D59/D61/D63 (item 22a: the
+ * timeout is a cancel)/D65 (item 23a: step 5), §13.4 (git-spice 0.31.2 facts, 2026-10-08 and
+ * 2026-10-09; gh 2.102.0 facts, 2026-10-14).
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
-import type { PushResult, Readiness, StackBackend, TrackResult } from '../backend';
+import type { GhFound, PushResult, Readiness, StackBackend, TrackResult } from '../backend';
 import type { CommandResult, CommandRunner } from '../command';
 import { isInitialised, readRefDigest } from '../digest';
 import { detectForge } from '../forge';
+import type { Forge } from '../forge';
+import { ghReadiness } from '../ghstatus';
 import type { GsLogEntry } from '../gsLog';
 import { parseGsLog } from '../gsLog';
 import type { Enrichment, EnrichmentCause, GitRunner, RepoState, StackLayer } from '../model';
@@ -177,16 +184,21 @@ interface RememberedLog {
 
 /**
  * The git-spice backend (plan §4.4, §7.13). One per window (item 19b builds it, and builds a
- * new one when `prCascade.gsPath` changes); it holds the git runner, the command runner and
- * the setting, plus two memos: the `ready` answers, and the last `gs log` answer per root.
+ * new one when `prCascade.gsPath` — or, from item 23b, `prCascade.ghPath` — changes); it holds
+ * the git runner, the command runner and the settings, plus two memos: the `ready` answers, and
+ * the last `gs log` answer per root.
  *
  * What the probe never does: run `gs log` (on an uninitialised repository it would try to
- * initialise it, plan §7.6 — see `enrich`), `gs repo init` or `gs auth login` (side effects,
- * prompts — those are item 19b's terminals), reach the network (`auth status` reads the
- * keychain), read `refs/spice/data`'s contents (only its existence, plan §3), or run `gh` (item
- * 23). The happy path is exactly five commands — two of git-spice, three of git — and the tests
- * pin that list. `enrich` keeps the same rules: it runs `gs log` only on an initialised
- * repository, and only when a ref it could read has moved.
+ * initialise it, plan §7.6 — see `enrich`), `gs repo init`, `gs auth login`, `gh auth login` or
+ * `gh extension install` (side effects, prompts — those are the setup flow's terminals), read
+ * `refs/spice/data`'s contents (only its existence, plan §3), or run `gh` anywhere but step 5 on
+ * a GitHub repository, where it asks three read-only questions (core/ghstatus.ts) after the
+ * git-spice login — the one step that reaches the network (`gh auth status` validates the token;
+ * `gs auth status` reads the keychain), which is why readiness is asked by the setup command and
+ * the gated actions only, never on a refresh. The happy path is exactly five commands on GitLab —
+ * two of git-spice, three of git — and eight on GitHub, the three of gh after them; the tests pin
+ * both lists. `enrich` keeps the same rules: it runs `gs log` only on an initialised repository,
+ * and only when a ref it could read has moved.
  */
 // see primer §13 (class: `implements`, `private`, a default parameter; a `readonly` field with a
 // literal keeps the exact type `'git-spice'`), §46 (a Map as a cache) and §47 (parameter properties)
@@ -224,15 +236,20 @@ export class GitSpiceBackend implements StackBackend {
      * than being quietly worked around.
      */
     private readonly gsPath: string = '',
+    /**
+     * `prCascade.ghPath` as read (item 23a; the setting is item 23b's): `''` — the default — or
+     * only whitespace runs `gh` from VS Code's PATH; anything else is the one executable tried,
+     * `gsPath`'s rule. Only GitHub repositories ever reach it (step 5, E24).
+     */
+    private readonly ghPath: string = '',
   ) {}
 
   /**
-   * Plan §7.13.1's steps 1–4 in order, first failure wins; step 5 (gh, for GitHub's native
-   * stack) is item 23's, so until then a logged-in GitHub repository is `ready`. Never throws
-   * for anything git-spice or the forge can be in — every such outcome is a Readiness member.
-   * It rejects only as every core function does: when git itself cannot run (E17), or when the
-   * root cannot be used as a directory — faults the caller already draws for the tree, with
-   * no one-click fix a member could carry.
+   * Plan §7.13.1's five steps in order, first failure wins (step 5, gh, on GitHub only — item
+   * 23a). Never throws for anything git-spice, gh or the forge can be in — every such outcome is
+   * a Readiness member. It rejects only as every core function does: when git itself cannot run
+   * (E17), or when the root cannot be used as a directory — faults the caller already draws for
+   * the tree, with no one-click fix a member could carry.
    */
   // see primer §6 (async / await) and §44 (`\0` in a string literal)
   async readiness(root: string, remote: string): Promise<Readiness> {
@@ -241,7 +258,7 @@ export class GitSpiceBackend implements StackBackend {
     if (remembered !== undefined) {
       return remembered;
     }
-    const answer = await probe(this.git, this.commands, this.gsPath, root, remote);
+    const answer = await probe(this.git, this.commands, this.gsPath, this.ghPath, root, remote);
     if (answer.kind === 'ready') {
       this.readyByRepo.set(key, answer);
     }
@@ -455,10 +472,10 @@ type NotLocated = Extract<Readiness, { kind: 'gs-missing' | 'gs-too-old' }>;
 /**
  * Step 1 of the probe: which executable is git-spice, and is it new enough. Every name asked
  * goes into `tried`, Ghostscript's `gs` included — it was tried, and did not answer as
- * git-spice. Its own function so that `probe` below reads as the four steps (and so that each
+ * git-spice. Its own function so that `probe` below reads as the five steps (and so that each
  * stays simple enough for a reader — and for SonarCloud's complexity rule, which asked for the
- * split); from item 20a `enrich` and `track` run it too, right before their first git-spice
- * command.
+ * split; `ghStep` is the same idea for step 5); from item 20a `enrich` and `track` run it too,
+ * right before their first git-spice command.
  */
 // see primer §48 (the conditional expression) and §22 (for ... of, and `break`)
 async function locateGitSpice(commands: CommandRunner, gsPath: string, root: string): Promise<LocatedGitSpice | NotLocated> {
@@ -492,11 +509,40 @@ async function locateGitSpice(commands: CommandRunner, gsPath: string, root: str
 }
 
 /**
+ * Step 5's answer: one of the two gh members, with the forge attached, or `passed` with what
+ * `ready.gh` records — `null` where there is no step: gh plays no part on GitLab (E24), so no gh
+ * is spawned there.
+ */
+// see primer §49 (`Extract`: the two members step 5 can answer) and §59 (a member of our own beside them)
+type GhStepAnswer = Extract<Readiness, { kind: 'gh-missing' | 'gh-not-logged-in' }> | { readonly kind: 'passed'; readonly gh: GhFound | null };
+
+/**
+ * Step 5 (item 23a), GitHub only: core/ghstatus.ts's three questions, read-only, after the
+ * git-spice login — so a logged-out git-spice never spawns gh. Its own function so that `probe`
+ * stays readable as its steps (and under SonarCloud's complexity rule, which asked for
+ * locateGitSpice's split); the fields are copied one by one rather than spread so a field added to
+ * either union is a compile error here, where the two are joined.
+ */
+async function ghStep(commands: CommandRunner, ghPath: string, root: string, forge: Forge): Promise<GhStepAnswer> {
+  if (forge.kind !== 'github') {
+    return { kind: 'passed', gh: null };
+  }
+  const gh = await ghReadiness(commands, ghPath, root, forge.host);
+  if (gh.kind === 'gh-ready') {
+    return { kind: 'passed', gh: { path: gh.ghPath, version: gh.ghVersion } };
+  }
+  if (gh.kind === 'gh-missing') {
+    return { kind: 'gh-missing', forge, missing: gh.missing, ghVersion: gh.ghVersion, ghMinimum: gh.ghMinimum, ghPath: gh.ghPath };
+  }
+  return { kind: 'gh-not-logged-in', forge, ghPath: gh.ghPath };
+}
+
+/**
  * One run of the probe, uncached. A function beside the class rather than a method, as
  * core/git.ts keeps its helpers: the class holds state, this holds the steps.
  */
 // see primer §59 (tagged unions: building members, and narrowing `forge.kind` with `!==`)
-async function probe(git: GitRunner, commands: CommandRunner, gsPath: string, root: string, remote: string): Promise<Readiness> {
+async function probe(git: GitRunner, commands: CommandRunner, gsPath: string, ghPath: string, root: string, remote: string): Promise<Readiness> {
   // Step 1: see locateGitSpice. Anything but `located` is already the answer.
   const located = await locateGitSpice(commands, gsPath, root);
   if (located.kind !== 'located') {
@@ -542,7 +588,15 @@ async function probe(git: GitRunner, commands: CommandRunner, gsPath: string, ro
   if (auth.exitCode !== 0) {
     return { kind: 'not-logged-in', gsPath: located.gsPath, forge };
   }
-  return { kind: 'ready', gsPath: located.gsPath, gsVersion: located.gsVersion, forge };
+
+  // Step 5 (item 23a): gh — on GitHub only, read-only, after the git-spice login: see ghStep.
+  // The one step that reaches the network (`gh auth status` validates the token), which is why
+  // readiness is asked by the setup command and the gated actions only, never on a refresh.
+  const gh = await ghStep(commands, ghPath, root, forge);
+  if (gh.kind !== 'passed') {
+    return gh;
+  }
+  return { kind: 'ready', gsPath: located.gsPath, gsVersion: located.gsVersion, forge, gh: gh.gh };
 }
 
 /**

@@ -2387,7 +2387,9 @@ one that takes `Ready` has every field of the ready member with no narrowing to 
 shape may itself hold a union: `Extract<Readiness, { kind: 'gs-missing' | 'gs-too-old' }>`
 (`NotLocated` in `src/core/backends/gitspice.ts`, M5 item 20a) keeps both members whose `kind`
 fits — the two answers step 1 of the probe can give — so a function taking one has no case to
-write for the eight others.
+write for the eight others. `GhStepAnswer` in the same file (M5 item 23a) is one more `Extract`
+over `Readiness` — the two members step 5 can answer — with a member of the function's own
+(`passed`) joined to it by `|`, as `locateGitSpice`'s `located` is joined to `NotLocated`.
 
 ## 50. `JSON.stringify` and `JSON.parse`
 

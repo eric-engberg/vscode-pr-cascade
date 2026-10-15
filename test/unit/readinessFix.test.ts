@@ -647,15 +647,26 @@ describe('offerFor', () => {
 });
 
 describe('readyMessage', () => {
-  it('names the version, the repository and the host', () => {
-    // arrange
-    const ready: Ready = { kind: 'ready', gsPath: 'git-spice', gsVersion: '0.31.2', forge: GITHUB };
+  it('names the version, the repository and the host — for a repository where gh plays no part', () => {
+    // arrange: a GitLab host, say — step 5 asked nothing, so there is no gh to name
+    const ready: Ready = { kind: 'ready', gsPath: 'git-spice', gsVersion: '0.31.2', forge: GITHUB, gh: null };
 
     // act
     const message = readyMessage(ready, ROOT);
 
     // assert
     expect(message).toBe('git-spice 0.31.2 is ready for app (github.com).');
+  });
+
+  it('names both tools on GitHub — the gh the probe found, with its version (item 23a)', () => {
+    // arrange
+    const ready: Ready = { kind: 'ready', gsPath: 'git-spice', gsVersion: '0.31.2', forge: GITHUB, gh: { path: 'gh', version: '2.102.0' } };
+
+    // act
+    const message = readyMessage(ready, ROOT);
+
+    // assert
+    expect(message).toBe('git-spice 0.31.2 and gh 2.102.0 are ready for app (github.com).');
   });
 });
 

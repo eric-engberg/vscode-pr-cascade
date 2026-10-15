@@ -1,5 +1,5 @@
 /**
- * core/command.ts — runs a program other than git — git-spice now, gh from item 23 — and
+ * core/command.ts — runs a program other than git — git-spice and, since item 23a, gh — and
  * answers with what happened, whatever happened: the exit code, both output streams, or why
  * the program never started. Never a rejection, because for the callers here an exit code is
  * an answer, not a failure: `gs auth status` exiting 1 means "not logged in", and a missing
@@ -9,8 +9,8 @@
  * core/git.ts for the three things both runners need the same way — the output ceiling, the
  * working-directory check and the ENOENT/EACCES classification. Depended on by:
  * core/backends/gitspice.ts (the readiness probe, item 18; `enrich` and `track`, item 20a;
- * `push`, item 21a) and, from item 23, the gh probe; test/helpers/fakeCommand.ts implements the
- * interface for tests. Plan: §4.2, §7.13 (every gs call: `--no-prompt`, env, cwd), §7.13.1, §11.3
+ * `push`, item 21a) and core/ghstatus.ts (the probe's gh step, item 23a); test/helpers/fakeCommand.ts
+ * implements the interface for tests. Plan: §4.2, §7.13 (every gs call: `--no-prompt`, env, cwd), §7.13.1, §11.3
  * (the `execa` question: this file is the "execFile wrapper" it was measured against in item 21a
  * and kept — D61), §13.2 D56, D61, D63 (item 22a: the process-group kill).
  */

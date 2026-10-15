@@ -37,15 +37,27 @@ import type { TrunkBranch } from './readinessFix';
  * case; the offer names the kind's own key) — in that order, so an Azure or Bitbucket host is
  * reported as unsupported, never as "set `spice.forge.*`".
  */
+/**
+ * The gh step 5 found on a GitHub repository (item 23a): the executable that answered `--version`
+ * as gh — `gh`, or `prCascade.ghPath` — and its version token. Read by `readyMessage` now and by
+ * M7's `gh stack link` (core/nativeStack.ts) later; `null` on `ready` where gh plays no part (GitLab).
+ */
+// see primer §9 (interface) and §14 (readonly)
+export interface GhFound {
+  readonly path: string;
+  readonly version: string;
+}
+
 // see primer §59 (tagged unions, incl. `readonly ('gh' | 'gh-stack')[]`: an array of a union) and §14 (readonly)
 export type Readiness =
   /**
    * Every step passed. `gsPath` is the executable that answered — `git-spice`, the program's
    * name since v0.24, or `gs`, the old name a `go install` build still has (and Ghostscript's on
    * a Homebrew Mac, plan §13.1) — and later commands run whichever worked. `gsVersion` is the version token of `gs --version`'s banner (`git-spice 0.31.2 …`), for
-   * the log.
+   * the log. `gh` is step 5's answer on GitHub — the gh that answered and its version — and
+   * `null` on GitLab, where gh plays no part (E24; item 23a).
    */
-  | { readonly kind: 'ready'; readonly gsPath: string; readonly gsVersion: string; readonly forge: Forge }
+  | { readonly kind: 'ready'; readonly gsPath: string; readonly gsVersion: string; readonly forge: Forge; readonly gh: GhFound | null }
   /** Step 1, E62: none of the executables answered `--version` as git-spice — `prCascade.gsPath` when set, else `git-spice` then `gs`. `tried` lists them for the message, Ghostscript's `gs` included. */
   | { readonly kind: 'gs-missing'; readonly tried: readonly string[] }
   /** Step 1: the `--version` banner's token `found` (`0.30.0`; `dev` for a build with no number) is below — or cannot be read against — the floor `minimum` the message quotes. */
