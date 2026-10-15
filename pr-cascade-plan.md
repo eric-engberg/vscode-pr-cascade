@@ -2950,7 +2950,9 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
   measured here with `CI=true` alone — `GITHUB_ACTIONS=true` alone still prints the hint), and under `GITHUB_ACTIONS=true`
   it words exit 4 as a workflow hint (`gh: To use GitHub CLI in a GitHub Actions workflow, set the GH_TOKEN environment
   variable. Example: …`; `…in automation…` under `CI` alone). The file deletes both now (a ninth commit) and pins a
-  developer's gh. For Ric: a `CI=true` in VS Code's own environment would make the probe's `gh stack --version` install
+  developer's gh. CI's second run (2026-10-15), with the fix: green on both runners — the job 1 min 17 s on
+  Ubuntu, 2 min 3 s on macOS (`npm test` included; gh 2.102.0 on both images).
+  For Ric: a `CI=true` in VS Code's own environment would make the probe's `gh stack --version` install
   the extension — a network download from a step meant to be read-only; `GH_ENV` does not clear it (it would have to
   set `CI=`, and whether gh reads an empty value as unset is unmeasured). Nine commits, each green — the seventh the
   review's fixes, the ninth the CI fix: a four-lens panel with sceptics over a scratch copy found 37 things, 24 of
