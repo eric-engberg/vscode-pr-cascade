@@ -24,7 +24,7 @@
  * item 23a moved it; nothing here runs the backend), Node's `node:path`.
  * Depended on by: src/vscode/login.ts and src/extension.ts (item 19b),
  * test/unit/readinessFix.test.ts, test/git/trunkBranch.git.test.ts. Plan: §7.6, §7.13.1, §8
- * E21/E25/E55/E59/E60/E62/E62b/E67/E70/E75, §10.1 item 19a, §13.2 D57.
+ * E21/E23/E25/E55/E59/E60/E62/E62b/E67/E70/E75, §10.1 items 19a and 23a, §13.2 D57/D65.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -135,12 +135,12 @@ export interface Offer {
 
 /**
  * The offer for a member that is not `ready` (plan §7.13.1, E55) — one test per variant in
- * test/unit/readinessFix.test.ts. Six members have a function of their own below; the three
- * that are a single sentence (no-remote, remote-unparseable, forge-unsupported) are worded here.
- * Taking `NotReady` rather than `Readiness` means `ready` cannot be passed in, and the chain of
- * `if`s is complete: after the eight tests, the compiler has narrowed `readiness` to
- * `gh-missing` (primer §59), so a member added to the union later is a compile error on the
- * last line until it gets a case.
+ * test/unit/readinessFix.test.ts. Six members have a function of their own below; the four
+ * that are a single sentence (no-remote, remote-unparseable, forge-unsupported, and
+ * gh-not-logged-in until item 23b brings its line) are worded here. Taking `NotReady` rather
+ * than `Readiness` means `ready` cannot be passed in, and the chain of `if`s is complete: after
+ * the nine tests, the compiler has narrowed `readiness` to `gh-missing` (primer §59), so a
+ * member added to the union later is a compile error on the last line until it gets a case.
  */
 // see primer §59 (tagged unions: narrowing on `kind`) and §28 (`path.basename`)
 export function offerFor(readiness: NotReady, facts: OfferFacts): Offer {
@@ -177,6 +177,14 @@ export function offerFor(readiness: NotReady, facts: OfferFacts): Offer {
   if (readiness.kind === 'not-logged-in') {
     return loginOffer(readiness.gsPath, readiness.forge);
   }
+  if (readiness.kind === 'gh-not-logged-in') {
+    // E23. The words only, until item 23b wires the login line (it needs prCascade.gitProtocol).
+    // The host is lower-cased after --hostname because gh does not fold the flag's case (plan §13.4).
+    return textOnly('warning', `gh is not logged in to ${readiness.forge.host}. Run gh auth login --hostname ${readiness.forge.host.toLowerCase()} --web in a terminal.`);
+  }
+  // E62b. 19a's information sentence, produced for real from this PR: no button and no command
+  // named until item 23b brings the install offers — one PR of interim, recorded in D65 rather
+  // than reworded twice.
   return ghMissingOffer(readiness.forge.host, readiness.missing, readiness.ghVersion, readiness.ghMinimum);
 }
 

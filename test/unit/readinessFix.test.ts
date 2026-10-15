@@ -601,10 +601,10 @@ describe('offerFor', () => {
     });
   });
 
-  describe('gh-missing (E62b — drawn now, produced from item 23)', () => {
+  describe('gh-missing (E62b — the words of 19a, produced since item 23a)', () => {
     it('lists both when gh is not there at all', () => {
-      // act
-      const offer = offerFor({ kind: 'gh-missing', forge: GITHUB, missing: ['gh', 'gh-stack'], ghVersion: null, ghMinimum: '2.90.0' }, FACTS);
+      // act: nothing answered `gh --version` as gh, so there is no path to name either
+      const offer = offerFor({ kind: 'gh-missing', forge: GITHUB, missing: ['gh', 'gh-stack'], ghVersion: null, ghMinimum: '2.90.0', ghPath: null }, FACTS);
 
       // assert
       expect(offer).toStrictEqual({
@@ -616,7 +616,7 @@ describe('offerFor', () => {
 
     it('quotes the version of a gh that is too old', () => {
       // act
-      const offer = offerFor({ kind: 'gh-missing', forge: GITHUB, missing: ['gh'], ghVersion: '2.40.1', ghMinimum: '2.90.0' }, FACTS);
+      const offer = offerFor({ kind: 'gh-missing', forge: GITHUB, missing: ['gh'], ghVersion: '2.40.1', ghMinimum: '2.90.0', ghPath: 'gh' }, FACTS);
 
       // assert
       expect(offer.message).toBe('Pull requests on github.com need gh 2.90.0 or newer and its gh-stack extension; missing: gh (found 2.40.1). Pushing and the local git-spice operations still work.');
@@ -624,10 +624,24 @@ describe('offerFor', () => {
 
     it('lists only the extension when gh itself is fine', () => {
       // act
-      const offer = offerFor({ kind: 'gh-missing', forge: GITHUB, missing: ['gh-stack'], ghVersion: '2.91.0', ghMinimum: '2.90.0' }, FACTS);
+      const offer = offerFor({ kind: 'gh-missing', forge: GITHUB, missing: ['gh-stack'], ghVersion: '2.91.0', ghMinimum: '2.90.0', ghPath: 'gh' }, FACTS);
 
       // assert
       expect(offer.message).toBe('Pull requests on github.com need gh 2.90.0 or newer and its gh-stack extension; missing: gh-stack. Pushing and the local git-spice operations still work.');
+    });
+  });
+
+  describe('gh-not-logged-in (E23 — the words now, the button in item 23b)', () => {
+    it('names the host and the command to run, with no button — a warning, since there is something to do', () => {
+      // act
+      const offer = offerFor({ kind: 'gh-not-logged-in', forge: GITHUB, ghPath: 'gh' }, FACTS);
+
+      // assert: the host lower-cased after --hostname, as gh wants it (it does not fold the case itself)
+      expect(offer).toStrictEqual({
+        severity: 'warning',
+        message: 'gh is not logged in to github.com. Run gh auth login --hostname github.com --web in a terminal.',
+        fix: null,
+      });
     });
   });
 });

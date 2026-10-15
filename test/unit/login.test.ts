@@ -40,7 +40,8 @@ const NOT_LOGGED_IN: Readiness = { kind: 'not-logged-in', gsPath: 'git-spice', f
 const NOT_INITIALIZED: Readiness = { kind: 'not-initialized', gsPath: 'git-spice' };
 const GS_MISSING: Readiness = { kind: 'gs-missing', tried: ['git-spice', 'gs'] };
 const TOO_OLD: Readiness = { kind: 'gs-too-old', gsPath: 'git-spice', found: '0.30.0', minimum: '0.31.0' };
-const GH_MISSING: Readiness = { kind: 'gh-missing', forge: GITHUB, missing: ['gh-stack'], ghVersion: '2.91.0', ghMinimum: '2.90.0' };
+const GH_MISSING: Readiness = { kind: 'gh-missing', forge: GITHUB, missing: ['gh-stack'], ghVersion: '2.91.0', ghMinimum: '2.90.0', ghPath: 'gh' };
+const GH_NOT_LOGGED_IN: Readiness = { kind: 'gh-not-logged-in', forge: GITHUB, ghPath: 'gh' };
 const UNPARSEABLE: Readiness = { kind: 'remote-unparseable', remote: 'origin', url: '/srv/git/repo.git' };
 // A Mac whose Homebrew has git-spice.
 const HOMEBREW = { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: '/opt/homebrew/bin/git-spice' };
@@ -505,7 +506,7 @@ describe('ReadinessFlows.ensureReady', () => {
       expect(h.host.asked[1].message).toBe('git-spice initialised in repo.');
     });
 
-    it('counts a login as done when the probe gets to gh (item 23\'s step)', async () => {
+    it('counts a git-spice login as done when the probe reaches gh\'s step', async () => {
       // arrange
       const probe = scripted([NOT_LOGGED_IN, NOT_LOGGED_IN, GH_MISSING]);
       const h = harness({ answers: ['Log in'] });
@@ -520,6 +521,24 @@ describe('ReadinessFlows.ensureReady', () => {
         LOGIN_OFFER.message,
         LOGGED_IN.message,
         'Pull requests on github.com need gh 2.90.0 or newer and its gh-stack extension; missing: gh-stack. Pushing and the local git-spice operations still work.',
+      ]);
+    });
+
+    it('counts a git-spice login as done when the probe reaches gh\'s login step (item 23a)', async () => {
+      // arrange: gh is installed with its extension, and not logged in — the member after gh-missing
+      const probe = scripted([NOT_LOGGED_IN, NOT_LOGGED_IN, GH_NOT_LOGGED_IN]);
+      const h = harness({ answers: ['Log in'] });
+
+      // act
+      const flow = watch(h.flows.ensureReady(requestFor(probe, [])));
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      // assert: further than the git-spice login — the wait passed — and the interim sentence has no button
+      expect(flow.outcome).toBe('not-ready');
+      expect(h.host.asked.map((asked) => asked.message)).toStrictEqual([
+        LOGIN_OFFER.message,
+        LOGGED_IN.message,
+        'gh is not logged in to github.com. Run gh auth login --hostname github.com --web in a terminal.',
       ]);
     });
 

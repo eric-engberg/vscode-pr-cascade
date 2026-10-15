@@ -3883,3 +3883,42 @@ and after". A write that lands just after the snapshot must not pass as "nothing
 the time exactly as APFS and ext4 store it — and a file replaced by `rename` keeps its path and
 may keep its size, but never its inode. Beside the snapshot the tests read the ref digest
 (core/digest.ts) too: two instruments, so a quiet write would have to fool both.
+
+## 80. `Readiness['kind']`: the type of one field, read off a type
+
+*First seen in `src/vscode/login.ts` (`PROGRESS`, M5 item 23a).*
+
+```ts
+const PROGRESS: Record<Readiness['kind'], number> = {
+  'gs-missing': 0,
+  'gs-too-old': 1,
+  …
+  'gh-not-logged-in': 6,
+  ready: 7,
+};
+
+function progressOf(answer: Readiness): number {
+  return PROGRESS[answer.kind];
+}
+```
+
+Square brackets after a *type* name, with a field's name as a string type inside, are the type
+that field has in that type: `Readiness['kind']` is "whatever `kind` holds in a `Readiness`". It is
+an **indexed access type** — to types what `object['field']` is to values — and, like every type,
+it produces nothing at run time. On a union such as `Readiness` (§59) it is the union of what each
+member holds in that field, so `Readiness['kind']` is the eleven exact strings `'ready' |
+'gs-missing' | … | 'gh-not-logged-in'` (§10) without anyone writing them out. The field name must
+be one every member has: `Readiness['ghPath']` is a compile error, because `ready` has no such
+field. Contrast `Extract` (§49), which picks *members* of a union by shape; this picks a *field*
+across all of them.
+
+Why it is here: `Record<Readiness['kind'], number>` (§43) demands exactly one number per member —
+add a member to `Readiness` and `PROGRESS` fails to compile until it has a line, which is the whole
+point of writing the table this way. The `if` chain it replaced ended in `return 3` for "every
+other member", and item 23a's `gh-not-logged-in` would have taken the forge step's number in
+silence: a git-spice login's wait, which passes only when the probe gets *further* than 4, could
+never have passed into a member counted as 3. The read, `PROGRESS[answer.kind]`, is a plain lookup
+the compiler knows cannot miss (§43's rule for a `Record` over exact strings). §43's `keyof
+DiscoveryOptions` is the other direction of the same idea — the names of a type's fields rather
+than the type of one field — and the two are often met together as `T[keyof T]`, "the type of any
+field of `T`", which this codebase has not needed yet.
