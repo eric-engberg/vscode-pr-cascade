@@ -32,6 +32,7 @@ const TRUNK_DATE = 1760000900;
 // behind it — the fork points of stale stacks (a parent that is not itself a DAG line, F1).
 const SHA_T = '0000000000000000000000000000000000000000';
 const SHA_OLD = '9999999999999999999999999999999999999999';
+const SHA_OLDER = '8888888888888888888888888888888888888888';
 const SHA_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const SHA_B = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const SHA_C = 'cccccccccccccccccccccccccccccccccccccccc';
@@ -43,6 +44,21 @@ const SHA_2 = '2222222222222222222222222222222222222222';
 const SHA_3 = '3333333333333333333333333333333333333333';
 // The amended middle layer of one case: a second commit standing where `add-retries` stood.
 const SHA_S2 = 'e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2';
+// The deep-nesting case: the stacks b1–b4, c1–c2 and d1.
+const SHA_B1 = 'b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1';
+const SHA_B2 = 'b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2';
+const SHA_B3 = 'b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3';
+const SHA_B4 = 'b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4';
+const SHA_C1 = 'c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1';
+const SHA_C2 = 'c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2';
+const SHA_D1 = 'd1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1';
+// An orphan branch's three commits — the oldest has no parent at all.
+const SHA_P1 = 'f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1';
+const SHA_P2 = 'f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2';
+const SHA_P3 = 'f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3';
+// The view-lab rail (pane B): part1–part4 and chore on digits, the 1610 stack on letters.
+const SHA_4 = '4444444444444444444444444444444444444444';
+const SHA_6 = '6666666666666666666666666666666666666666';
 
 // What `rev-list -1 --no-commit-header --format='%H %ct'` prints for trunk: its tip and the date.
 // see primer §12 (template strings)
@@ -272,6 +288,12 @@ interface LayoutCase {
 // The rows that read the same in every shape.
 const TRUNK_HOLLOW: RowSkeleton = { kind: 'trunk', name: TRUNK, lane: 0, node: 'hollow' };
 const TRUNK_FILLED: RowSkeleton = { kind: 'trunk', name: TRUNK, lane: 0, node: 'filled' };
+const ELIDED: RowSkeleton = { kind: 'elided', lane: 0 };
+
+/** The working-tree row: dashed, on `lane`, its changes sitting on the branch `parent`. */
+function workingTree(parent: string, lane: number): RowSkeleton {
+  return { kind: 'workingTree', parent, lane, node: 'dashed' };
+}
 
 // The three Appendix A layers as rows, with HEAD on the top one: the shape every other case varies.
 const APPENDIX_A_ROWS: RowSkeleton[] = [
@@ -289,6 +311,57 @@ function allHollow(rows: RowSkeleton[]): RowSkeleton[] {
 // L3's texts: `side-fix` one commit on top of the middle layer, beside `retry-metrics`.
 const SIDE_FIX_REFS = refs(['add-retries', SHA_B], ['api-refactor', SHA_A], ['main', SHA_T], ['retry-metrics', SHA_C], ['side-fix', SHA_E]);
 const SIDE_FIX_DAG = dag([SHA_E, SHA_B]) + APPENDIX_A_DAG;
+
+// The view-lab rail, docs/view-lab.html pane B, as the two commands would print it: part1 on an
+// old trunk commit (squash-merged — "#480 merged" — so behind), the five-layer 1610 stack on part1,
+// part2–part4 on part1 too, fix on trunk's tip, chore on the old commit. for-each-ref's order:
+// `chore/…` < `feat/…` < `fix/…` < `main`.
+const PANE_B_REFS = refs(
+  ['chore/FWRK-1011-update-kbs-settings', SHA_6],
+  ['feat/FWRK-1434-part1', SHA_1],
+  ['feat/FWRK-1434-part2', SHA_2],
+  ['feat/FWRK-1434-part3', SHA_3],
+  ['feat/FWRK-1434-part4', SHA_4],
+  ['feat/FWRK-1610-a-collector-core', SHA_A],
+  ['feat/FWRK-1610-b-collector-auth', SHA_B],
+  ['feat/FWRK-1610-c-collector-tests', SHA_C],
+  ['feat/FWRK-1610-d-collector-api', SHA_D],
+  ['feat/FWRK-1610-e-collector-ui', SHA_E],
+  ['fix/FWRK-1500-retry-timeout', SHA_F],
+  ['main', SHA_T],
+);
+const PANE_B_DAG = dag(
+  [SHA_E, SHA_D], [SHA_D, SHA_C], [SHA_C, SHA_B], [SHA_B, SHA_A], [SHA_A, SHA_1],
+  [SHA_4, SHA_3], [SHA_3, SHA_2], [SHA_2, SHA_1], [SHA_1, SHA_OLD],
+  [SHA_F, SHA_T], [SHA_6, SHA_OLD],
+);
+// Rows 1–12 and 14 are the thirteen rows of the mockup in its order; the view-lab draws the elided
+// history inside main's own cell, E78 makes it a row, so 13 becomes 14.
+const PANE_B_ROWS: RowSkeleton[] = [
+  { kind: 'layer', name: 'feat/FWRK-1610-e-collector-ui', lane: 0, node: 'hollow', parent: 'feat/FWRK-1610-d-collector-api', depth: 6 },
+  { kind: 'layer', name: 'feat/FWRK-1610-d-collector-api', lane: 0, node: 'hollow', parent: 'feat/FWRK-1610-c-collector-tests', depth: 5 },
+  { kind: 'layer', name: 'feat/FWRK-1610-c-collector-tests', lane: 0, node: 'hollow', parent: 'feat/FWRK-1610-b-collector-auth', depth: 4 },
+  { kind: 'layer', name: 'feat/FWRK-1610-b-collector-auth', lane: 0, node: 'hollow', parent: 'feat/FWRK-1610-a-collector-core', depth: 3 },
+  { kind: 'layer', name: 'feat/FWRK-1610-a-collector-core', lane: 0, node: 'hollow', parent: 'feat/FWRK-1434-part1', depth: 2 },
+  { kind: 'layer', name: 'feat/FWRK-1434-part4', lane: 1, node: 'hollow', parent: 'feat/FWRK-1434-part3', depth: 4 },
+  workingTree('feat/FWRK-1434-part3', 1),
+  { kind: 'layer', name: 'feat/FWRK-1434-part3', lane: 1, node: 'filled', parent: 'feat/FWRK-1434-part2', depth: 3 },
+  { kind: 'layer', name: 'feat/FWRK-1434-part2', lane: 1, node: 'hollow', joinsLane: 0, parent: 'feat/FWRK-1434-part1', depth: 2 },
+  { kind: 'layer', name: 'feat/FWRK-1434-part1', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+  { kind: 'layer', name: 'fix/FWRK-1500-retry-timeout', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 },
+  { kind: 'layer', name: 'chore/FWRK-1011-update-kbs-settings', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 },
+  ELIDED,
+  TRUNK_HOLLOW,
+];
+
+// L8's texts: a two-row stack behind trunk's tip, a one-row branch on it.
+const STALE_REFS = refs(['fresh', SHA_A], ['main', SHA_T], ['stale', SHA_B], ['stale-up', SHA_C]);
+const STALE_DAG = dag([SHA_C, SHA_B], [SHA_B, SHA_OLD], [SHA_A, SHA_T]);
+const STALE_ROWS: RowSkeleton[] = [
+  { kind: 'layer', name: 'stale-up', lane: 0, node: 'hollow', parent: 'stale', depth: 2 },
+  { kind: 'layer', name: 'stale', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+  { kind: 'layer', name: 'fresh', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 },
+];
 
 const E78_CASES: LayoutCase[] = [
   {
@@ -467,6 +540,215 @@ const E78_CASES: LayoutCase[] = [
     ],
     lanes: 2,
   },
+  {
+    title: 'deep nesting: a seven-row stale stack keeps lane 0 and the one-row root on the tip hangs beside it; its own sides open lanes 1 and 2; lanes = 3',
+    refs: refs(['a', SHA_A], ['b1', SHA_B1], ['b2', SHA_B2], ['b3', SHA_B3], ['b4', SHA_B4], ['c1', SHA_C1], ['c2', SHA_C2], ['d1', SHA_D1], ['main', SHA_T]),
+    dag: dag([SHA_B4, SHA_B3], [SHA_B3, SHA_B2], [SHA_B2, SHA_B1], [SHA_D1, SHA_C1], [SHA_C2, SHA_C1], [SHA_C1, SHA_B1], [SHA_B1, SHA_OLD], [SHA_A, SHA_T]),
+    head: 'd1',
+    dirty: false,
+    // b1's subtree has seven rows, `a` one: size decides, not the fork. b1's children b2 and c1 tie
+    // at three → b2 continues; c1's children tie at one → c2 continues.
+    rows: [
+      { kind: 'layer', name: 'b4', lane: 0, node: 'hollow', parent: 'b3', depth: 4 },
+      { kind: 'layer', name: 'b3', lane: 0, node: 'hollow', parent: 'b2', depth: 3 },
+      { kind: 'layer', name: 'b2', lane: 0, node: 'hollow', parent: 'b1', depth: 2 },
+      { kind: 'layer', name: 'c2', lane: 1, node: 'hollow', parent: 'c1', depth: 3 },
+      { kind: 'layer', name: 'd1', lane: 2, node: 'filled', joinsLane: 1, parent: 'c1', depth: 3 },
+      { kind: 'layer', name: 'c1', lane: 1, node: 'hollow', joinsLane: 0, parent: 'b1', depth: 2 },
+      { kind: 'layer', name: 'b1', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+      { kind: 'layer', name: 'a', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 1 },
+      ELIDED,
+      TRUNK_HOLLOW,
+    ],
+    lanes: 3,
+  },
+  {
+    title: 'a stale two-row stack is the bigger, so it stays on lane 0 — lane 0 does not move when a fetch leaves it behind — and the one-row root on the tip hangs beside it above the elided row',
+    refs: STALE_REFS,
+    dag: STALE_DAG,
+    head: null,
+    dirty: false,
+    rows: [...STALE_ROWS, ELIDED, TRUNK_HOLLOW],
+    lanes: 2,
+  },
+  {
+    title: 'every root behind, at two different fork points → still one elided row; the size tie goes to the smaller name',
+    refs: refs(['main', SHA_T], ['stale-a', SHA_A], ['stale-b', SHA_B]),
+    dag: dag([SHA_B, SHA_OLDER], [SHA_A, SHA_OLD]),
+    head: 'stale-b',
+    dirty: false,
+    rows: [
+      { kind: 'layer', name: 'stale-a', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+      { kind: 'layer', name: 'stale-b', lane: 1, node: 'filled', joinsLane: 0, parent: TRUNK, depth: 1 },
+      ELIDED,
+      TRUNK_HOLLOW,
+    ],
+    lanes: 2,
+  },
+  {
+    title: 'detached HEAD (E3): every layer drawn, nothing filled, and no working-tree row even when dirty',
+    refs: APPENDIX_A_REFS,
+    dag: APPENDIX_A_DAG,
+    head: null,
+    dirty: true,
+    rows: [...allHollow(APPENDIX_A_ROWS), TRUNK_HOLLOW],
+    lanes: 1,
+  },
+  {
+    title: 'HEAD on a merged branch behind the tip (F5), dirty: the trunk row is filled — HEAD is on a branch trunk contains — and the dashed row sits above it naming that branch',
+    refs: refs(['add-retries', SHA_B], ['api-refactor', SHA_A], ['main', SHA_T], ['merged-already', SHA_OLD], ['retry-metrics', SHA_C]),
+    dag: APPENDIX_A_DAG,
+    head: 'merged-already',
+    dirty: true,
+    // No row named merged-already; no elided row — the stack's fork is the tip.
+    rows: [...allHollow(APPENDIX_A_ROWS), workingTree('merged-already', 0), TRUNK_FILLED],
+    lanes: 1,
+  },
+  {
+    title: "dirty tree → a dashed working-tree row directly above the checked-out layer, below that layer's children",
+    refs: SIDE_FIX_REFS,
+    dag: SIDE_FIX_DAG,
+    head: 'add-retries',
+    dirty: true,
+    rows: [
+      { kind: 'layer', name: 'retry-metrics', lane: 0, node: 'hollow', parent: 'add-retries', depth: 3 },
+      { kind: 'layer', name: 'side-fix', lane: 1, node: 'hollow', joinsLane: 0, parent: 'add-retries', depth: 3 },
+      workingTree('add-retries', 0),
+      { kind: 'layer', name: 'add-retries', lane: 0, node: 'filled', parent: 'api-refactor', depth: 2 },
+      { kind: 'layer', name: 'api-refactor', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+      TRUNK_HOLLOW,
+    ],
+    lanes: 2,
+  },
+  {
+    title: 'dirty on trunk with a stale root: the elided row, then the working tree naming main, then the filled trunk row',
+    refs: STALE_REFS,
+    dag: STALE_DAG,
+    head: 'main',
+    dirty: true,
+    // The working tree sits on trunk's tip, so the elided history is above it.
+    rows: [...STALE_ROWS, ELIDED, workingTree('main', 0), TRUNK_FILLED],
+    lanes: 2,
+  },
+  {
+    title: "a merge from trunk's tip (F4): the merge commit counts one, the trunk side none — depth 2 — and the merged tip is a fork, so the root is on the tip and nothing is elided",
+    refs: refs(['main', SHA_T], ['other-work', SHA_F]),
+    dag: dag([SHA_F, SHA_D, SHA_T], [SHA_D, SHA_OLD]),
+    head: 'other-work',
+    dirty: false,
+    rows: [{ kind: 'layer', name: 'other-work', lane: 0, node: 'filled', parent: TRUNK, depth: 2 }, TRUNK_HOLLOW],
+    lanes: 1,
+  },
+  {
+    title: 'a merge from an older trunk commit: depth 2 still, but no fork is the tip, so the root is behind and the history elided',
+    refs: refs(['main', SHA_T], ['other-work', SHA_F]),
+    dag: dag([SHA_F, SHA_D, SHA_OLDER], [SHA_D, SHA_OLD]),
+    head: 'other-work',
+    dirty: false,
+    rows: [{ kind: 'layer', name: 'other-work', lane: 0, node: 'filled', parent: TRUNK, depth: 2 }, ELIDED, TRUNK_HOLLOW],
+    lanes: 1,
+  },
+  {
+    title: 'a local main ahead of origin/main (F3, D59) is a DAG line and so a member like any other — here a one-row stack beside the others, drawn as git says',
+    refs: refs(['add-retries', SHA_B], ['api-refactor', SHA_A], ['main', SHA_1], ['retry-metrics', SHA_C]),
+    dag: dag([SHA_1, SHA_T]) + APPENDIX_A_DAG,
+    head: 'main',
+    dirty: false,
+    // `head` is a member, so its row is filled and the trunk row is not.
+    rows: [...allHollow(APPENDIX_A_ROWS), { kind: 'layer', name: 'main', lane: 1, node: 'filled', joinsLane: 0, parent: TRUNK, depth: 1 }, TRUNK_HOLLOW],
+    lanes: 2,
+  },
+  {
+    title: 'the view-lab rail (pane B): the 1610 stack straight above part1 — squash-merged, so behind, and still the lane-0 line because it is the biggest — part2–part4 on lane 1 with the working tree above the checked-out part3, fix (on the tip) then chore (behind) curving into main, one elided row',
+    refs: PANE_B_REFS,
+    dag: PANE_B_DAG,
+    head: 'feat/FWRK-1434-part3',
+    dirty: true,
+    rows: PANE_B_ROWS,
+    lanes: 2,
+  },
+  {
+    title: "onlyStackOf a middle layer (pane B on part3) is git-spice's stack: the layers below it and every layer above it, in one lane — the 1610 stack, fix and chore gone, the elided row kept because part1 is behind",
+    refs: PANE_B_REFS,
+    dag: PANE_B_DAG,
+    head: 'feat/FWRK-1434-part3',
+    dirty: true,
+    onlyStackOf: 'feat/FWRK-1434-part3',
+    rows: [
+      { kind: 'layer', name: 'feat/FWRK-1434-part4', lane: 0, node: 'hollow', parent: 'feat/FWRK-1434-part3', depth: 4 },
+      workingTree('feat/FWRK-1434-part3', 0),
+      { kind: 'layer', name: 'feat/FWRK-1434-part3', lane: 0, node: 'filled', parent: 'feat/FWRK-1434-part2', depth: 3 },
+      { kind: 'layer', name: 'feat/FWRK-1434-part2', lane: 0, node: 'hollow', parent: 'feat/FWRK-1434-part1', depth: 2 },
+      { kind: 'layer', name: 'feat/FWRK-1434-part1', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+      ELIDED,
+      TRUNK_HOLLOW,
+    ],
+    lanes: 1,
+  },
+  {
+    title: 'onlyStackOf a root beside the others keeps that root alone; the checked-out layer is among the dropped, so nothing is filled and no working-tree row is drawn',
+    refs: PANE_B_REFS,
+    dag: PANE_B_DAG,
+    head: 'feat/FWRK-1434-part3',
+    dirty: true,
+    onlyStackOf: 'fix/FWRK-1500-retry-timeout',
+    // No elided row: the one drawn root is on the tip. The trunk row is hollow: `head` is a member, filtered out or not.
+    rows: [{ kind: 'layer', name: 'fix/FWRK-1500-retry-timeout', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 }, TRUNK_HOLLOW],
+    lanes: 1,
+  },
+  {
+    title: "onlyStackOf a name that is no layer (trunk's own branch here) leaves the trunk row alone",
+    refs: PANE_B_REFS,
+    dag: PANE_B_DAG,
+    head: 'feat/FWRK-1434-part3',
+    dirty: true,
+    onlyStackOf: 'main',
+    rows: [TRUNK_HOLLOW],
+    lanes: 1,
+  },
+  {
+    title: 'an orphan branch (gh-pages: a line with no parent, as every branch of a shallow clone cut inside a stack prints) is drawn as a stale one-row stack of its whole history — its curve into trunk and the elided row stand for history that is not trunk\'s',
+    refs: refs(['feat', SHA_A], ['gh-pages', SHA_P3], ['main', SHA_T]),
+    dag: dag([SHA_A, SHA_T], [SHA_P3, SHA_P2], [SHA_P2, SHA_P1], [SHA_P1]),
+    head: null,
+    dirty: false,
+    // Sizes tie at one; 'feat' < 'gh-pages'.
+    rows: [
+      { kind: 'layer', name: 'feat', lane: 0, node: 'hollow', parent: TRUNK, depth: 1 },
+      { kind: 'layer', name: 'gh-pages', lane: 1, node: 'hollow', joinsLane: 0, parent: TRUNK, depth: 3 },
+      ELIDED,
+      TRUNK_HOLLOW,
+    ],
+    lanes: 2,
+  },
+  {
+    title: 'HEAD on a local main behind origin/main, dirty — the everyday case: the trunk row is filled and the working tree sits directly above it, naming main',
+    refs: refs(['add-retries', SHA_B], ['api-refactor', SHA_A], ['main', SHA_OLD], ['retry-metrics', SHA_C]),
+    dag: APPENDIX_A_DAG,
+    head: 'main',
+    dirty: true,
+    // No elided row: the stack forks at the tip; `main` being behind is 23d's behindTrunk.local.
+    rows: [...allHollow(APPENDIX_A_ROWS), workingTree('main', 0), TRUNK_FILLED],
+    lanes: 1,
+  },
+  {
+    title: 'HEAD on an unborn branch (named by HEAD, in no refs line): nothing filled, no working-tree row even when dirty',
+    refs: APPENDIX_A_REFS,
+    dag: APPENDIX_A_DAG,
+    head: 'unborn',
+    dirty: true,
+    rows: [...allHollow(APPENDIX_A_ROWS), TRUNK_HOLLOW],
+    lanes: 1,
+  },
+  {
+    title: 'HEAD on a branch with no commits of its own yet (git checkout -b fresh origin/main), dirty: no row of that name; the trunk row is filled and the working tree above it names fresh',
+    refs: refs(['fresh', SHA_T], ['main', SHA_T]),
+    dag: '',
+    head: 'fresh',
+    dirty: true,
+    rows: [workingTree('fresh', 0), TRUNK_FILLED],
+    lanes: 1,
+  },
 ];
 
 describe('layoutGraph', () => {
@@ -519,6 +801,49 @@ describe('layoutGraph', () => {
       };
       expect(filledName(onTop)).toBe('retry-metrics');
       expect(filledName(onSide)).toBe('side-fix');
+    });
+
+    it('dirty adds exactly one row and moves nothing: the same layout with the working-tree row taken out', () => {
+      // arrange
+      const input = { refs: SIDE_FIX_REFS, dag: SIDE_FIX_DAG, trunkTip: TRUNK_TIP };
+
+      // act
+      const dirty = layoutGraph(input, { trunk: TRUNK, head: 'add-retries', dirty: true });
+      const clean = layoutGraph(input, { trunk: TRUNK, head: 'add-retries', dirty: false });
+
+      // assert
+      expect(dirty.rows.filter((row) => row.kind !== 'workingTree').map(skeleton)).toEqual(clean.rows.map(skeleton));
+      expect(dirty.rows.length).toBe(clean.rows.length + 1);
+      expect(dirty.lanes).toBe(clean.lanes);
+    });
+
+    it("keeps on every layer the trunk commits its history stops at, sorted — one for a plain fork, two after a merge from trunk, none for an orphan — so a root is on the tip exactly when they include trunk's SHA", () => {
+      /** The `forks` of the layer called `name`, or null when no row is. */
+      const forksOf = (layout: { rows: readonly GraphRow[] }, name: string): readonly string[] | null => {
+        const row = layout.rows.find((candidate) => candidate.kind === 'layer' && candidate.name === name);
+        return row !== undefined && row.kind === 'layer' ? row.forks : null;
+      };
+
+      // act
+      const paneB = layoutGraph({ refs: PANE_B_REFS, dag: PANE_B_DAG, trunkTip: TRUNK_TIP }, { trunk: TRUNK, head: null, dirty: false });
+      const mergeFromTip = layoutGraph(
+        { refs: refs(['main', SHA_T], ['other-work', SHA_F]), dag: dag([SHA_F, SHA_D, SHA_T], [SHA_D, SHA_OLD]), trunkTip: TRUNK_TIP },
+        { trunk: TRUNK, head: null, dirty: false },
+      );
+      const orphan = layoutGraph(
+        { refs: refs(['feat', SHA_A], ['gh-pages', SHA_P3], ['main', SHA_T]), dag: dag([SHA_A, SHA_T], [SHA_P3, SHA_P2], [SHA_P2, SHA_P1], [SHA_P1]), trunkTip: TRUNK_TIP },
+        { trunk: TRUNK, head: null, dirty: false },
+      );
+
+      // assert: a layer's forks are its own history's, however far up the stack it sits
+      expect(forksOf(paneB, 'fix/FWRK-1500-retry-timeout')).toEqual([SHA_T]);
+      expect(forksOf(paneB, 'chore/FWRK-1011-update-kbs-settings')).toEqual([SHA_OLD]);
+      expect(forksOf(paneB, 'feat/FWRK-1434-part1')).toEqual([SHA_OLD]);
+      expect(forksOf(paneB, 'feat/FWRK-1610-e-collector-ui')).toEqual([SHA_OLD]);
+      // Two forks, sorted by character code: '0000…' before '9999…'.
+      expect(forksOf(mergeFromTip, 'other-work')).toEqual([SHA_T, SHA_OLD]);
+      expect(forksOf(orphan, 'gh-pages')).toEqual([]);
+      expect(forksOf(orphan, 'feat')).toEqual([SHA_T]);
     });
 
     it('marks a layer isTip when no row has it as its parent', () => {

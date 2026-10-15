@@ -324,8 +324,10 @@ interface Member {
   readonly candidates: readonly string[];
   /** A layer's name, or the trunk ref — set once every member is measured. */
   parent: string;
-  /** The members whose `parent` is this one — filled once every member has its parent. */
-  readonly children: Member[];
+  /** The members whose `parent` is this one — filled once every member has its parent; the §7.2.1 filter (step 6) may narrow it. */
+  children: Member[];
+  /** No member sits on this one in the full picture — set with the tree (step 5), before any filter. */
+  isTip: boolean;
   /** Rows in this member's subtree, itself included — set once the tree stands (step 7); decides which child continues a lane. */
   size: number;
 }
@@ -341,19 +343,20 @@ interface Member {
  * 3. one walk per member down its history, for its depth and its fork commits;
  * 4. its parent: the deepest member its history reaches, else trunk;
  * 5. the tree: children, roots, tips;
+ * 6. the §7.2.1 filter, `onlyStackOf`: one branch's stack kept, in git-spice's sense, before any
+ *    lane is assigned;
  * 7. each subtree's size — how many rows it will draw;
  * 8. which child continues its parent's lane (the biggest subtree, ties by name) and in what
- *    order the rest stand beside it;
+ *    order the rest stand beside it — for trunk's side roots, the ones on its tip first;
  * 9. the rows, depth-first: the continuing child's subtree on the parent's lane, each other
  *    child's subtree one lane to the right with `joinsLane` on its lowest row, then the parent;
  *    trunk last;
  * 10. why that never crosses a lane (`draw`'s comment);
  * 11. the checked-out row is filled — a layer, or the trunk row when HEAD is on a branch trunk
  *     already contains;
+ * 12. the working tree, when dirty: one dashed row directly above the checked-out row;
+ * 13. the elided history: one row above trunk when any drawn root sits behind trunk's tip;
  * 14. `lanes`, the highest lane drawn plus one.
- *
- * (Steps 6, 12 and 13 — the §7.2.1 filter, the working-tree row and the elided row — arrive in
- * the next commit.)
  */
 // see primer §19 (Map), §21 (Set) and §22 (for ... of)
 export function layoutGraph(input: GraphInput, options: GraphOptions): GraphLayout {
@@ -364,7 +367,12 @@ export function layoutGraph(input: GraphInput, options: GraphOptions): GraphLayo
 
   // 2–5. The members with their parents, then the tree.
   const members = measureMembers(entries, commits, trunkTip.sha, options.trunk);
-  const roots = buildTree(members, options.trunk);
+  const fullRoots = buildTree(members, options.trunk);
+
+  // 6. The filter, before any lane is assigned: dropping rows from a finished layout would leave
+  // the lanes they took; what is kept must be drawn as if it were alone.
+  // see primer §8 (narrowing `undefined` away)
+  const roots = options.onlyStackOf === undefined ? fullRoots : keepOnlyStackOf(options.onlyStackOf, members);
 
   // 11. Which row is checked out. A layer: the member `head` names. Otherwise the trunk row, when
   // `head` names a branch that exists and is not a member — by step 2 exactly "a branch trunk
@@ -375,7 +383,7 @@ export function layoutGraph(input: GraphInput, options: GraphOptions): GraphLayo
   const memberNames = new Set(members.map((member) => member.name));
   const trunkFilled = options.head !== null && branchNames.has(options.head) && !memberNames.has(options.head);
 
-  // 7. How many rows each subtree will draw.
+  // 7. How many rows each subtree will draw (after the filter: a kept stack is sized as drawn).
   for (const root of roots) {
     measureSize(root);
   }
@@ -407,6 +415,12 @@ export function layoutGraph(input: GraphInput, options: GraphOptions): GraphLayo
     if (lane + 1 > lanes) {
       lanes = lane + 1;
     }
+    // 12. The working tree hangs on the checked-out layer, directly above it — after its children,
+    // so with children the dashed node sits between the child chain and the layer (view-lab rows
+    // 6–8). Its `parent` is the branch the changes sit on.
+    if (options.dirty && member.name === options.head) {
+      rows.push({ kind: 'workingTree', parent: member.name, lane, node: 'dashed' });
+    }
     const row: LayerRow = {
       kind: 'layer',
       name: member.name,
@@ -414,7 +428,7 @@ export function layoutGraph(input: GraphInput, options: GraphOptions): GraphLayo
       committedAt: member.committedAt,
       parent: member.parent,
       depth: member.depth,
-      isTip: member.children.length === 0,
+      isTip: member.isTip,
       forks: member.forks,
       lane,
       node: member.name === options.head ? 'filled' : 'hollow',
@@ -423,13 +437,29 @@ export function layoutGraph(input: GraphInput, options: GraphOptions): GraphLayo
   };
 
   // Trunk is drawn like any other parent — its continuing child straight up lane 0, the other
-  // roots beside it — except that its own row is the trunk row.
+  // roots beside it (orderSideRoots says in what order) — except that its own row is the trunk
+  // row, with the elided history and its working tree above it.
   const [continuingRoot, ...sideRoots] = orderChildren(roots);
   if (continuingRoot !== undefined) {
     draw(continuingRoot, 0, null);
   }
-  for (const root of sideRoots) {
+  for (const root of orderSideRoots(sideRoots)) {
     draw(root, 1, 0);
+  }
+  // 13. One elided row for the repository when any drawn root is behind trunk's tip: trunk has
+  // commits none of the drawn stacks is built on — E78's "elided trunk history between the lowest
+  // stack and main". It says that some root is behind, not which; the ⇈ of §7.1.1 says which,
+  // from git-spice, in item 23b. An orphan branch has no forks, so it is never on the tip and the
+  // row stands for history that is not trunk's at all. Every root on the tip → no row.
+  // see primer §25 (arrays: some)
+  if (roots.some((root) => !root.onTip)) {
+    rows.push({ kind: 'elided', lane: 0 });
+  }
+  // 12 again, for trunk: the working tree of a HEAD on a branch trunk contains sits directly above
+  // the trunk row — below the elided history, since the changes are on trunk's tip — and names
+  // that branch, never the trunk ref. `head` is a string here: trunkFilled checked it.
+  if (options.dirty && trunkFilled && options.head !== null) {
+    rows.push({ kind: 'workingTree', parent: options.head, lane: 0, node: 'dashed' });
   }
   rows.push({
     kind: 'trunk',
@@ -503,6 +533,7 @@ function measureMembers(entries: RefEntry[], commits: Map<string, readonly strin
       candidates,
       parent: trunk,
       children: [],
+      isTip: true,
       size: 0,
     });
   }
@@ -612,7 +643,40 @@ function buildTree(members: Member[], trunk: string): Member[] {
     // compiler is not told that, and a tree with members and no roots would draw nothing.
     throw new Error(`layoutGraph: ${members.length} layers and none sits on ${trunk}`);
   }
+  for (const member of members) {
+    member.isTip = member.children.length === 0;
+  }
   return roots;
+}
+
+/**
+ * Step 6, §7.2.1's "Show Only This Stack": the stack of the branch called `name`, in git-spice's
+ * sense — the layers below it down to trunk and every layer above it, never a sibling subtree
+ * hanging off one of its ancestors (`gs stack submit` from the branch reaches exactly these).
+ * Climbing `parent` from the branch to its root, every ancestor keeps only the child on the path;
+ * the branch keeps its own children whole; the root becomes trunk's only child. Nothing else
+ * changes — `depth`, `parent` and `isTip` of every kept row are the full picture's — so the kept
+ * stack lays out exactly as it would in a repository holding nothing else. A name that is no
+ * layer (trunk's own branch, a merged branch, a typo) leaves trunk with no children at all.
+ * Membership, and so "is HEAD on a layer", was judged before this: a checked-out layer that the
+ * filter drops fills nothing and draws no working-tree row.
+ */
+// see primer §38 (while loops: climbing a chain)
+function keepOnlyStackOf(name: string, members: Member[]): Member[] {
+  const byName = new Map(members.map((member) => [member.name, member]));
+  let node = byName.get(name);
+  if (node === undefined) {
+    return [];
+  }
+  let parent = byName.get(node.parent);
+  while (parent !== undefined) {
+    parent.children = [node];
+    node = parent;
+    parent = byName.get(node.parent);
+  }
+  // The climb stopped at a member whose parent is no member — the trunk — so `node` is the path's
+  // root, and the only root left.
+  return [node];
 }
 
 /**
@@ -644,14 +708,37 @@ function measureSize(member: Member): number {
  */
 // see primer §26 (sort and comparison functions) and §16 (arrays: spread — a copy)
 function orderChildren(children: readonly Member[]): Member[] {
-  return [...children].sort((first, second) => {
-    if (first.size !== second.size) {
-      // The bigger first: a negative result puts `first` before `second`.
-      return second.size - first.size;
+  return [...children].sort(compareBySizeThenName);
+}
+
+/**
+ * Step 8 for trunk's side roots only: the roots on trunk's tip above the roots behind it, then
+ * size, then name — fresh side stacks higher, stale ones lower, just above the elided segment
+ * (view-lab's `fix` above `chore`, with no dates read). The tip key does not decide which root
+ * continues lane 0: that stays the biggest subtree, because lane 0 must not move when `git fetch`
+ * moves trunk under the main stack, and the view-lab's lane-0 stack (`part1`, "#480 merged", so
+ * behind) would otherwise be pushed to lane 1 by any one-row fresh branch. A consequence to keep,
+ * not fix: two one-row roots tie on size and the name decides, so a stale `alpha` is straight while
+ * a fresh `zeta` curves — stability over freshness, since a (size, onTip, name) key would swap the
+ * two lanes on the next fetch, when both are behind.
+ */
+function orderSideRoots(roots: readonly Member[]): Member[] {
+  return [...roots].sort((first, second) => {
+    if (first.onTip !== second.onTip) {
+      return first.onTip ? -1 : 1;
     }
-    if (first.name < second.name) {
-      return -1;
-    }
-    return first.name > second.name ? 1 : 0;
+    return compareBySizeThenName(first, second);
   });
+}
+
+/** Biggest subtree first, then the smaller name first — by `<` and `>`, as isDeeper compares. */
+function compareBySizeThenName(first: Member, second: Member): number {
+  if (first.size !== second.size) {
+    // The bigger first: a negative result puts `first` before `second`.
+    return second.size - first.size;
+  }
+  if (first.name < second.name) {
+    return -1;
+  }
+  return first.name > second.name ? 1 : 0;
 }
