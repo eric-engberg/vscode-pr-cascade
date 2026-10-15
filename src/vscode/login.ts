@@ -133,8 +133,11 @@ export type ReadyOutcome = 'acted' | 'not-ready' | 'gave-up' | 'in-flight';
 
 /**
  * Passes per question before the flow gives up — a guard against a loop, not a limit a real
- * chain meets: the longest is install, upgrade, initialise, set the forge's URLs, log in, and the
- * pass that finds ready.
+ * chain meets: the longest, counting an install and an upgrade of each tool as this comment has
+ * always counted, is install, upgrade, initialise, set the forge's URLs, log in, install gh,
+ * upgrade gh, install gh-stack, log gh in, and the pass that finds ready — ten, this limit exactly
+ * (the loop acts on its last pass); no real chain has both an install and an upgrade of one tool,
+ * so eight is the most a user meets.
  */
 export const MAX_STEPS = 10;
 
@@ -156,7 +159,10 @@ type FixResult = 'passed' | 'failed' | 'changed';
  * does not wait. A `Record` over every `kind`, so a member added to `Readiness` does not compile
  * here until it has a number — the `if` chain this replaced (item 19b) ended in `return 3`, and
  * item 23a's new member would have silently taken the forge step's place, so that a git-spice
- * login's wait could never have passed into it.
+ * login's wait could never have passed into it. `gh-missing` holds two steps — gh, then its
+ * extension — because E62b wants both named in one answer: after `brew install gh` the probe
+ * answers `gh-missing` again with only `gh-stack` listed, and that is further (item 23b); without
+ * the split every gh install's wait would have timed out in silence with gh installed.
  */
 // see primer §43 (`Record<K, V>`: one value for each member of a union of keys) and §80 (`Readiness['kind']`: the type of one field, read off the union)
 const PROGRESS: Record<Readiness['kind'], number> = {
@@ -169,12 +175,36 @@ const PROGRESS: Record<Readiness['kind'], number> = {
   'forge-unsupported': 3,
   'not-logged-in': 4,
   'gh-missing': 5,
-  'gh-not-logged-in': 6,
-  ready: 7,
+  'gh-not-logged-in': 7,
+  ready: 8,
 };
 
+/** `gh-missing` with gh itself present and only its extension missing: the step after a gh install, inside the same member. */
+const GH_STACK_STEP = 6;
+
+// see primer §25 (arrays: `includes`)
 function progressOf(answer: Readiness): number {
+  if (answer.kind === 'gh-missing' && !answer.missing.includes('gh')) {
+    return GH_STACK_STEP;
+  }
   return PROGRESS[answer.kind];
+}
+
+/**
+ * An install counted done by the disk rather than the probe: VS Code's PATH may never reach
+ * Homebrew's directory, so the probe could say "missing" for ever while `brew install` has finished
+ * — the next offer then names the path for the setting. For gh only when gh itself was absent
+ * (`ghVersion === null`): a too-old Homebrew gh is already on disk and must not pass an upgrade's
+ * wait, nor a gh-stack install's.
+ */
+function installAppeared(failing: NotReady, machine: MachineFacts): boolean {
+  if (failing.kind === 'gs-missing') {
+    return machine.brewGitSpice !== null;
+  }
+  if (failing.kind === 'gh-missing') {
+    return failing.ghVersion === null && machine.brewGh !== null;
+  }
+  return false;
 }
 
 /**
@@ -369,9 +399,10 @@ export class ReadinessFlows implements Disposable {
   /**
    * Asks the probe again every interval until it gets further than the member that was offered
    * (`progressOf`) — the step passed; the next one may well fail, and gets its own offer on the
-   * next pass. For an install, the step also passed when Homebrew's `git-spice` appears beside its
-   * `brew`, though VS Code's PATH may never find it: the next offer then names its path for
-   * `prCascade.gsPath`, rather than the wait running out. The close of the fix's own terminal
+   * next pass. For an install, the step also passed when Homebrew's `git-spice` — or, since item
+   * 23b, its `gh` — appears beside its `brew`, though VS Code's PATH may never find it
+   * (`installAppeared`): the next offer then names its path for the setting, rather than the wait
+   * running out. The close of the fix's own terminal
    * stops the wait, and then one last look is taken: the user may have finished in the last
    * seconds and closed it. A timeout, or a close with nothing changed, gives up with one line in
    * the log and no notification (§7.5: "silent give-up"); a terminal given up on that way is not
@@ -386,8 +417,7 @@ export class ReadinessFlows implements Disposable {
     }
     const controller = new AbortController();
     flight.wait = controller;
-    const passed = async (): Promise<boolean> =>
-      progressOf(await request.probe()) > progressOf(failing) || (failing.kind === 'gs-missing' && this.deps.host.machine().brewGitSpice !== null);
+    const passed = async (): Promise<boolean> => progressOf(await request.probe()) > progressOf(failing) || installAppeared(failing, this.deps.host.machine());
     const closing =
       flight.terminal === undefined
         ? undefined
