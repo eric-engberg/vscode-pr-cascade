@@ -55,11 +55,13 @@ jobs:
       # truncated or tampered download fails the job here, not in a test. Everything lands in
       # $RUNNER_TEMP, outside the checkout, so no tarball sits in the working tree for vsce or a
       # test to find. `shell: bash` is spelled out for `pipefail`, which the last line needs:
-      # under the default `bash -e` the `--version | head -1` pipe takes head's exit status, so a
+      # under the default `bash -e` the `--version | sed -n 1p` pipe takes sed's exit status, so a
       # binary that cannot run would pass (the checksum line fails either way — `shasum --check`
-      # exits 1 on the empty input a missing line gives). $GITHUB_PATH prepends the directory for
-      # every later step, so `npm test` finds `git-spice` by name, the way the extension does
-      # from VS Code's PATH. Not cached: the download is as quick as a cache restore would be.
+      # exits 1 on the empty input a missing line gives). `sed -n 1p` rather than `head -1` for the
+      # first line: head closes the pipe after one line while git-spice is still writing two more, and
+      # under `pipefail` that SIGPIPE — exit 141 — failed the step once, on #42's Ubuntu leg
+      # (2026-10-15); sed reads to the end. $GITHUB_PATH prepends the directory for every later step,
+      # so `npm test` finds `git-spice` by name, the way the extension does from VS Code's PATH. Not cached: the download is as quick as a cache restore would be.
       - name: Install git-spice
         shell: bash
         run: |
@@ -72,7 +74,7 @@ jobs:
           mkdir -p git-spice
           tar -xzf "$asset" -C git-spice git-spice
           echo "$RUNNER_TEMP/git-spice" >> "$GITHUB_PATH"
-          git-spice/git-spice --version | head -1
+          git-spice/git-spice --version | sed -n 1p
 
       # `npm ci` installs exactly what package-lock.json says, unlike `npm install`.
       # `--ignore-scripts` stops every package's install-time scripts from running: a
