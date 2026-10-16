@@ -73,9 +73,12 @@ export function connect(): HostConnection {
     onModel(handler) {
       // `event.origin` is the sender's origin; the host's posts carry the page's own (the header says
       // why), and `event.data` is whatever was posted, copied into the page: `unknown` until checked.
+      // `globalThis.location` is `window.location` by another name — the page's one global object
+      // (primer §84); SonarCloud's S7764 prefers `globalThis` wherever `window` is not the
+      // window-specific API, which `addEventListener` is.
       // see primer §85 (the browser's globals and the DOM lib: `window`, `location`, `MessageEvent<T>`)
       window.addEventListener('message', (event: MessageEvent<unknown>) => {
-        if (event.origin === window.location.origin && isModelMessage(event.data)) {
+        if (event.origin === globalThis.location.origin && isModelMessage(event.data)) {
           lastSeq = event.data.seq;
           handler(event.data);
         }

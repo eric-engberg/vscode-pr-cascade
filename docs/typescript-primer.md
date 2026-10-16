@@ -4287,7 +4287,9 @@ for that type runs before `dispatchEvent` returns, which is why `test/webview/ho
 after `postFromHost` with no `await` (first seen in `test/webview/helpers/fakeVsCodeApi.ts`, M6 item 23c; 23e's
 `new Event('resize')` is the same move). `MessageEvent<T>` is §31's generics on an event type: `T` is the type
 of `event.data`, what the sender
-put in; `event.origin` is the sender's origin as a string and `window.location.origin` the page's own, and
+put in; `event.origin` is the sender's origin as a string and `globalThis.location.origin` the page's own (§84's
+`globalThis`; `window.location` reads the same, and SonarCloud's S7764 prefers `globalThis` for what is not a
+window-specific API), and
 `host.ts` compares the two before it reads `data`, because VS Code's bootstrap posts the host's message with the
 page's origin and nothing else should arrive with it (SonarCloud's S2819 asks every `message` handler for that
 check). It is written `unknown` here, not `ModelMessage`, because what arrives is data — the host's
