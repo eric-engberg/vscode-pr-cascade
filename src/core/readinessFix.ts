@@ -591,20 +591,24 @@ function ghStackOffer(ghPath: string, ghVersion: string, host: string): Offer {
 /**
  * E23 (item 23b). `--web` is the device flow — a code printed, the browser opened, no token
  * anywhere (plan §7.5); `--hostname` always, lower-cased (gh does not fold the flag's case);
- * `--git-protocol` from prCascade.gitProtocol (what gh itself will use for git on this host —
- * nothing of PR Cascade's pushes); the host's token pair unset for this one command
+ * `--git-protocol` from prCascade.gitProtocol when it names one (what gh itself will use for git
+ * on this host — nothing of PR Cascade's pushes); the empty value, the default, passes no flag,
+ * so gh asks its one question in the terminal and a host already set up for `ssh` is not moved
+ * to `https` by a re-login (Ric, 2026-10-16; D66); the host's token pair unset for this one command
  * (ghTokenVariables says why). The done line names gh because "Logged in to <host>." is already
  * git-spice's and a GitHub flow can show both.
  */
 function ghLoginOffer(ghPath: string, forge: Forge, facts: OfferFacts): Offer {
   const lower = forge.host.toLowerCase();
   const tokens = ghTokenVariables(lower);
+  // see primer §16 (spread into `[ ]`: two arguments or none)
+  const protocol = facts.gitProtocol === '' ? [] : ['--git-protocol', facts.gitProtocol];
   return {
     severity: 'warning',
     message: `gh is not logged in to ${forge.host}.`,
     fix: {
       button: 'Log in',
-      action: { kind: 'terminal', argv: ['env', '-u', tokens[0], '-u', tokens[1], ghPath, 'auth', 'login', '--hostname', lower, '--web', '--git-protocol', facts.gitProtocol] },
+      action: { kind: 'terminal', argv: ['env', '-u', tokens[0], '-u', tokens[1], ghPath, 'auth', 'login', '--hostname', lower, '--web', ...protocol] },
       done: `gh is logged in to ${forge.host}.`,
     },
   };

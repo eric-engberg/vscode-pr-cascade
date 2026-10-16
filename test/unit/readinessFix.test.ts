@@ -773,6 +773,14 @@ describe('offerFor', () => {
       expect(offer.fix?.action.kind === 'terminal' ? offer.fix.action.argv.slice(-2) : []).toStrictEqual(['--git-protocol', 'ssh']);
     });
 
+    it('omits --git-protocol when the setting is empty — the default — so gh asks once and a host keeps its protocol', () => {
+      // act
+      const offer = offerFor({ kind: 'gh-not-logged-in', forge: GITHUB, ghPath: 'gh' }, { ...FACTS, gitProtocol: '' });
+
+      // assert: the line ends at `--web`; nothing of the flag, no empty argument
+      expect(offer.fix?.action.kind === 'terminal' ? offer.fix.action.argv : []).toStrictEqual(['env', '-u', 'GH_TOKEN', '-u', 'GITHUB_TOKEN', 'gh', 'auth', 'login', '--hostname', 'github.com', '--web']);
+    });
+
     it('runs the gh that answered', () => {
       // act
       const offer = offerFor({ kind: 'gh-not-logged-in', forge: GITHUB, ghPath: '/opt/homebrew/bin/gh' }, FACTS);

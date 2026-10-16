@@ -441,7 +441,8 @@ describe('PR Cascade: Set Up git-spice (plan §7.13.1, D58)', () => {
       // assert: both lines in the repository's one terminal, `command` past any alias, the token pair unset
       const cd = shellCommandLine(['cd', repositoryRoot()]);
       assert.deepStrictEqual(install, { name: 'PR Cascade: repo', cwd: repositoryRoot(), text: `${cd} && command gh extension install github/gh-stack`, execute: true });
-      assert.strictEqual(login.text, `${cd} && env -u GH_TOKEN -u GITHUB_TOKEN gh auth login --hostname github.com --web --git-protocol https`);
+      // the default protocol setting is empty, so the line ends at --web and gh asks
+      assert.strictEqual(login.text, `${cd} && env -u GH_TOKEN -u GITHUB_TOKEN gh auth login --hostname github.com --web`);
       assert.strictEqual(outcome, 'acted');
       assert.deepStrictEqual(host.asked, [
         { severity: 'warning', message: 'gh 2.102.0 is installed, but its gh-stack extension is not; pull requests on github.com need it. Install it?', buttons: ['Install gh-stack'] },

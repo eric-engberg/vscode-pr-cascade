@@ -137,8 +137,8 @@ answered long after it appeared does nothing when the step was done meanwhile. T
   git-spice, a gh a terminal finds and PR Cascade does not means VS Code's PATH misses its
   directory: set `prCascade.ghPath` to its full path — the message names it when Homebrew has one.
 - **Install gh-stack** — `gh extension install github/gh-stack` in the terminal; no login needed.
-- **Log in to gh** — `gh auth login --hostname <host> --web --git-protocol <prCascade.gitProtocol>`
-  in the terminal: gh prints a one-time code, opens the host in your browser, and you paste it —
+- **Log in to gh** — `gh auth login --hostname <host> --web` in the terminal, with
+  `--git-protocol <prCascade.gitProtocol>` added when that setting names a protocol: gh prints a one-time code, opens the host in your browser, and you paste it —
   no token to copy anywhere. gh still asks in the terminal before it opens the browser — with
   `https` whether it may act as git's credential helper for the host, with `ssh` about an SSH key —
   then `Press Enter to open …`. A `GH_TOKEN` or `GITHUB_TOKEN` in your shell makes gh refuse to log
@@ -208,7 +208,7 @@ again on each refresh, so a change takes effect without reloading the window.
 | `statusBar` | `true` | Show the `<branch> · n of N` status bar item: the branch HEAD is on and its place in the stack, counted from the bottom. Click it to open the Stack view. |
 | `gsPath` | `""` | The git-spice executable. Empty = `git-spice`, then `gs`, from VS Code's PATH; a full path when VS Code's PATH misses it (see "git-spice setup"). A set value is the only one tried. |
 | `ghPath` | `""` | The GitHub CLI executable. Empty = `gh` from VS Code's PATH; a full path when VS Code's PATH misses it (see "git-spice setup"). A set value is the only one tried. GitHub repositories only. |
-| `gitProtocol` | `"https"` | What gh uses for git on the host after the setup command logs it in (`gh auth login --git-protocol`): its own clones and its credential helper — not PR Cascade's pushes, which use your remote's URL as it is. `ssh` makes gh ask about an SSH key. |
+| `gitProtocol` | `""` | What gh uses for git on the host after the setup command logs it in (`gh auth login --git-protocol`): its own clones and its credential helper — not PR Cascade's pushes, which use your remote's URL as it is. Empty (the default) passes no flag: gh asks once in the terminal, and a host already set up keeps its protocol. `https` or `ssh` answers for you; `ssh` makes gh ask about an SSH key. |
 
 Which repositories the view shows is the built-in Git extension's decision, so its settings
 apply, exactly as in the Source Control view: `git.autoRepositoryDetection`,

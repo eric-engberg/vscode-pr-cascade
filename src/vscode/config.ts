@@ -52,8 +52,10 @@ export interface PrCascadeSettings {
   ghPath: string;
   /**
    * `prCascade.gitProtocol` (M5 item 23b): `https` or `ssh`, what `gh auth login --git-protocol` is
-   * given when the setup command logs gh in. Taken as it comes, like the rest: a value gh does not
-   * know fails in the terminal the user is watching, with gh's own words.
+   * given when the setup command logs gh in — or empty, the default, for no flag at all: gh asks
+   * once in the terminal and a host already set up keeps its protocol (Ric, 2026-10-16). Taken as
+   * it comes, like the rest: a value gh does not know fails in the terminal the user is watching,
+   * with gh's own words.
    */
   gitProtocol: string;
 }
@@ -84,6 +86,6 @@ export function readSettings(): PrCascadeSettings {
     statusBar: configuration.get<boolean>('statusBar', true),
     gsPath: configuration.get<string>('gsPath', ''),
     ghPath: configuration.get<string>('ghPath', ''),
-    gitProtocol: configuration.get<string>('gitProtocol', 'https'),
+    gitProtocol: configuration.get<string>('gitProtocol', ''),
   };
 }

@@ -22,7 +22,7 @@ in `package.json`, and a release's tag is that version with a `v` in front.
   both tools. GitLab repositories are not asked for gh.
 - Setting `prCascade.gsPath`: the git-spice executable, when VS Code's PATH does not find it.
 - Settings `prCascade.ghPath` (the gh executable, when VS Code's PATH does not find it) and
-  `prCascade.gitProtocol` (`https` or `ssh`, default `https`: the git protocol gh is asked to store
+  `prCascade.gitProtocol` (empty by default, so gh asks once in the terminal and a host already set up keeps its protocol; or `https` / `ssh`: the git protocol gh is asked to store
   when PR Cascade logs it in).
 - Each layer now shows what git-spice knows about it beside its count: its pull request's id
   (`#12`; the link is in the tooltip), `needs restack`, `needs push`, or `not tracked`. Nothing

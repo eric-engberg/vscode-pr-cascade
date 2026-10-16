@@ -134,13 +134,14 @@
         },
         "prCascade.gitProtocol": {
           "type": "string",
-          "enum": ["https", "ssh"],
+          "enum": ["", "https", "ssh"],
           "enumDescriptions": [
+            "No flag: gh asks once in the terminal which protocol to use, and a host it is already set up for keeps what it has.",
             "gh fetches and pushes over HTTPS, and offers to act as git's credential helper for the host.",
             "gh uses your SSH key, and offers to upload one when it logs in."
           ],
-          "default": "https",
-          "markdownDescription": "Passed to `gh auth login --git-protocol` when **PR Cascade: Set Up git-spice** logs gh in. It is the protocol gh itself uses for git on that host — its clones and its credential helper; PR Cascade's own pushes use your remote's URL as it is, whatever this says. `https` needs no key and asks the fewest questions. gh applies it to every account on the host."
+          "default": "",
+          "markdownDescription": "Empty (the default) passes no `--git-protocol`, so gh asks once in the terminal and a host already set up keeps its protocol. `https` or `ssh` is passed to `gh auth login --git-protocol` when **PR Cascade: Set Up git-spice** logs gh in. It is the protocol gh itself uses for git on that host — its clones and its credential helper; PR Cascade's own pushes use your remote's URL as it is, whatever this says. `https` needs no key and asks the fewest questions. gh applies it to every account on the host."
         }
       }
     }
