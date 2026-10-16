@@ -1,0 +1,32 @@
+{
+  // tsconfig.webview.json — how tsc type-checks the browser world: src/webview/ and test/webview/.
+  //
+  // Layer: tooling. The second of `npm run typecheck`'s two runs (`tsc --noEmit -p
+  // tsconfig.webview.json`; the first is tsconfig.json, which excludes these two folders). The
+  // code under src/webview runs inside a webview — a browser page, not VS Code's Node — so it
+  // needs the DOM's types (`document`, `window`, `MessageEvent<T>`) and must not see Node's
+  // (`process`, `Buffer`, `node:fs`): the root config has it the other way round, so each world
+  // is checked against exactly the globals it will have at run time; everything else is
+  // inherited. The src/core files protocol.ts reaches through `import type` are in this program
+  // too, checked under the DOM lib with no Node types — a Node type entering the model's type
+  // closure fails *here*, naming a core file: the right failure, that closure is what crosses
+  // postMessage into the browser. VS Code's TypeScript service never reads a config by this
+  // name — it takes the nearest tsconfig.json above a file — so src/webview/tsconfig.json and
+  // test/webview/tsconfig.json (one line each) point it here. Plan: §4.1, §9.1 layer 1b, §10.1
+  // item 23c, §13.2 D69.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // The browser's standard library beside ES2022: `window`, `document`, every element and event
+    // type, and the iterable forms of the DOM's collections (`for (const line of root.children)`).
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // No global type packages at all. The root's `types: ["node"]` would make `process.env`
+    // type-check in a file that runs where there is no `process` (measured: with this line it is
+    // TS2591, and `import 'node:fs'` is TS2307 — in the tests too, since vitest's own types bring
+    // no Node global in). A test file imports what it needs from 'vitest', as every test here does.
+    "types": []
+  },
+  "include": ["src/webview", "test/webview"],
+  // `exclude` is inherited from the file a config extends, and the root's names exactly these two
+  // folders — without this line the project has no inputs at all (TS18003, measured).
+  "exclude": []
+}

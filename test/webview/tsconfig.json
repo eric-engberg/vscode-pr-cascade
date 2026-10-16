@@ -1,0 +1,6 @@
+{
+  // The editor's pointer to the browser world's config, nothing more: VS Code's TypeScript
+  // service takes the nearest tsconfig.json above a file, and the root one excludes this folder
+  // (tsconfig.webview.json says why). `npm run typecheck` never reads this file.
+  "extends": "../../tsconfig.webview.json"
+}

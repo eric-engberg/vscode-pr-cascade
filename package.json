@@ -147,7 +147,7 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.webview.json",
     "lint": "eslint .",
     "test:unit": "vitest run test/unit",
     "test:git": "vitest run test/git",
