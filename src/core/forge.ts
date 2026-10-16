@@ -7,7 +7,7 @@
  * Layer: core (no VS Code imports; plan §4.1). Depends on: core/model.ts (GitRunner) and
  * Node's global URL class. Depended on by: core/backend.ts (a Readiness carries a Forge),
  * core/backends/gitspice.ts (item 18, the readiness probe), core/readinessFix.ts (item 19a: the
- * E21/E25/E60/E70/E75 sentences read a Forge and a ForgeConfig), core/ghstatus.ts (item 23,
+ * E21/E25/E60/E70/E75 sentences read a Forge and a ForgeConfig), core/ghstatus.ts (item 23a,
  * ghEnv).
  * Plan: §4.2, §7.5, §7.6, §8 E21/E22/E25/E60/E65/E70/E75, §9.4, §13.2 D54.
  */
@@ -509,12 +509,15 @@ export interface GhEnv {
 }
 
 /**
- * The environment every execFile'd `gh` call gets on top of the process's own: `GH_HOST`,
- * so gh talks to this repository's host even when the repository has several remotes
- * (plan §7.5), and each repository in a window gets its own (E22). Lower-cased, as gh
- * normalises hostnames itself, so two spellings of one host are one host to it. Only this
- * key — the non-interactive hygiene (`GH_PROMPT_DISABLED`, `GH_NO_UPDATE_NOTIFIER`,
- * `NO_COLOR`) is the same for every call and belongs to the gh runner of item 23, the way
+ * The environment every spawned `gh` call gets on top of the process's own: `GH_HOST`, so gh
+ * talks to this repository's host even when the repository has several remotes (plan §7.5),
+ * and each repository in a window gets its own (E22). Lower-cased: gh normalises the host it
+ * looks a token up under, so two spellings of one host are one host to it — though not the
+ * `--hostname` flag's case, which core/ghstatus.ts lower-cases itself beside this (measured
+ * 2.102.0, plan §13.4). Only this key — the non-interactive hygiene (`GH_PROMPT_DISABLED`,
+ * `GH_NO_UPDATE_NOTIFIER`, `GH_NO_EXTENSION_UPDATE_NOTIFIER`, `NO_COLOR`, `GH_TELEMETRY`, and
+ * `CI` and `GITHUB_ACTIONS` removed) is
+ * the same for every call and lives in core/ghstatus.ts's `GH_ENV` (item 23a), the way
  * `LC_ALL=C` and `GIT_OPTIONAL_LOCKS=0` belong to RealGitRunner — and the §7.5 login terminal
  * must keep prompting, so a per-host function must not switch prompts off. A fresh object on
  * every call, so no caller can change another's.

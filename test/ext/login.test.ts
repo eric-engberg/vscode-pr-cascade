@@ -9,10 +9,11 @@
  * are test/unit/login.test.ts's, on fake timers; here the poll is 50 ms and the point is the
  * wiring.
  *
- * Never the real git-spice: the handle `activate()` returns under `ExtensionMode.Test` (plan
- * §13.4) carries the setup flow's seams, and the test puts a FakeCommandRunner (which throws on
- * any command nobody canned) and a fake host in them, and the real ones back afterwards. git is
- * real: the probe's own questions run against the fixture.
+ * Never the real git-spice, and never the real gh: the handle `activate()` returns under
+ * `ExtensionMode.Test` (plan §13.4) carries the setup flow's seams, and the test puts a
+ * FakeCommandRunner (which throws on any command nobody canned — gh's three questions are canned
+ * since item 23a, when step 5 began reaching gh on every GitHub row) and a fake host in them, and
+ * the real ones back afterwards. git is real: the probe's own questions run against the fixture.
  *
  * Layer: test, extension host (plan §9.1 layer 3; Mocha inside VS Code, `npm run test:ext`).
  * Depends on: the running extension (what activate() returns in test mode), the fixture
@@ -45,12 +46,18 @@ let real: ReadinessDeps;
 // The fake git-spice's keys (executable and arguments joined by spaces), as the probe asks them —
 // and as the tree's `enrich` asks `gs log` (item 20b): once the init fix has written
 // `refs/spice/data`, the E83 refresh enriches through the same fake, which throws for a command
-// nobody canned, so the default fake answers `gs log` with nothing (no layer tracked).
+// nobody canned, so the default fake answers `gs log` with nothing (no layer tracked). And the
+// fake gh's three keys (item 23a): once step 5 exists every GitHub row reaches gh through the same
+// runner, so the default fake answers all three as found and logged in.
 // see primer §4 (const)
 const VERSION = 'git-spice --no-prompt --version';
 const AUTH = 'git-spice --no-prompt auth status --forge github';
 const LOG = 'git-spice --no-prompt log short --all --json';
 const BANNER = 'git-spice 0.31.2\nCopyright (C) Abhinav Gupta\n';
+const GH_VERSION = 'gh --version';
+const GH_STACK = 'gh stack --version';
+const GH_AUTH = 'gh auth status --hostname github.com';
+const GH_BANNER = 'gh version 2.102.0 (2026-09-30)\nhttps://github.com/cli/cli/releases/tag/v2.102.0\n';
 
 /** The repository root: the workspace folder named `repo` (the other folder is its empty `nested` subfolder). */
 // see primer §25 (arrays: find) and §30 (`??`)
@@ -92,6 +99,9 @@ function fakeGitSpice(extra: Canned[] = []): { runner: FakeCommandRunner; result
   const results = new Map<string, CommandResult>([
     [VERSION, exited(0, BANNER)],
     [LOG, exited(0, '')],
+    [GH_VERSION, exited(0, GH_BANNER)],
+    [GH_STACK, exited(0, 'gh stack version 0.1.1\n')],
+    [GH_AUTH, exited(0, 'github.com\n  ✓ Logged in to github.com account test (keyring)\n')],
   ]);
   for (const canned of extra) {
     results.set(canned.key, canned.result);
@@ -248,7 +258,7 @@ describe('PR Cascade: Set Up git-spice (plan §7.13.1, D58)', () => {
       assert.deepStrictEqual(host.asked, [
         { severity: 'warning', message: 'git-spice is not logged in to github.com.', buttons: ['Log in'] },
         { severity: 'information', message: 'Logged in to github.com.', buttons: [] },
-        { severity: 'information', message: 'git-spice 0.31.2 is ready for repo (github.com).', buttons: [] },
+        { severity: 'information', message: 'git-spice 0.31.2 and gh 2.102.0 are ready for repo (github.com).', buttons: [] },
       ]);
       assert.strictEqual(treeChanges, 1);
       // asked at least twice while waiting, and never logged in by itself
@@ -302,7 +312,7 @@ describe('PR Cascade: Set Up git-spice (plan §7.13.1, D58)', () => {
 
       // assert
       assert.strictEqual(first, 'acted');
-      assert.deepStrictEqual(host.asked, [{ severity: 'information', message: 'git-spice 0.31.2 is ready for repo (github.com).', buttons: [] }]);
+      assert.deepStrictEqual(host.asked, [{ severity: 'information', message: 'git-spice 0.31.2 and gh 2.102.0 are ready for repo (github.com).', buttons: [] }]);
       assert.strictEqual(host.terminals.created.length, 0);
 
       // act again: `gs auth logout` in a terminal, then the command once more (the offer is closed)

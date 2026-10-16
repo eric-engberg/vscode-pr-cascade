@@ -848,7 +848,9 @@ character (where §20 above had `?` after a group), and the three captured group
 to `Number` (§27). Nothing anchors the end, so `0.32.0-dev` matches too — the suffix is
 ignored on purpose. `GIT_SPICE_BANNER`, `/^git-spice (\S+)/`, takes the word after the
 program's name from its `--version` banner: `\S` is any character that is *not* whitespace,
-so `(\S+)` is "the next word".
+so `(\S+)` is "the next word". `src/core/ghstatus.ts`'s `GH_BANNER` (`/^gh version (\S+)/`) and
+`GH_STACK_BANNER` are the same shape for gh and its extension (M5 item 23a); `VERSION` itself
+moved to `src/core/version.ts` in the same item.
 
 `src/core/digest.ts` (M5, item 20a) adds the first pattern with a **flag**: `SPICE_DATA_LINE` is
 `/^refs\/spice\/data /m`, and the `m` after the closing slash — *multiline* — makes `^` match at
@@ -2013,6 +2015,9 @@ item 18) — "any keys, all strings", which is what a set of environment variabl
 what `process.env` is spread together with (§16). An `interface` with three named fields
 would have said *which* variables, but an interface is not accepted where a `Record` is
 asked for, and the runner must take gh's variables (item 23) as readily as git-spice's.
+`GH_ENV` in `src/core/ghstatus.ts` (M5 item 23a) is another, spread under `ghEnv(host)` into one
+request (`{ ...GH_ENV, ...ghEnv(host) }`, §16) — a `Record` and an interface together make an
+ordinary object literal, which is what `CommandRequest.env` takes.
 
 `K` can also be a union of exact strings (§10), and then the `Record` is a lookup table the
 compiler checks for completeness: `FORGE_NAMES: Record<ForgeKind, string>` in
@@ -2387,7 +2392,9 @@ one that takes `Ready` has every field of the ready member with no narrowing to 
 shape may itself hold a union: `Extract<Readiness, { kind: 'gs-missing' | 'gs-too-old' }>`
 (`NotLocated` in `src/core/backends/gitspice.ts`, M5 item 20a) keeps both members whose `kind`
 fits — the two answers step 1 of the probe can give — so a function taking one has no case to
-write for the eight others.
+write for every other member. `GhStepAnswer` in the same file (M5 item 23a) is one more `Extract`
+over `Readiness` — the two members step 5 can answer — with a member of the function's own
+(`passed`) joined to it by `|`, as `locateGitSpice`'s `located` is joined to `NotLocated`.
 
 ## 50. `JSON.stringify` and `JSON.parse`
 
@@ -2904,7 +2911,7 @@ and then `detection.forge.kind === 'github'`, and the `Forge` can be passed on w
 needs one. And every member carries `remote`, the one fact all three messages need, so the
 result can be turned into a message without the caller remembering what it asked for.
 
-`Readiness` in `src/core/backend.ts` (M5, item 17) is the largest: ten members, one for `ready`
+`Readiness` in `src/core/backend.ts` (M5, item 17) is the largest: eleven members since M5 item 23a (ten before it), one for `ready`
 and one for each step of plan §7.13.1's probe that can fail, listed in probe order because the
 first failure is the answer. Why a union and not `{ ready: boolean; problems: Problem[] }`:
 that shape allows `ready: true` with problems and `ready: false` with none, and every reader
@@ -3234,6 +3241,13 @@ so a real child process can run to its `close` while every `setTimeout` the runn
 caught in the fake queue, and `vi.getTimerCount()` then says how many are still pending: zero,
 once the result is in, is the proof that the runner cleared the timer it set. `vi.useRealTimers()`
 in the `finally` hands the clock back whatever the assertion said.
+
+**`vi.stubEnv(name, value)`** is the environment's counterpart: it sets `process.env[name]` for
+the test and remembers the old value; `vi.stubEnv(name, undefined)` *deletes* the variable
+(Vitest 5 types the value `string | undefined`), which is how `test/git/gh.git.test.ts` (M5 item
+23a) keeps a developer's `GH_TOKEN` — or a CI job's `GITHUB_TOKEN` — out of a pin; `vi.unstubAllEnvs()`
+in `afterAll` puts everything back. The real-git files have used `vi.stubEnv` since M1 for `HOME`
+and the `GIT_CONFIG_*` variables.
 
 ## 66. The status bar: `window.createStatusBarItem` and `StatusBarItem`
 
@@ -3760,8 +3774,8 @@ is a compile error rather than a runtime one, and `close`'s second argument is t
 *First seen in `test/git/git.git.test.ts` (`it.skipIf(runningAsRoot)`, M1 — the pointer was
 added in M5 item 22a) and `test/git/command.git.test.ts` (`describe.skipIf(process.platform ===
 'win32')`, item 22a); `it.runIf` and the files that skip as a block in `test/helpers/gitspice.ts` /
-`test/git/gitspice*.git.test.ts` (item 22b); `expect(value, message)` earlier, in
-`test/unit/enrich.test.ts` (item 20a).*
+`test/git/gitspice*.git.test.ts` (item 22b) and `test/git/gh.git.test.ts` (M5 item 23a, the same
+shape for gh); `expect(value, message)` earlier, in `test/unit/enrich.test.ts` (item 20a).*
 
 ```ts
 const runningAsRoot = process.getuid !== undefined && process.getuid() === 0;
@@ -3883,3 +3897,42 @@ and after". A write that lands just after the snapshot must not pass as "nothing
 the time exactly as APFS and ext4 store it — and a file replaced by `rename` keeps its path and
 may keep its size, but never its inode. Beside the snapshot the tests read the ref digest
 (core/digest.ts) too: two instruments, so a quiet write would have to fool both.
+
+## 80. `Readiness['kind']`: the type of one field, read off a type
+
+*First seen in `src/vscode/login.ts` (`PROGRESS`, M5 item 23a).*
+
+```ts
+const PROGRESS: Record<Readiness['kind'], number> = {
+  'gs-missing': 0,
+  'gs-too-old': 1,
+  …
+  'gh-not-logged-in': 6,
+  ready: 7,
+};
+
+function progressOf(answer: Readiness): number {
+  return PROGRESS[answer.kind];
+}
+```
+
+Square brackets after a *type* name, with a field's name as a string type inside, are the type
+that field has in that type: `Readiness['kind']` is "whatever `kind` holds in a `Readiness`". It is
+an **indexed access type** — to types what `object['field']` is to values — and, like every type,
+it produces nothing at run time. On a union such as `Readiness` (§59) it is the union of what each
+member holds in that field, so `Readiness['kind']` is the eleven exact strings `'ready' |
+'gs-missing' | … | 'gh-not-logged-in'` (§10) without anyone writing them out. The field name must
+be one every member has: `Readiness['ghPath']` is a compile error, because `ready` has no such
+field. Contrast `Extract` (§49), which picks *members* of a union by shape; this picks a *field*
+across all of them.
+
+Why it is here: `Record<Readiness['kind'], number>` (§43) demands exactly one number per member —
+add a member to `Readiness` and `PROGRESS` fails to compile until it has a line, which is the whole
+point of writing the table this way. The `if` chain it replaced ended in `return 3` for "every
+other member", and item 23a's `gh-not-logged-in` would have taken the forge step's number in
+silence: a git-spice login's wait, which passes only when the probe gets *further* than 4, could
+never have passed into a member counted as 3. The read, `PROGRESS[answer.kind]`, is a plain lookup
+the compiler knows cannot miss (§43's rule for a `Record` over exact strings). §43's `keyof
+DiscoveryOptions` is the other direction of the same idea — the names of a type's fields rather
+than the type of one field — and the two are often met together as `T[keyof T]`, "the type of any
+field of `T`", which this codebase has not needed yet.

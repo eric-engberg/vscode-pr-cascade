@@ -11,14 +11,25 @@
  * src/vscode/login.ts and src/extension.ts (items 19b–20; 21b for `push`). Plan: §4.4 (the target shape — this
  * file declares what the next PR implements and grows with each one, D55; item 20a adds
  * `enrich` and `track`, item 21a `push` and `PushResult`), §7.8, §7.13.1 (the probe), §7.13.3
- * (what each member runs), §8 E21/E25/E55/E56/E57/E59/E60/E62/E62b/E67/E70/E75/E76, §13.2
- * D59/D61.
+ * (what each member runs), §8 E21/E23/E24/E25/E55/E56/E57/E59/E60/E62/E62b/E67/E70/E75/E76, §13.2
+ * D59/D61/D65 (item 23a: the gh members).
  */
 
 // see primer §1 (import / export) and §9 (`import type`: a types-only module imports types only)
 import type { Forge, ForgeConfig } from './forge';
 import type { RepoState, StackLayer } from './model';
 import type { TrunkBranch } from './readinessFix';
+
+/**
+ * The gh step 5 found on a GitHub repository (item 23a): the executable that answered `--version`
+ * as gh — `gh`, or `prCascade.ghPath` — and its version token. Read by `readyMessage` now and by
+ * M7's `gh stack link` (core/nativeStack.ts) later; `null` on `ready` where gh plays no part (GitLab).
+ */
+// see primer §9 (interface) and §14 (readonly)
+export interface GhFound {
+  readonly path: string;
+  readonly version: string;
+}
 
 /**
  * The readiness probe's answer (plan §7.13.1): one object, never a throw. A tagged union on
@@ -43,9 +54,10 @@ export type Readiness =
    * Every step passed. `gsPath` is the executable that answered — `git-spice`, the program's
    * name since v0.24, or `gs`, the old name a `go install` build still has (and Ghostscript's on
    * a Homebrew Mac, plan §13.1) — and later commands run whichever worked. `gsVersion` is the version token of `gs --version`'s banner (`git-spice 0.31.2 …`), for
-   * the log.
+   * the log. `gh` is step 5's answer on GitHub — the gh that answered and its version — and
+   * `null` on GitLab, where gh plays no part (E24; item 23a).
    */
-  | { readonly kind: 'ready'; readonly gsPath: string; readonly gsVersion: string; readonly forge: Forge }
+  | { readonly kind: 'ready'; readonly gsPath: string; readonly gsVersion: string; readonly forge: Forge; readonly gh: GhFound | null }
   /** Step 1, E62: none of the executables answered `--version` as git-spice — `prCascade.gsPath` when set, else `git-spice` then `gs`. `tried` lists them for the message, Ghostscript's `gs` included. */
   | { readonly kind: 'gs-missing'; readonly tried: readonly string[] }
   /** Step 1: the `--version` banner's token `found` (`0.30.0`; `dev` for a build with no number) is below — or cannot be read against — the floor `minimum` the message quotes. */
@@ -88,14 +100,28 @@ export type Readiness =
   /** Step 4, E67: `gs auth status --forge <kind>` exited non-zero. `forge.host` goes in the prompt; `gsPath` runs `gs auth login`. */
   | { readonly kind: 'not-logged-in'; readonly gsPath: string; readonly forge: Forge }
   /**
-   * Step 5, E62b, GitHub only: `gh` ≥ 2.90 and the gh-stack extension — the one step where two
-   * things can be missing at once, so `missing` is a list, never empty. `ghVersion` is null when
-   * gh was not found at all; a gh that is present but too old is `missing: ['gh']` with its version
-   * here and the floor in `ghMinimum`, so the message can quote both. Produced from item 23; item
-   * 19a words it already (core/readinessFix.ts), and 19b shows it. Push and the local gs operations still work in this state (E24, E62b):
-   * only CR creation waits for gh.
+   * Step 5, E62b, GitHub only (item 23a): gh ≥ 2.90 and the gh-stack extension — the one step
+   * where two things can be missing at once, so `missing` is a list, never empty, `gh` before
+   * `gh-stack`. `['gh', 'gh-stack']` with `ghVersion` and `ghPath` null when nothing answered `gh
+   * --version` as gh (an extension cannot be there without it, so `gh stack --version` is not
+   * asked); `['gh']` for a gh below the floor, with `ghVersion` as its banner printed it (`2.89.9`,
+   * or a token with no numbers) and `ghMinimum` for the message; `['gh-stack']` when `gh stack
+   * --version` printed no `gh stack version` banner — asked whatever gh's version, so one probe
+   * lists both when both are wrong. `ghPath` is the gh that answered — `gh` from PATH, or
+   * `prCascade.ghPath` — for the upgrade and the `gh extension install github/gh-stack` lines
+   * (item 23b). Push and every local operation still work (E24).
    */
-  | { readonly kind: 'gh-missing'; readonly forge: Forge; readonly missing: readonly ('gh' | 'gh-stack')[]; readonly ghVersion: string | null; readonly ghMinimum: string };
+  | { readonly kind: 'gh-missing'; readonly forge: Forge; readonly missing: readonly ('gh' | 'gh-stack')[]; readonly ghVersion: string | null; readonly ghMinimum: string; readonly ghPath: string | null }
+  /**
+   * Step 5, E23, GitHub only (item 23a): `gh auth status --hostname <host>` exited non-zero — gh has
+   * no account for this host (per host, E22), or an account whose token it could not validate
+   * (revoked, or no network: gh exits 1 for all three and only its stderr tells them apart, plan
+   * §13.4; the fix is the same login for the two that have one, so one member). `forge.host` goes
+   * in the sentence and the `--hostname`; `ghPath` runs `gh auth login`. The last member before
+   * `ready`: everything installable has been found, so the wait that follows the login polls one
+   * network call, not three.
+   */
+  | { readonly kind: 'gh-not-logged-in'; readonly forge: Forge; readonly ghPath: string };
 
 /**
  * The `ready` member alone — what an action gated on readiness receives once every step passed
@@ -161,7 +187,7 @@ export interface StackBackend {
    * The §7.13.1 probe for the repository at `root`, whose forge is read from the remote
    * `remote` names (`prCascade.remote`). Memoized per root and remote until a refresh after a
    * failure — a changed `prCascade.remote` is a new question. Never throws for anything
-   * git-spice or the forge can be in: every such outcome is a Readiness member. It rejects
+   * git-spice, gh (item 23a) or the forge can be in: every such outcome is a Readiness member. It rejects
    * only as every core function does — when git itself cannot run (E17), or the root cannot
    * be used as a directory — faults the caller already draws for the tree (D56).
    */

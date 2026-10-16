@@ -27,7 +27,7 @@
  * (`setUpGitSpice`; `trackStack` for `chooseRepository`, item 20b), test/helpers/fakeReadinessHost.ts
  * (types), test/unit/login.test.ts, test/ext/login.test.ts.
  * Plan: §4.2, §7.5 steps 1–4, §7.6, §7.13.1, §8 E55/E59/E62/E67/E70/E83, §9.4 `ext/login`, §10.1
- * item 19b, §13.2 D58, §13.4 (test-only hooks).
+ * item 19b, §13.2 D58, D65 (item 23a: `progressOf` as a table), §13.4 (test-only hooks).
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -139,34 +139,32 @@ interface Flight {
 type FixResult = 'passed' | 'failed' | 'changed';
 
 /**
- * How far through the probe's steps an answer is (plan §7.13.1's order, `ready` last). A wait has
+ * How far through the probe's steps each answer is (plan §7.13.1's order, `ready` last). A wait has
  * passed when the probe gets *further* than the member it was waiting on — not merely somewhere
  * else: a git-spice that times out during a login wait answers `gs-missing`, and that is no login.
  * The forge step's four members share one number; only E70 among them has a fix, and that fix
- * does not wait.
+ * does not wait. A `Record` over every `kind`, so a member added to `Readiness` does not compile
+ * here until it has a number — the `if` chain this replaced (item 19b) ended in `return 3`, and
+ * item 23a's new member would have silently taken the forge step's place, so that a git-spice
+ * login's wait could never have passed into it.
  */
-// see primer §59 (narrowing on `kind`)
+// see primer §43 (`Record<K, V>`: one value for each member of a union of keys) and §80 (`Readiness['kind']`: the type of one field, read off the union)
+const PROGRESS: Record<Readiness['kind'], number> = {
+  'gs-missing': 0,
+  'gs-too-old': 1,
+  'not-initialized': 2,
+  'no-remote': 3,
+  'remote-unparseable': 3,
+  'forge-unrecognized': 3,
+  'forge-unsupported': 3,
+  'not-logged-in': 4,
+  'gh-missing': 5,
+  'gh-not-logged-in': 6,
+  ready: 7,
+};
+
 function progressOf(answer: Readiness): number {
-  if (answer.kind === 'gs-missing') {
-    return 0;
-  }
-  if (answer.kind === 'gs-too-old') {
-    return 1;
-  }
-  if (answer.kind === 'not-initialized') {
-    return 2;
-  }
-  if (answer.kind === 'not-logged-in') {
-    return 4;
-  }
-  if (answer.kind === 'gh-missing') {
-    return 5;
-  }
-  if (answer.kind === 'ready') {
-    return 6;
-  }
-  // no-remote, remote-unparseable, forge-unrecognized, forge-unsupported: the forge step
-  return 3;
+  return PROGRESS[answer.kind];
 }
 
 /**

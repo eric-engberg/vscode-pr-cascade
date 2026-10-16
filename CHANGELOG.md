@@ -14,7 +14,9 @@ in `package.json`, and a release's tag is that version with a `v` in front.
   GitLab repository git-spice recognises, and that you are logged in — and offers the fix for
   the first thing missing (install or upgrade with Homebrew or from git-spice's install page,
   `git-spice repo init`, the forge's `spice.forge.*` URLs, `git-spice auth login` in a
-  terminal), waits for it to take, refreshes, and goes on to the next.
+  terminal), waits for it to take, refreshes, and goes on to the next. On a GitHub repository it
+  also checks that GitHub CLI (`gh`) 2.90 or newer and its `gh-stack` extension are installed and
+  that gh is logged in to the host, and the final line names both tools.
 - Setting `prCascade.gsPath`: the git-spice executable, when VS Code's PATH does not find it.
 - Each layer now shows what git-spice knows about it beside its count: its pull request's id
   (`#12`; the link is in the tooltip), `needs restack`, `needs push`, or `not tracked`. Nothing

@@ -1,29 +1,21 @@
 /**
  * test/unit/readiness.test.ts — the readiness probe as a specification: every `Readiness`
- * member in probe order (gs → initialised → forge → auth), the exact programs and git commands
- * the probe runs — and the ones it must never run — the version rules, and the memo.
+ * member in probe order (gs → initialised → forge → auth → gh on GitHub), the exact programs and
+ * git commands the probe runs — and the ones it must never run — the version rules, and the memo.
  *
- * Layer: test, unit (plan §9.1 layer 1; Vitest, no git, no git-spice, no VS Code). Depends on:
- * src/core/backends/gitspice.ts, test/helpers/fakeGit.ts, test/helpers/fakeCommand.ts. The
+ * Layer: test, unit (plan §9.1 layer 1; Vitest, no git, no git-spice, no gh, no VS Code). Depends
+ * on: src/core/backends/gitspice.ts, test/helpers/fakeGit.ts, test/helpers/fakeCommand.ts. The
  * real runner is in test/git/command.git.test.ts; the init check on real git in
- * test/git/readiness.git.test.ts. Plan: §10.1 item 18, §7.13.1, §8 E17/E22/E55/E59/E60/E62/
- * E67/E70/E75, §9.4 `unit/readiness`, §13.2 D56.
+ * test/git/readiness.git.test.ts; the gh step on its own in test/unit/ghstatus.test.ts. Plan:
+ * §10.1 items 18 and 23a, §7.13.1, §8 E17/E22/E23/E24/E55/E59/E60/E62/E62b/E67/E70/E75, §9.4
+ * `unit/readiness`, §13.2 D56/D65.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
 import { describe, expect, it } from 'vitest';
 import type { CommandResult } from '../../src/core/command';
 import type { ForgeConfig } from '../../src/core/forge';
-import {
-  formatVersion,
-  GitSpiceBackend,
-  gitSpiceVersion,
-  GS_ENV,
-  isAtLeast,
-  MINIMUM_GS_VERSION,
-  parseVersion,
-  PROBE_TIMEOUT_MS,
-} from '../../src/core/backends/gitspice';
+import { GitSpiceBackend, gitSpiceVersion, GS_ENV, PROBE_TIMEOUT_MS } from '../../src/core/backends/gitspice';
 import { exited, FakeCommandRunner, neverStarted, timedOut } from '../helpers/fakeCommand';
 import { FakeGitRunner } from '../helpers/fakeGit';
 
@@ -51,6 +43,38 @@ const GHOSTSCRIPT = exited(0, '10.08.0\n');
 const LOGGED_IN = exited(0, '', 'INF github: currently logged in\n');
 const NOT_LOGGED_IN = exited(1, '', 'FTL git-spice: github: not logged in\n');
 
+// What gh 2.102.0 prints to the three questions of step 5 (measured 2026-10-14, plan §13.4;
+// test/unit/ghstatus.test.ts has every shape — here only what the probe's rows need): the
+// banner, the extension's banner and gh's hint when it is absent, the logged-in report, and two of
+// the exit-1 shapes the probe reads as one — a host with no account, and a token gh could not
+// validate (revoked, or no network).
+const GH_BANNER = 'gh version 2.102.0 (2026-09-30)\nhttps://github.com/cli/cli/releases/tag/v2.102.0\n';
+const GH_STACK_PRESENT = exited(0, 'gh stack version 0.1.1\n');
+const GH_STACK_ABSENT = exited(1, '', 'gh stack is available as an official extension.\nTo install it, run:\n  gh extension install github/gh-stack\n');
+const GH_LOGGED_IN = exited(0, 'github.com\n  ✓ Logged in to github.com account test (keyring)\n  - Active account: true\n  - Git operations protocol: ssh\n');
+const GH_NO_ACCOUNT = exited(1, '', 'You are not logged into any accounts on github.com\n');
+const GH_OFFLINE = exited(
+  1,
+  '',
+  'github.com\n  X Failed to log in to github.com account test (keyring)\n  - Active account: true\n  - The token in keyring is invalid.\n  - To re-authenticate, run: gh auth refresh -h github.com\n',
+);
+
+/** What `ready.gh` records on the happy path: the gh that answered, and its version token. */
+const GH_FOUND = { path: 'gh', version: '2.102.0' };
+
+// The environment every gh spawn carries, as a literal (the plan names the variables, and a
+// constant compared with itself would pass at any value).
+const GH_ENV_LITERAL = {
+  GH_PROMPT_DISABLED: '1',
+  GH_NO_UPDATE_NOTIFIER: '1',
+  GH_NO_EXTENSION_UPDATE_NOTIFIER: '1',
+  NO_COLOR: '1',
+  GH_TELEMETRY: 'false',
+  CI: undefined,
+  GITHUB_ACTIONS: undefined,
+  GH_HOST: 'github.com',
+};
+
 // No `spice.forge.*` configuration, as parseForgeConfig reads it from a config call that
 // exited 1.
 const NO_CONFIG: ForgeConfig = { kind: null, rejectedKind: null, hosts: new Map() };
@@ -65,6 +89,11 @@ function versionKey(executable: string): string {
 function authKey(executable: string, kind: string): string {
   return `${executable} --no-prompt auth status --forge ${kind}`;
 }
+
+/** The fake's keys for gh's three questions (item 23a), for one executable and one lower-cased host. */
+const ghVersionKey = (executable: string): string => `${executable} --version`;
+const ghStackKey = (executable: string): string => `${executable} stack --version`;
+const ghAuthKey = (executable: string, host: string): string => `${executable} auth status --hostname ${host}`;
 
 /**
  * A git fake for the happy path — initialised, a github.com origin, nothing configured — with
@@ -88,12 +117,15 @@ interface Canned {
   result: CommandResult;
 }
 
-/** A command fake where `git-spice` is git-spice 0.31.2 and logged in to GitHub, with answers replaced or added. */
+/** A command fake where `git-spice` is git-spice 0.31.2 logged in to GitHub, and `gh` is gh 2.102.0 with its extension, logged in to github.com — with answers replaced or added. */
 // see primer §31 (type arguments on `new Map`) and §22 (for ... of)
 function commandsFor(entries: Canned[] = []): FakeCommandRunner {
   const results = new Map<string, CommandResult>([
     [versionKey('git-spice'), exited(0, BANNER)],
     [authKey('git-spice', 'github'), LOGGED_IN],
+    [ghVersionKey('gh'), exited(0, GH_BANNER)],
+    [ghStackKey('gh'), GH_STACK_PRESENT],
+    [ghAuthKey('gh', 'github.com'), GH_LOGGED_IN],
   ]);
   for (const entry of entries) {
     results.set(entry.key, entry.result);
@@ -116,7 +148,7 @@ describe('GitSpiceBackend.readiness', () => {
       const answer = await backend.readiness(ROOT, 'origin');
 
       // assert
-      expect(answer).toStrictEqual({ kind: 'ready', gsPath: 'git-spice', gsVersion: '0.31.2', forge: GITHUB_FORGE });
+      expect(answer).toStrictEqual({ kind: 'ready', gsPath: 'git-spice', gsVersion: '0.31.2', forge: GITHUB_FORGE, gh: GH_FOUND });
       expect(commands.calls[0]).toStrictEqual({
         executable: 'git-spice',
         args: ['--no-prompt', '--version'],
@@ -141,8 +173,8 @@ describe('GitSpiceBackend.readiness', () => {
       const answer = await backend.readiness(ROOT, 'origin');
 
       // assert: the one that answered is the one later commands will run
-      expect(answer).toStrictEqual({ kind: 'ready', gsPath: 'gs', gsVersion: '0.31.2', forge: GITHUB_FORGE });
-      expect(commands.calls.map((call) => call.executable)).toEqual(['git-spice', 'gs', 'gs']);
+      expect(answer).toStrictEqual({ kind: 'ready', gsPath: 'gs', gsVersion: '0.31.2', forge: GITHUB_FORGE, gh: GH_FOUND });
+      expect(commands.calls.map((call) => call.executable)).toEqual(['git-spice', 'gs', 'gs', 'gh', 'gh', 'gh']);
     });
 
     // Every way a candidate can fail to answer as git-spice; each moves the probe to the next.
@@ -222,9 +254,9 @@ describe('GitSpiceBackend.readiness', () => {
       // act
       const answer = await backend.readiness(ROOT, 'origin');
 
-      // assert
-      expect(answer).toStrictEqual({ kind: 'ready', gsPath: '/opt/homebrew/bin/git-spice', gsVersion: '0.31.2', forge: GITHUB_FORGE });
-      expect(commands.calls.map((call) => call.executable)).toEqual(['/opt/homebrew/bin/git-spice', '/opt/homebrew/bin/git-spice']);
+      // assert: gh is the default `gh` whatever gsPath says — the two settings are independent (item 23a)
+      expect(answer).toStrictEqual({ kind: 'ready', gsPath: '/opt/homebrew/bin/git-spice', gsVersion: '0.31.2', forge: GITHUB_FORGE, gh: GH_FOUND });
+      expect(commands.calls.map((call) => call.executable)).toEqual(['/opt/homebrew/bin/git-spice', '/opt/homebrew/bin/git-spice', 'gh', 'gh', 'gh']);
     });
 
     it('treats a setting that is only whitespace as unset — the two default names are tried', async () => {
@@ -324,7 +356,7 @@ describe('GitSpiceBackend.readiness', () => {
       const answer = await backend.readiness(ROOT, 'origin');
 
       // assert
-      expect(answer).toStrictEqual({ kind: 'ready', gsPath: 'git-spice', gsVersion: 'v0.31.2', forge: GITHUB_FORGE });
+      expect(answer).toStrictEqual({ kind: 'ready', gsPath: 'git-spice', gsVersion: 'v0.31.2', forge: GITHUB_FORGE, gh: GH_FOUND });
     });
 
     it('reads a banner with CRLF line endings', async () => {
@@ -538,7 +570,7 @@ describe('GitSpiceBackend.readiness', () => {
   });
 
   describe('the whole probe (E55)', () => {
-    it('is exactly two programs and three git commands on the happy path, in order — and no gh (step 5 is item 23\'s)', async () => {
+    it('is exactly five programs and three git commands on the GitHub happy path, in order — the three of gh after the git-spice login', async () => {
       // arrange
       const git = gitFor();
       const commands = commandsFor();
@@ -546,15 +578,18 @@ describe('GitSpiceBackend.readiness', () => {
       // act
       await new GitSpiceBackend(git, commands).readiness(ROOT, 'origin');
 
-      // assert
+      // assert: an extra spawn, or one out of place, fails here
       expect(commands.calls.map((call) => `${call.executable} ${call.args.join(' ')}`)).toEqual([
         'git-spice --no-prompt --version',
         'git-spice --no-prompt auth status --forge github',
+        'gh --version',
+        'gh stack --version',
+        'gh auth status --hostname github.com',
       ]);
       expect(git.calls.map((call) => call.args.join(' '))).toEqual([REF_KEY, GET_URL_KEY, CONFIG_KEY]);
     });
 
-    it('puts --no-prompt first and the git-spice environment on every program it runs', async () => {
+    it('puts --no-prompt first and the git-spice environment on every git-spice it runs', async () => {
       // arrange
       const commands = commandsFor();
 
@@ -562,7 +597,10 @@ describe('GitSpiceBackend.readiness', () => {
       await new GitSpiceBackend(gitFor(), commands).readiness(ROOT, 'origin');
 
       // assert
-      for (const call of commands.calls) {
+      // see primer §25 (arrays: `filter`)
+      const gitSpiceCalls = commands.calls.filter((call) => call.executable !== 'gh');
+      expect(gitSpiceCalls.length).toBe(2);
+      for (const call of gitSpiceCalls) {
         expect(call.args[0]).toBe('--no-prompt');
         expect(call.env).toStrictEqual({ NO_COLOR: '1', LC_ALL: 'C', GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' });
         expect(call.cwd).toBe(ROOT);
@@ -570,6 +608,230 @@ describe('GitSpiceBackend.readiness', () => {
         // itself would pass at any value. (See primer §27 for the `_` in `15_000`.)
         expect(call.timeoutMs).toBe(15_000);
       }
+    });
+
+    it('puts the gh environment, GH_HOST and the probe\'s timeout on every gh spawn (item 23a)', async () => {
+      // arrange
+      const commands = commandsFor();
+
+      // act
+      await new GitSpiceBackend(gitFor(), commands).readiness(ROOT, 'origin');
+
+      // assert
+      const ghCalls = commands.calls.filter((call) => call.executable === 'gh');
+      expect(ghCalls.length).toBe(3);
+      for (const call of ghCalls) {
+        expect(call.env).toStrictEqual(GH_ENV_LITERAL);
+        expect(call.cwd).toBe(ROOT);
+        expect(call.timeoutMs).toBe(15_000);
+      }
+    });
+  });
+
+  describe('step 5 — gh on GitHub (E62b, E23, E24)', () => {
+    it('runs no gh at all for a gitlab.com remote — on GitLab nothing is affected (E24)', async () => {
+      // arrange
+      const commands = commandsFor([{ key: authKey('git-spice', 'gitlab'), result: LOGGED_IN }]);
+      const backend = new GitSpiceBackend(gitFor({ url: 'git@gitlab.com:org/repo.git\n' }), commands);
+
+      // act
+      const answer = await backend.readiness(ROOT, 'origin');
+
+      // assert: ready with no gh to name, and the five commands of the GitLab happy path
+      expect(answer.kind).toBe('ready');
+      if (answer.kind === 'ready') {
+        expect(answer.gh).toBeNull();
+      }
+      // see primer §25 (arrays: `every`)
+      expect(commands.calls.every((call) => call.executable !== 'gh')).toBe(true);
+      expect(commands.calls.length).toBe(2);
+    });
+
+    it('reports gh-missing with both listed when nothing answers as gh (E24, E62b)', async () => {
+      // arrange
+      const commands = commandsFor([{ key: ghVersionKey('gh'), result: neverStarted('not-found') }]);
+      const backend = new GitSpiceBackend(gitFor(), commands);
+
+      // act
+      const answer = await backend.readiness(ROOT, 'origin');
+
+      // assert: one gh spawn — the extension is not asked about without gh
+      expect(answer).toStrictEqual({ kind: 'gh-missing', forge: GITHUB_FORGE, missing: ['gh', 'gh-stack'], ghVersion: null, ghMinimum: '2.90.0', ghPath: null });
+      expect(commands.calls.filter((call) => call.executable === 'gh').length).toBe(1);
+    });
+
+    it('reports a gh below the floor with its version, the extension still asked', async () => {
+      // arrange
+      const commands = commandsFor([{ key: ghVersionKey('gh'), result: exited(0, 'gh version 2.89.9 (2025-01-01)\n') }]);
+      const backend = new GitSpiceBackend(gitFor(), commands);
+
+      // act
+      const answer = await backend.readiness(ROOT, 'origin');
+
+      // assert
+      expect(answer).toStrictEqual({ kind: 'gh-missing', forge: GITHUB_FORGE, missing: ['gh'], ghVersion: '2.89.9', ghMinimum: '2.90.0', ghPath: 'gh' });
+      expect(commands.calls.map((call) => call.args.join(' '))).toContain('stack --version');
+    });
+
+    it('lists only the extension when gh is fine', async () => {
+      // act
+      const answer = await new GitSpiceBackend(gitFor(), commandsFor([{ key: ghStackKey('gh'), result: GH_STACK_ABSENT }])).readiness(ROOT, 'origin');
+
+      // assert
+      expect(answer).toStrictEqual({ kind: 'gh-missing', forge: GITHUB_FORGE, missing: ['gh-stack'], ghVersion: '2.102.0', ghMinimum: '2.90.0', ghPath: 'gh' });
+    });
+
+    it('lists both when both are wrong', async () => {
+      // act
+      const answer = await new GitSpiceBackend(
+        gitFor(),
+        commandsFor([
+          { key: ghVersionKey('gh'), result: exited(0, 'gh version 2.89.9 (2025-01-01)\n') },
+          { key: ghStackKey('gh'), result: GH_STACK_ABSENT },
+        ]),
+      ).readiness(ROOT, 'origin');
+
+      // assert
+      expect(answer.kind).toBe('gh-missing');
+      if (answer.kind === 'gh-missing') {
+        expect(answer.missing).toStrictEqual(['gh', 'gh-stack']);
+      }
+    });
+
+    it('reports gh-not-logged-in on a non-zero `auth status`, asking exactly that (E23)', async () => {
+      // arrange
+      const commands = commandsFor([{ key: ghAuthKey('gh', 'github.com'), result: GH_NO_ACCOUNT }]);
+      const backend = new GitSpiceBackend(gitFor(), commands);
+
+      // act
+      const answer = await backend.readiness(ROOT, 'origin');
+
+      // assert: the member, and the whole request — the host after --hostname and in GH_HOST
+      expect(answer).toStrictEqual({ kind: 'gh-not-logged-in', forge: GITHUB_FORGE, ghPath: 'gh' });
+      expect(commands.calls[4]).toStrictEqual({
+        executable: 'gh',
+        args: ['auth', 'status', '--hostname', 'github.com'],
+        cwd: ROOT,
+        env: GH_ENV_LITERAL,
+        timeoutMs: 15_000,
+      });
+    });
+
+    it('reads the offline shape as not logged in — stderr unread, the same exit code (D65)', async () => {
+      // act
+      const answer = await new GitSpiceBackend(gitFor(), commandsFor([{ key: ghAuthKey('gh', 'github.com'), result: GH_OFFLINE }])).readiness(ROOT, 'origin');
+
+      // assert
+      expect(answer).toStrictEqual({ kind: 'gh-not-logged-in', forge: GITHUB_FORGE, ghPath: 'gh' });
+    });
+
+    it('asks gh nothing while git-spice is not logged in — step 4 first', async () => {
+      // arrange
+      const commands = commandsFor([{ key: authKey('git-spice', 'github'), result: NOT_LOGGED_IN }]);
+
+      // act
+      const answer = await new GitSpiceBackend(gitFor(), commands).readiness(ROOT, 'origin');
+
+      // assert
+      expect(answer.kind).toBe('not-logged-in');
+      expect(commands.calls.every((call) => call.executable !== 'gh')).toBe(true);
+    });
+
+    it('asks gh nothing when the forge step fails (E70)', async () => {
+      // arrange: a *.ghe.com host git-spice will not match without its url key
+      const commands = commandsFor();
+
+      // act
+      const answer = await new GitSpiceBackend(gitFor({ url: 'git@eu.ghe.com:org/repo.git\n' }), commands).readiness(ROOT, 'origin');
+
+      // assert
+      expect(answer.kind).toBe('forge-unrecognized');
+      expect(commands.calls.every((call) => call.executable !== 'gh')).toBe(true);
+    });
+
+    it('asks gh nothing when the repository is not initialised', async () => {
+      // arrange
+      const commands = commandsFor();
+
+      // act
+      await new GitSpiceBackend(gitFor({ ref: MISSING }), commands).readiness(ROOT, 'origin');
+
+      // assert
+      expect(commands.calls.every((call) => call.executable !== 'gh')).toBe(true);
+    });
+
+    it('keeps hosts apart — github.com ready beside a *.github.com host gh has no account for (E22)', async () => {
+      // arrange: one window, two repositories; the second's remote is ssh.github.com (ssh over
+      // port 443 — a host git-spice matches as GitHub's subdomain, and a host of its own to gh)
+      const git = new FakeGitRunner(
+        new Map<string, string | Error>([
+          [REF_KEY, SHA],
+          [GET_URL_KEY, 'git@github.com:org/repo.git\n'],
+          ['remote get-url ssh', 'git@ssh.github.com:org/repo.git\n'],
+          [CONFIG_KEY, MISSING],
+        ]),
+      );
+      const commands = commandsFor();
+      commands.answerIn('/work/b', 'gh', ['auth', 'status', '--hostname', 'ssh.github.com'], GH_NO_ACCOUNT);
+      const backend = new GitSpiceBackend(git, commands);
+
+      // act
+      const a = await backend.readiness('/work/a', 'origin');
+      const b = await backend.readiness('/work/b', 'ssh');
+
+      // assert: each root's gh spawns carry their own host, in the flag and in GH_HOST alike
+      expect(a.kind).toBe('ready');
+      expect(b).toStrictEqual({ kind: 'gh-not-logged-in', forge: { ...GITHUB_FORGE, host: 'ssh.github.com' }, ghPath: 'gh' });
+      const ghIn = (cwd: string) => commands.calls.filter((call) => call.executable === 'gh' && call.cwd === cwd);
+      expect(ghIn('/work/a').every((call) => call.env?.GH_HOST === 'github.com')).toBe(true);
+      expect(ghIn('/work/b').every((call) => call.env?.GH_HOST === 'ssh.github.com')).toBe(true);
+      expect(ghIn('/work/b')[2].args).toStrictEqual(['auth', 'status', '--hostname', 'ssh.github.com']);
+    });
+
+    it('lower-cases a host the remote spells in capitals in the flag and GH_HOST, and keeps the spelling in the member', async () => {
+      // arrange: git-spice compares the spelling, so its url key is set to match (else E70 stops
+      // the probe before step 5); gh gets the lower-cased host either way
+      const git = gitFor({ url: 'git@GitHub.com:org/repo.git\n', config: 'spice.forge.github.url https://GitHub.com\n' });
+      const commands = commandsFor();
+
+      // act
+      const answer = await new GitSpiceBackend(git, commands).readiness(ROOT, 'origin');
+
+      // assert
+      expect(answer.kind).toBe('ready');
+      if (answer.kind === 'ready') {
+        expect(answer.forge.host).toBe('GitHub.com');
+      }
+      expect(commands.calls[4].args).toStrictEqual(['auth', 'status', '--hostname', 'github.com']);
+      expect(commands.calls.filter((call) => call.executable === 'gh').every((call) => call.env?.GH_HOST === 'github.com')).toBe(true);
+    });
+
+    it('runs every gh spawn with the configured executable, independently of gsPath', async () => {
+      // arrange: the fourth constructor argument (the setting is item 23b's); `gh` itself is not canned
+      const commands = new FakeCommandRunner(
+        new Map<string, CommandResult>([
+          [versionKey('git-spice'), exited(0, BANNER)],
+          [authKey('git-spice', 'github'), LOGGED_IN],
+          [ghVersionKey('/opt/homebrew/bin/gh'), exited(0, GH_BANNER)],
+          [ghStackKey('/opt/homebrew/bin/gh'), GH_STACK_PRESENT],
+          [ghAuthKey('/opt/homebrew/bin/gh', 'github.com'), GH_LOGGED_IN],
+        ]),
+      );
+
+      // act
+      const answer = await new GitSpiceBackend(gitFor(), commands, '', '/opt/homebrew/bin/gh').readiness(ROOT, 'origin');
+
+      // assert
+      expect(answer).toStrictEqual({ kind: 'ready', gsPath: 'git-spice', gsVersion: '0.31.2', forge: GITHUB_FORGE, gh: { path: '/opt/homebrew/bin/gh', version: '2.102.0' } });
+      expect(commands.calls.map((call) => call.executable)).toEqual(['git-spice', 'git-spice', '/opt/homebrew/bin/gh', '/opt/homebrew/bin/gh', '/opt/homebrew/bin/gh']);
+    });
+
+    it('rejects, naming the root, when `gh --version` reports an unusable directory', async () => {
+      // act
+      const result = new GitSpiceBackend(gitFor(), commandsFor([{ key: ghVersionKey('gh'), result: neverStarted('unusable-directory') }])).readiness(ROOT, 'origin');
+
+      // assert
+      await expect(result).rejects.toThrow('readiness: /work/app');
     });
   });
 
@@ -604,12 +866,44 @@ describe('GitSpiceBackend.readiness', () => {
 
       // act: the user ran `gs auth login` in the terminal item 19 opens
       results.set(authKey('git-spice', 'github'), LOGGED_IN);
+      results.set(ghVersionKey('gh'), exited(0, GH_BANNER));
+      results.set(ghStackKey('gh'), GH_STACK_PRESENT);
+      results.set(ghAuthKey('gh', 'github.com'), GH_LOGGED_IN);
       const after = await backend.readiness(ROOT, 'origin');
 
-      // assert
+      // assert: two programs the first time (step 4 stopped it), five the second
       expect(before.kind).toBe('not-logged-in');
       expect(after.kind).toBe('ready');
-      expect(commands.calls.length).toBe(4);
+      expect(commands.calls.length).toBe(7);
+    });
+
+    it('does not remember gh-not-logged-in — the next question finds the gh login that happened meanwhile (item 23a)', async () => {
+      // arrange
+      const commands = commandsFor([{ key: ghAuthKey('gh', 'github.com'), result: GH_NO_ACCOUNT }]);
+      const backend = new GitSpiceBackend(gitFor(), commands);
+      const before = await backend.readiness(ROOT, 'origin');
+
+      // act: `gh auth login` in the terminal item 23b will open
+      commands.answerIn(ROOT, 'gh', ['auth', 'status', '--hostname', 'github.com'], GH_LOGGED_IN);
+      const after = await backend.readiness(ROOT, 'origin');
+
+      // assert: five programs each time
+      expect(before.kind).toBe('gh-not-logged-in');
+      expect(after.kind).toBe('ready');
+      expect(commands.calls.length).toBe(10);
+    });
+
+    it('answers from memory with no gh spawned the second time', async () => {
+      // arrange
+      const commands = commandsFor();
+      const backend = new GitSpiceBackend(gitFor(), commands);
+      await backend.readiness(ROOT, 'origin');
+
+      // act
+      await backend.readiness(ROOT, 'origin');
+
+      // assert: the three gh spawns of the first probe, and no more — the network call among them is not repeated
+      expect(commands.calls.filter((call) => call.executable === 'gh').length).toBe(3);
     });
 
     it('does not remember gs-missing either — an install is noticed by the next refresh', async () => {
@@ -625,6 +919,9 @@ describe('GitSpiceBackend.readiness', () => {
       // act
       results.set(versionKey('git-spice'), exited(0, BANNER));
       results.set(authKey('git-spice', 'github'), LOGGED_IN);
+      results.set(ghVersionKey('gh'), exited(0, GH_BANNER));
+      results.set(ghStackKey('gh'), GH_STACK_PRESENT);
+      results.set(ghAuthKey('gh', 'github.com'), GH_LOGGED_IN);
       const after = await backend.readiness(ROOT, 'origin');
 
       // assert
@@ -636,6 +933,9 @@ describe('GitSpiceBackend.readiness', () => {
       const results = new Map<string, CommandResult>([
         [versionKey('git-spice'), exited(0, BANNER)],
         [authKey('git-spice', 'github'), LOGGED_IN],
+        [ghVersionKey('gh'), exited(0, GH_BANNER)],
+        [ghStackKey('gh'), GH_STACK_PRESENT],
+        [ghAuthKey('gh', 'github.com'), GH_LOGGED_IN],
       ]);
       const commands = new FakeCommandRunner(results);
       const backend = new GitSpiceBackend(gitFor(), commands);
@@ -646,10 +946,27 @@ describe('GitSpiceBackend.readiness', () => {
       backend.forget(ROOT, 'origin');
       const after = await backend.readiness(ROOT, 'origin');
 
-      // assert: the memo would have said ready; asked again, the probe ran all its programs again
+      // assert: the memo would have said ready; asked again, the probe ran its programs again —
+      // five the first time, two the second (step 4 stopped it)
       expect(remembered.kind).toBe('ready');
       expect(after.kind).toBe('not-logged-in');
-      expect(commands.calls.length).toBe(4);
+      expect(commands.calls.length).toBe(7);
+    });
+
+    it('forgets a remembered ready and finds a gh logout (item 23a)', async () => {
+      // arrange: ready and remembered; then `gh auth logout` in a terminal
+      const commands = commandsFor();
+      const backend = new GitSpiceBackend(gitFor(), commands);
+      const remembered = await backend.readiness(ROOT, 'origin');
+      commands.answerIn(ROOT, 'gh', ['auth', 'status', '--hostname', 'github.com'], GH_NO_ACCOUNT);
+
+      // act
+      backend.forget(ROOT, 'origin');
+      const after = await backend.readiness(ROOT, 'origin');
+
+      // assert
+      expect(remembered.kind).toBe('ready');
+      expect(after.kind).toBe('gh-not-logged-in');
     });
 
     it('forgets only the repository and remote it is told — another remote stays remembered', async () => {
@@ -713,12 +1030,12 @@ describe('GitSpiceBackend.readiness', () => {
       const aAgain = await backend.readiness('/work/a', 'origin');
       const bAgain = await backend.readiness('/work/b', 'origin');
 
-      // assert: a answered from memory, b probed twice
+      // assert: a answered from memory (five programs once — gh's three among them), b probed twice
       expect(a.kind).toBe('ready');
       expect(b.kind).toBe('not-logged-in');
       expect(aAgain).toBe(a);
       expect(bAgain.kind).toBe('not-logged-in');
-      expect(commands.calls.filter((call) => call.cwd === '/work/a').length).toBe(2);
+      expect(commands.calls.filter((call) => call.cwd === '/work/a').length).toBe(5);
       expect(commands.calls.filter((call) => call.cwd === '/work/b').length).toBe(4);
     });
   });
@@ -740,55 +1057,9 @@ describe('GitSpiceBackend.readiness', () => {
   });
 });
 
-describe('the version helpers', () => {
-  // Text → the three numbers, or null. One test per row, so a failure names the text.
-  // see primer §10 (union types: `Version | null` as a row's expectation)
-  const parsed: { text: string; expected: { major: number; minor: number; patch: number } | null }[] = [
-    { text: '0.31.2', expected: { major: 0, minor: 31, patch: 2 } },
-    { text: 'v1.2.3-rc1', expected: { major: 1, minor: 2, patch: 3 } },
-    { text: '0.32.0-dev (abc1234 2026-07-21)', expected: { major: 0, minor: 32, patch: 0 } },
-    { text: '0.31', expected: null },
-    { text: 'dev', expected: null },
-    { text: '', expected: null },
-    { text: 'GPL Ghostscript 10.08.0', expected: null },
-  ];
-
-  for (const row of parsed) {
-    it(`parseVersion reads ${JSON.stringify(row.text)} as ${row.expected === null ? 'no version' : 'three numbers, ignoring what follows'}`, () => {
-      // act
-      const version = parseVersion(row.text);
-
-      // assert
-      expect(version).toStrictEqual(row.expected);
-    });
-  }
-
-  const compared: { major: number; minor: number; patch: number; atLeast: boolean }[] = [
-    { major: 0, minor: 31, patch: 0, atLeast: true },
-    { major: 0, minor: 31, patch: 1, atLeast: true },
-    { major: 1, minor: 0, patch: 0, atLeast: true },
-    { major: 0, minor: 30, patch: 99, atLeast: false },
-    { major: 0, minor: 9, patch: 99, atLeast: false },
-  ];
-
-  for (const row of compared) {
-    it(`isAtLeast puts ${row.major}.${row.minor}.${row.patch} ${row.atLeast ? 'at or above' : 'below'} the 0.31.0 floor — numbers, not text`, () => {
-      // act
-      const result = isAtLeast({ major: row.major, minor: row.minor, patch: row.patch }, MINIMUM_GS_VERSION);
-
-      // assert
-      expect(result).toBe(row.atLeast);
-    });
-  }
-
-  it('formatVersion writes the floor the way a message quotes it', () => {
-    // act
-    const text = formatVersion(MINIMUM_GS_VERSION);
-
-    // assert
-    expect(text).toBe('0.31.0');
-  });
-
+// The version helpers' rows (`parseVersion`, `isAtLeast`, `formatVersion`) are test/unit/version.test.ts's
+// since item 23a moved them to core/version.ts; the banner reader is the backend's and stays here.
+describe('gitSpiceVersion — the banner reader', () => {
   // Program output → git-spice's version token, or null for any other program's.
   const banners: { stdout: string; token: string | null; note: string }[] = [
     { stdout: BANNER, token: '0.31.2', note: 'the release banner' },

@@ -19,20 +19,21 @@
  * the remote spells it (git-spice compares the spelling, D54).
  *
  * Layer: core (no VS Code imports; plan §4.1). Depends on: core/backend.ts (`NotReady`,
- * `Ready`), core/backends/gitspice.ts (`parseVersion`), core/forge.ts (types), core/model.ts
- * (`GitRunner`), core/shell.ts (a command quoted inside a sentence), Node's `node:path`.
+ * `Ready`), core/forge.ts (types), core/model.ts (`GitRunner`), core/shell.ts (a command quoted
+ * inside a sentence), core/version.ts (`parseVersion` — from core/backends/gitspice.ts until
+ * item 23a moved it; nothing here runs the backend), Node's `node:path`.
  * Depended on by: src/vscode/login.ts and src/extension.ts (item 19b),
  * test/unit/readinessFix.test.ts, test/git/trunkBranch.git.test.ts. Plan: §7.6, §7.13.1, §8
- * E21/E25/E55/E59/E60/E62/E62b/E67/E70/E75, §10.1 item 19a, §13.2 D57.
+ * E21/E23/E25/E55/E59/E60/E62/E62b/E67/E70/E75, §10.1 items 19a and 23a, §13.2 D57/D65.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
 import * as path from 'node:path';
 import type { NotReady, Ready } from './backend';
-import { parseVersion } from './backends/gitspice';
 import type { Forge, ForgeConfig, ForgeKind, HostAddress } from './forge';
 import type { GitRunner } from './model';
 import { shellCommandLine } from './shell';
+import { parseVersion } from './version';
 
 /** git-spice's install page — the offer when Homebrew is not there, or the git-spice found is not Homebrew's. */
 // see primer §4 (const)
@@ -134,12 +135,12 @@ export interface Offer {
 
 /**
  * The offer for a member that is not `ready` (plan §7.13.1, E55) — one test per variant in
- * test/unit/readinessFix.test.ts. Six members have a function of their own below; the three
- * that are a single sentence (no-remote, remote-unparseable, forge-unsupported) are worded here.
- * Taking `NotReady` rather than `Readiness` means `ready` cannot be passed in, and the chain of
- * `if`s is complete: after the eight tests, the compiler has narrowed `readiness` to
- * `gh-missing` (primer §59), so a member added to the union later is a compile error on the
- * last line until it gets a case.
+ * test/unit/readinessFix.test.ts. Six members have a function of their own below; the four
+ * that are a single sentence (no-remote, remote-unparseable, forge-unsupported, and
+ * gh-not-logged-in until item 23b brings its line) are worded here. Taking `NotReady` rather
+ * than `Readiness` means `ready` cannot be passed in, and the chain of `if`s is complete: after
+ * the nine tests, the compiler has narrowed `readiness` to `gh-missing` (primer §59), so a
+ * member added to the union later is a compile error on the last line until it gets a case.
  */
 // see primer §59 (tagged unions: narrowing on `kind`) and §28 (`path.basename`)
 export function offerFor(readiness: NotReady, facts: OfferFacts): Offer {
@@ -176,13 +177,27 @@ export function offerFor(readiness: NotReady, facts: OfferFacts): Offer {
   if (readiness.kind === 'not-logged-in') {
     return loginOffer(readiness.gsPath, readiness.forge);
   }
+  if (readiness.kind === 'gh-not-logged-in') {
+    // E23. The words only, until item 23b wires the login line (it needs prCascade.gitProtocol).
+    // The host is lower-cased after --hostname because gh does not fold the flag's case (plan §13.4).
+    return textOnly('warning', `gh is not logged in to ${readiness.forge.host}. Run gh auth login --hostname ${readiness.forge.host.toLowerCase()} --web in a terminal.`);
+  }
+  // E62b. 19a's information sentence, produced for real from this PR: no button and no command
+  // named until item 23b brings the install offers — one PR of interim, recorded in D65 rather
+  // than reworded twice.
   return ghMissingOffer(readiness.forge.host, readiness.missing, readiness.ghVersion, readiness.ghMinimum);
 }
 
-/** `git-spice 0.31.2 is ready for app (github.com).` — the answer when the user asked by hand and every step passed. */
-// see primer §12 (template strings)
+/**
+ * `git-spice 0.31.2 is ready for app (gitlab.com).` — or, on GitHub, `git-spice 0.31.2 and gh
+ * 2.102.0 are ready for app (github.com).`: the answer when the user asked by hand and every step
+ * passed, naming every tool it checked (item 23a: `ready.gh` is the gh step 5 found, `null` where
+ * there was no step).
+ */
+// see primer §12 (template strings) and §48 (the conditional expression)
 export function readyMessage(ready: Ready, root: string): string {
-  return `git-spice ${ready.gsVersion} is ready for ${path.basename(root)} (${ready.forge.host}).`;
+  const tools = ready.gh === null ? `git-spice ${ready.gsVersion} is` : `git-spice ${ready.gsVersion} and gh ${ready.gh.version} are`;
+  return `${tools} ready for ${path.basename(root)} (${ready.forge.host}).`;
 }
 
 /**
@@ -461,9 +476,10 @@ function loginOffer(gsPath: string, forge: Forge): Offer {
 }
 
 /**
- * E62b, produced from item 23: what is missing for pull requests on GitHub, with the version of
- * a gh that is there but too old. Information — pushing and every local operation still work —
- * and no button until item 23 decides how gh is installed.
+ * E62b, produced for real since item 23a (the probe's step 5): what is missing for pull requests
+ * on GitHub, with the version of a gh that is there but too old. Information — pushing and every
+ * local operation still work — and no button until item 23b brings the three install offers
+ * (D65 records the one PR of interim).
  */
 // see primer §25 (arrays: `map`), §48 (the conditional expression) and §59 (`readonly ('gh' | 'gh-stack')[]`)
 function ghMissingOffer(host: string, missing: readonly ('gh' | 'gh-stack')[], ghVersion: string | null, ghMinimum: string): Offer {

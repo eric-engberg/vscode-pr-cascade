@@ -7,10 +7,11 @@
 set -u
 
 # git-spice and gh are warnings, not failures: the extension calls git-spice from M5 on and gh
-# from item 23, but `npm test` passes without them — the three test files that run a real
-# git-spice (test/git/gitspice*.git.test.ts) skip themselves when none is found, and CI installs
-# its own. `npm run test:ext` downloads its own VS Code. --strict turns every warning into a
-# failure.
+# from item 23a, but `npm test` passes without them — the three real-git-spice files
+# (test/git/gitspice*.git.test.ts) and the real-gh file (test/git/gh.git.test.ts) skip themselves
+# when the tool is absent; CI installs a pinned git-spice, relies on the gh its runner images
+# ship, and sets PRCASCADE_REQUIRE_GS/GH so a skip fails there. `npm run test:ext` downloads its
+# own VS Code. --strict turns every warning into a failure.
 STRICT=0
 
 usage() {
@@ -278,11 +279,14 @@ if have gh; then
     elif version_ge "$gh_version" "$GH_MINIMUM"; then
         report ok "gh" "$gh_version"
     else
-        report warn "gh" "$gh_version is older than $GH_MINIMUM (gh stack needs $GH_MINIMUM)" \
+        report warn "gh" "$gh_version is older than $GH_MINIMUM (the extension's floor — MINIMUM_GH_VERSION in src/core/ghstatus.ts)" \
             "$(install_hint 'brew upgrade gh' https://github.com/cli/cli#installation)"
     fi
 
-    if gh extension list 2>/dev/null | grep -q 'gh-stack'; then
+    # `gh stack --version` needs neither a login nor the network; `gh extension list` exits 4 when
+    # gh is logged out and would report "not installed" wrongly (the probe asks the same question —
+    # src/core/ghstatus.ts).
+    if gh stack --version >/dev/null 2>&1; then
         report ok "gh-stack extension" "installed"
     else
         report warn "gh-stack extension" "not installed" "    gh extension install github/gh-stack"
@@ -294,7 +298,7 @@ if have gh; then
             report ok "gh login" "logged in to $host"
         else
             report warn "gh login" "not logged in to $host" \
-                "    gh auth login --hostname $host --web"
+                "    gh auth login --hostname $host --web --git-protocol https"
         fi
     else
         report skip "gh login" "no 'origin' remote to take a host from"

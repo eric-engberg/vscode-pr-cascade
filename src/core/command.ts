@@ -1,5 +1,5 @@
 /**
- * core/command.ts — runs a program other than git — git-spice now, gh from item 23 — and
+ * core/command.ts — runs a program other than git — git-spice and, since item 23a, gh — and
  * answers with what happened, whatever happened: the exit code, both output streams, or why
  * the program never started. Never a rejection, because for the callers here an exit code is
  * an answer, not a failure: `gs auth status` exiting 1 means "not logged in", and a missing
@@ -9,8 +9,8 @@
  * core/git.ts for the three things both runners need the same way — the output ceiling, the
  * working-directory check and the ENOENT/EACCES classification. Depended on by:
  * core/backends/gitspice.ts (the readiness probe, item 18; `enrich` and `track`, item 20a;
- * `push`, item 21a) and, from item 23, the gh probe; test/helpers/fakeCommand.ts implements the
- * interface for tests. Plan: §4.2, §7.13 (every gs call: `--no-prompt`, env, cwd), §7.13.1, §11.3
+ * `push`, item 21a) and core/ghstatus.ts (the probe's gh step, item 23a); test/helpers/fakeCommand.ts
+ * implements the interface for tests. Plan: §4.2, §7.13 (every gs call: `--no-prompt`, env, cwd), §7.13.1, §11.3
  * (the `execa` question: this file is the "execFile wrapper" it was measured against in item 21a
  * and kept — D61), §13.2 D56, D61, D63 (item 22a: the process-group kill).
  */
@@ -39,12 +39,15 @@ export interface CommandRequest {
   /**
    * Variables pinned on top of the caller's environment. Each tool's module owns its own:
    * git-spice's `NO_COLOR`, `LC_ALL`, `GIT_OPTIONAL_LOCKS` and, from item 21a, `GIT_TERMINAL_PROMPT` (plan §7.13.1); gh's `GH_HOST` and
-   * hygiene (item 23). Absent means "the environment as it is". A value typed as an
+   * hygiene (item 23a). Absent means "the environment as it is". A value typed as an
    * `interface` — core/forge.ts's `GhEnv` — is not accepted here as it is (an interface has no
-   * index signature, primer §43); item 23 spreads it into a literal, `{ ...ghEnv(host), … }`,
-   * which it does anyway to add the hygiene variables.
+   * index signature, primer §43); core/ghstatus.ts spreads it into a literal,
+   * `{ ...GH_ENV, ...ghEnv(host) }`, which it does anyway to add the hygiene variables. A value
+   * of `undefined` removes the variable from the program's environment: Node leaves out an
+   * env entry whose value is undefined, so `{ ...process.env, ...request.env }` deletes what
+   * the caller had (item 23a: gh's `CI` and `GITHUB_ACTIONS`).
    */
-  readonly env?: Record<string, string>;
+  readonly env?: Record<string, string | undefined>;
   /**
    * Kill the program after this many milliseconds and report `timedOut`. Absent means no
    * limit. The readiness probe sets one on every spawn: a tool stuck behind a keychain prompt
@@ -89,7 +92,7 @@ export interface CommandResult {
 }
 
 /**
- * How core runs git-spice (and, from item 23, gh). An interface, like GitRunner (core/model.ts),
+ * How core runs git-spice (and, since item 23a, gh). An interface, like GitRunner (core/model.ts),
  * so two things can satisfy it: RealCommandRunner below and test/helpers/fakeCommand.ts, which
  * answers from canned results — the readiness probe is tested without a git-spice on the
  * machine. Unlike GitRunner it is not bound to one executable: the probe tries two names for

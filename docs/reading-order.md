@@ -15,33 +15,33 @@ the repository root; its §13 is the running log of decisions and deviations mad
    plan §13.4), `engines` (which VS Code), and `contributes`: the **Stack** view under Source Control (`views.scm`), the **Refresh
    Stack** command and the toolbar slot it sits in (`commands`, `menus` › `view/title`,
    `navigation@1` = an inline icon), the **Open Changes** command (`prCascade.openDiff`,
-   M3 — no menu entry: a click on a file row is what runs it, item 57; the right-click
+   M3 — no menu entry: a click on a file row is what runs it, item 62; the right-click
    menu is a later milestone's, plan §7.2.1), the **Set Up git-spice** command
-   (`prCascade.setUpGitSpice`, M5 item 19b — Command Palette only; it runs item 62's flow), the
+   (`prCascade.setUpGitSpice`, M5 item 19b — Command Palette only; it runs item 67's flow), the
    **Track Stack with git-spice** command (`prCascade.trackStack`, M5 item 20b — in the view's
    `…` menu, `2_stack@8`, shown only while `prCascade.hasUntracked` is true: a context key
    `src/extension.ts` sets after every load, primer §74), the **Push Whole Stack** command
    (`prCascade.pushStack`, M5 item 21b — `2_stack@1`, the first entry in that menu, always
    shown; `enablement: !prCascade.rebaseInProgress`, a second key from the same listener, greys
-   it and Track Stack while a rebase is paused: primer §74, item 54), and the five
+   it and Track Stack while a rebase is paused: primer §74, item 59), and the five
    settings (`configuration`: `prCascade.trunk`, `prCascade.gitPath` — empty by default,
-   meaning "the git the built-in Git extension found", item 56 — `prCascade.remote`,
-   `prCascade.statusBar`, item 58, and `prCascade.gsPath`, the git-spice executable, empty for
-   "`git-spice`, then `gs`", item 33).
+   meaning "the git the built-in Git extension found", item 61 — `prCascade.remote`,
+   `prCascade.statusBar`, item 63, and `prCascade.gsPath`, the git-spice executable, empty for
+   "`git-spice`, then `gs`", item 35).
    There is deliberately no
    `extensionDependencies` entry for the Git extension (plan §7.14.1 says why). Everything
    declared here is given code in `src/extension.ts`. `version` is the release's tag without
-   its `v` (item 82 checks that), and `publisher` — `local` until a Marketplace publisher
+   its `v` (item 87 checks that), and `publisher` — `local` until a Marketplace publisher
    exists — is the first half of the extension's id, `local.vscode-pr-cascade`, the name the
    extension-host tests look it up by. The `scripts` block is every command a developer
    runs; the `devDependencies` block is the toolchain, nothing here ships.
 2. **`src/extension.ts`** — the entry point and the wiring. Read it twice: now for the
-   shape — `activate` builds the adapter for the built-in Git extension (item 56), builds
+   shape — `activate` builds the adapter for the built-in Git extension (item 61), builds
    the provider from two loader functions and the output channel, creates the view with
    `createTreeView` (primer §67) and the status bar item fed by the provider's
-   `onDidLoadStates` (item 58) — the same listener keeps `lastStates` and sets the two context
-   keys named in item 54 (M5 items 20b and 21b) — registers the five commands — the third, "Set
-   Up git-spice", runs the setup flow of item 62; the fourth, "Track Stack with git-spice", is
+   `onDidLoadStates` (item 63) — the same listener keeps `lastStates` and sets the two context
+   keys named in item 59 (M5 items 20b and 21b) — registers the five commands — the third, "Set
+   Up git-spice", runs the setup flow of item 67; the fourth, "Track Stack with git-spice", is
    `trackStack` at the bottom; the fifth, "Push Whole Stack", is `pushStack` below it —
    refreshes on the adapter's
    open/close event and on workspace-folder
@@ -51,13 +51,13 @@ the repository root; its §13 is the running log of decisions and deviations mad
    while the view is hidden and once at startup (plan §13.4, D52), returns
    `{ provider, refresh }` — plus `statusBar`, `treeView` and the setup flow's seams
    `readinessDeps` in test mode (primer §68) — and again after
-   item 65, when `connectedGit` and
+   item 70, when `connectedGit` and
    `loadRepoStates` at the bottom read as the pipeline in a row: the Git extension's
    connection (awaited; an unusable Git extension is thrown as a `GitUnavailableError`,
    E82) → settings → `RealGitRunner` over `gitExecutable(setting, api.git.path)` → the
    Git extension's repositories, sorted by `sortRepositoryRoots` → `loadRepoState` per
    repository (M5 item 20b split it out): `detectTrunk` → `computeStack` → `backend.enrich`
-   (item 33's local tier, through the window's one backend) → `logEnrichment`, the Output lines
+   (item 35's local tier, through the window's one backend) → `logEnrichment`, the Output lines
    that say how many layers git-spice tracks and whether `gs log` ran or the memo answered;
    `loadChangedFiles` under it, run for one
    layer when its row is opened: the same connection → `changedFiles`; and `loadFileAtRef`
@@ -65,7 +65,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
    <ref>:<path> --` through `tryRun`, so a file the commit does not have is `''` (E8, E9)
    — read its doc comment for why the `--`, why never trimmed, and why `tryRun`. M5 item 19b's
    wiring is in two places: above `activate`, `realTerminalHost`, `realReadinessHost` (VS Code
-   itself as items 61 and 62 take it) and `readinessDeps` (the seams, handed to tests only);
+   itself as items 66 and 67 take it) and `readinessDeps` (the seams, handed to tests only);
    at the bottom, `backendFor` (one git-spice backend per window, rebuilt when the git, the
    setting or — in a test — the runner changes), `probeFor` and `setUpGitSpice`, the command.
    Then M5 item 20b's: `lastStates` and `hasUntracked`, `notEnrichedMessage` (the sentence for a
@@ -92,7 +92,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
    about it: read its doc comment for the three states — no key, `null`, an entry — and for
    why an entry with no `down` is git-spice's trunk line), `RepoState` (everything about one
    repository: root, trunk, HEAD's branch or `null`, whether a rebase is paused, the layers
-   bottom to top, and `enrichment?` — how item 33's `enrich` went, the `Enrichment` union
+   bottom to top, and `enrichment?` — how item 35's `enrich` went, the `Enrichment` union
    above it), and `FileStatus` / `ChangedFile`, the row under a layer, built by
    `src/core/changes.ts` (item 16). The file's one import is `import type` from
    `src/core/gsLog.ts` (item 27): a layer carries the parser's own line.
@@ -131,7 +131,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
    `--end-of-options` and with `^{commit}` on the end) and `remoteDefaultBranch` (what
    `symbolic-ref` reads, and why `trim()` is safe on a ref name when it was not on a
    path). `TrunkOptions` at the top is the two settings, handed in as plain values so
-   this file never touches VS Code — `src/vscode/config.ts` (item 53) is what builds it.
+   this file never touches VS Code — `src/vscode/config.ts` (item 58) is what builds it.
 9. **`test/unit/trunk.test.ts`** — every step of the order as a specification against the
    fake, including the exact git commands each path runs and where it stops: configured
    ref found / missing (E4, no fall-through), `origin/HEAD`, a stale `origin/HEAD`,
@@ -187,7 +187,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
     by item 15's rebase tests), and — since M5 item 22b, for the real-git-spice files, items
     50–52 — `commitOnTrunk` (a pushed trunk commit: a restack needed, or a conflict when it
     touches `a`) and `addHook` (an executable git hook). The `directory` option is for the two
-    callers outside Vitest: the extension-host workspace (item 73) and `npm run fixture` (item 80). The class at the
+    callers outside Vitest: the extension-host workspace (item 78) and `npm run fixture` (item 85). The class at the
     bottom is the first one in the codebase whose methods carry real domain logic; the
     `Fixture` interface above it is all a test ever sees.
 14. **`test/git/stack.git.test.ts`** — `computeStack` on real repositories: the Appendix A
@@ -324,7 +324,8 @@ the repository root; its §13 is the running log of decisions and deviations mad
     for a host git-spice will not match (`*.ghe.com`, Azure, a default host in capitals), which
     is what `recognizedByGitSpice` records (E70's trigger); `ForgeDetection` and `detectForge`
     for the three answers E25, E21 and E60/E70/E75 need (the `forge` member carries the
-    configuration that decided it, so a message can say why); `ghEnv` last, and why it is one key.
+    configuration that decided it, so a message can say why); `ghEnv` last, and why it is one key —
+    the rest of gh's environment is item 36's `GH_ENV`.
     Hand-rolled after measuring `hosted-git-info`, which fails §7.5's own URL list (plan D54).
 24. **`test/unit/forge.test.ts`** — the URL forms as a table (one test per row, so a failure
     names the URL that broke), the texts that must be `null`, the configuration lines as git
@@ -345,24 +346,25 @@ the repository root; its §13 is the running log of decisions and deviations mad
 26. **`src/core/backend.ts`** — the second M5 file, and the first in the codebase made only
     of types: the `StackBackend` contract every stack operation will go through (plan §4.4),
     declared with the member the next PR implements and grown by each PR after it (D55), and
-    `Readiness`, the probe's answer — a tagged union of ten members, `ready` and one per step of
-    plan §7.13.1 that can fail, in probe order. Read the union's doc comment for why the forge step
+    `Readiness`, the probe's answer — a tagged union of eleven members, `ready` and one per step of
+    plan §7.13.1 that can fail, in probe order (M5 item 23a added `gh-not-logged-in`, and `GhFound`
+    above the union, what `ready.gh` carries on GitHub). Read the union's doc comment for why the forge step
     comes before the auth step (bare `gs auth status` cannot be read until the forge is known —
     verified against git-spice 0.31.2), the order of the checks inside the forge step, and the
     rule for what each member carries: what its one-click fix needs, nothing the caller already
     holds. Two names after the union (M5 item 19a): `Ready`, the `ready` member alone, and
     `NotReady`, every member but it — the union cut in two by `Extract` and `Exclude` (primer
-    §49), so the offers in item 40 cannot be handed `ready`. M5 item 20a grows the interface by
+    §49), so the offers in item 44 cannot be handed `ready`. M5 item 20a grows the interface by
     two members, `enrich` and `track`, each with a doc comment that is the whole promise (what
     is never run, what is never changed, what a result means), and adds `TrackResult` — on
-    purpose not a tagged union (primer §59). Its `TrunkBranch` import from item 40 is
-    type-only, as item 40's import of `Ready`/`NotReady` from here is: two files naming each
+    purpose not a tagged union (primer §59). Its `TrunkBranch` import from item 44 is
+    type-only, as item 44's import of `Ready`/`NotReady` from here is: two files naming each
     other's shapes, nothing running in a circle. M5 item 21a adds `push` and `PushResult` —
     `TrackResult`'s shape (`tracked` become `pushed`) plus `notes`, the lines git-spice printed
     beside `Pushed`; read `push`'s doc comment for what it refuses and why tracking is the caller's. `npm run typecheck` is
-    this file's test; item 33 implements all four members.
+    this file's test; item 35 implements all four members.
 27. **`src/core/gsLog.ts`** — the parser for `gs log short --all --json`, one JSON object per
-    line, which item 33's `enrich` runs and whose entries item 3's `StackLayer.tracking` carries.
+    line, which item 35's `enrich` runs and whose entries item 3's `StackLayer.tracking` carries.
     Read the header, the four small interfaces of an entry (what is kept — `name`, `down`,
     `change`, `push` — and what is dropped until something reads it), then `MalformedLine` and
     `GsLogParse` — the one-problem-per-line rule and the `{ entries, malformed }` answer — then
@@ -377,8 +379,8 @@ the repository root; its §13 is the running log of decisions and deviations mad
     branch), the fields kept and dropped, `--cr-status`'s `status` kept as text, and every way a
     line can be malformed — not JSON, not an object, each field with the wrong type — reported
     once with its 1-based line number while the lines around it still parse (E57).
-29. **`src/core/command.ts`** — the second runner, for programs other than git: git-spice now,
-    gh from M5 item 23. Read the header for why it answers with a *result* and never rejects (an
+29. **`src/core/command.ts`** — the second runner, for programs other than git: git-spice and,
+    since M5 item 23a, gh (item 36). Read the header for why it answers with a *result* and never rejects (an
     exit code is an answer to the readiness probe — `auth status` exit 1 is "not logged in",
     a missing executable is "not installed"), `CommandRequest` (one object for the executable,
     the arguments, the directory, the variables and the timeout — the executable is per request
@@ -396,7 +398,8 @@ the repository root; its §13 is the running log of decisions and deviations mad
     way `fakeGit.ts` (item 5) answers git: a Map keyed by the executable and its arguments,
     every request recorded whole, `answerIn` for one directory, and a loud throw for a command
     nobody canned. The three builders at the bottom — `exited`, `neverStarted`, `timedOut` —
-    are how a test spells an answer. No vitest import, so the extension-host tests can use it.
+    are how a test spells an answer. No vitest import, so the extension-host tests can use it —
+    and, since M5 item 23a, the gh questions of item 36 are answered through it too.
 31. **`test/unit/command.test.ts`** — the fake's contract as a specification, as
     `test/unit/git.test.ts` (item 6) is for `FakeGitRunner`: what it records, what it answers,
     where `answerIn` applies, how it fails on an unknown command, and the three builders' shapes.
@@ -413,23 +416,32 @@ the repository root; its §13 is the running log of decisions and deviations mad
     result open (the pipes are destroyed after the SIGKILL, not before the SIGTERM); a grandchild
     that ignores SIGTERM while the program dies on it, still reached by a SIGKILL timer that
     outlives `close`; and no timer left queued once a result is in.
-33. **`src/core/backends/gitspice.ts`** — the first M5 file that talks to git-spice: the
+33. **`src/core/version.ts`** — the smallest M5 file, and the one two readers share (M5 item 23a):
+    a version as three numbers, `parseVersion` (`v` optional, a suffix ignored — a floor on
+    features, so `0.31.0-rc1` has 0.31's commands; `dev` and a bare `0.31` are `null`),
+    `isAtLeast` (numbers, never text — `0.9.99` is below `0.31.0`, `2.102.0` above `2.90.0`) and
+    `formatVersion`. They lived in item 35 until the gh reader (item 36) needed them too; a shared
+    module is how neither file imports the other.
+34. **`test/unit/version.test.ts`** — the helpers as a table: every text `parseVersion` reads and
+    refuses, `isAtLeast` against both floors, `formatVersion`.
+35. **`src/core/backends/gitspice.ts`** — the first M5 file that talks to git-spice: the
     readiness probe (plan §7.13.1). Read the constants first — the two names tried, the
-    variables every call gets, the timeout, the version floor — then the four small version
-    helpers, then `GitSpiceBackend` (the class holds the runners, the setting and the memo of
-    `ready` answers) and, beside it, `locateGitSpice` (step 1) and `probe` (steps 2–4) — the
-    four steps in order: find git-spice by
+    variables every call gets, the timeout, the version floor (the version helpers are item 33's
+    since M5 item 23a) — then `GitSpiceBackend` (the class holds the runners, the two settings
+    and the memo of `ready` answers) and, beside it, `locateGitSpice` (step 1), `probe` (steps
+    2–5) and `ghStep` (step 5, M5 item 23a: item 36's three questions on a GitHub repository only,
+    after the git-spice login) — the five steps in order: find git-spice by
     what it calls itself in its `--version` banner (never by its exit code — Ghostscript's
     `gs --no-prompt --version` exits 0 and prints a bare `10.08.0`, so an exit code would take it
     for git-spice), check `refs/spice/data`
     exists (never `gs log`, which on an uninitialised repository would try to initialise it and
     die at the trunk prompt — plan §7.6), classify the forge with `detectForge`, ask
-    `auth status --forge <kind>`. Read the class comment for what the probe must never do,
+    `auth status --forge <kind>`, and on GitHub ask gh (item 36). Read the class comment for what the probe must never do,
     `forget` (M5 item 19a: drop one remembered `ready`, for the setup command's fresh look —
     primer §46 for `delete`), and `gs` at the bottom for the four things every git-spice call
     carries. Then the two members M5 item 20a adds. `enrich` — plan §7.8's local tier: read its
     doc comment for the order of its steps and stop at each: nothing to ask → the same object
-    back; the digest (item 43); no `refs/spice/data` line → not enriched with no program run
+    back; the digest (item 47); no `refs/spice/data` line → not enriched with no program run
     (the §7.6 rule, enforced where the spawn would be); the memo `logByRoot` (primer §46's third
     cache — a hit is an equal digest, applied to today's layers by name); `locateGitSpice` only
     right before a `gs log`; `gs log short --all --json` (`GS_LOG_ARGS`, with `--all` for a
@@ -448,40 +460,69 @@ the repository root; its §13 is the running log of decisions and deviations mad
     before it on an auto-init failure) and, since 21a, git's own line relayed after its `FTL
     stderr:` marker — `relayedGitLine`, in four small functions rather than one loop
     (SonarCloud's 15). `notLocatedReason` says why step 1's sentences are spelled here a second
-    time rather than imported from item 40.
-34. **`test/unit/readiness.test.ts`** — the probe as a specification against both fakes: every
+    time rather than imported from item 44.
+36. **`src/core/ghstatus.ts`** — the gh half of the probe's last step (M5 item 23a, plan §7.5,
+    §7.13.1 step 5): three small questions over the CommandRunner of item 29, in cost order — gh
+    found by what it calls itself in its `--version` banner (never by exit code, as item 35 does
+    for git-spice) and read against the 2.90.0 floor with item 33's helpers; the gh-stack
+    extension by `gh stack --version`'s own banner (`gh extension list` would exit 4 without a
+    login — and 0 with `GH_HOST` set, an answer that depends on the environment; the comment says
+    so, and the facts file of item 57 pins both); the login by `gh auth status --hostname <host>`,
+    exit 0 and nothing else — the host lower-cased because gh folds neither the flag nor
+    `GH_HOST`'s case, and the same host in both because gh matches the flag against its host list,
+    which only `GH_HOST` puts a host with no account on (and a never-logged-in host is thereby a
+    network call, not a local answer: `runGh`'s doc says why that is accepted). Read `GH_ENV` for
+    the five variables every call gets beside item 23's `ghEnv` (the hygiene forge.ts promised
+    would live here, telemetry off among them — the header says what gh writes without it), then
+    `ghReadiness` for the order and why the extension is asked of a gh that is too old but not of
+    one that is not there, then `runGh`, the one request builder (M7's `gh stack link` will go
+    through it). Nothing here polls or words a sentence: the poll is item 42's over the probe, the
+    words item 44's.
+37. **`test/unit/ghstatus.test.ts`** — the three questions as a specification against the fake of
+    item 30: the exact request of each spawn (the variables spelled out, not the constant); the
+    banner table; a program that is not gh, six ways, one spawn each; the extension present,
+    absent (gh's own hint), an old gh's unknown command, a timeout — the login never asked while
+    anything is missing; auth 0 / 1 / 4 / never started / timed out, the offline shape and the
+    empty-default-token shape read exactly as "not logged in" (the one rule the probe takes on
+    faith, plan D65); `GitHub.COM` lower-cased in the flag and in `GH_HOST`, and the same host in
+    both for a `*.github.com` remote (why: item 36's `runGh`); a GHE host carried through; the
+    setting empty, blank, set, and set to something that is not gh.
+38. **`test/unit/readiness.test.ts`** — the probe as a specification against both fakes: every
     `Readiness` member in probe order, the exact programs and git commands run — and the
-    happy path's whole list of five, so an extra spawn fails — the version table, the memo
+    happy path's whole list, eight on GitHub and five on GitLab, so an extra or a misplaced spawn
+    fails — the version table, the step-5 rows (M5 item 23a: a GitLab remote spawning no gh, each
+    gh answer, two hosts in one window, the memo not remembering either gh member), the memo
     (a `ready` remembered, a failure not, two roots kept apart, `forget` dropping exactly one
     entry), and E17 let through.
-35. **`test/git/readiness.git.test.ts`** — the probe's git side on the fixture: real git says
+39. **`test/git/readiness.git.test.ts`** — the probe's git side on the fixture: real git says
     `refs/spice/data` is not there, then is (`git update-ref` standing in for `gs repo init`),
     then is not again, and a failing answer is not remembered. git-spice is faked here; the real
-    one runs in item 50, since M5 item 22b gave CI one.
-36. **`src/core/shell.ts`** — the first of M5 item 19a's three files, which decide what the
+    one runs in item 54, since M5 item 22b gave CI one. No gh is faked here: the bare origin is
+    E21, so step 5 is never reached.
+40. **`src/core/shell.ts`** — the first of M5 item 19a's three files, which decide what the
     user is told when the probe says "not ready" and what one click runs; M5 item 19b shows it.
     This one turns a command, as a list of words, into one line a terminal's shell reads back
     as exactly those words: `shellQuote` leaves a plain word bare and wraps anything else in
     single quotes, with a quote inside written `'\''` (`replaceAll`, primer §23). Read the doc
     comments for why a terminal at all (git-spice prompts there), why a leading `=` is quoted
     (zsh), and the shells it is for — sh, bash and zsh; Windows out of scope.
-37. **`test/unit/shell.test.ts`** — which words stay bare and which are quoted, one `it` per
+41. **`test/unit/shell.test.ts`** — which words stay bare and which are quoted, one `it` per
     case, and how a quote inside a word survives. Every expected line here was also run through
     sh, bash and zsh while the file was written, and each printed the word back unchanged.
-38. **`src/core/poll.ts`** — plan §7.5 step 3's poll, generalised for both tools: `waitUntil`
+42. **`src/core/poll.ts`** — plan §7.5 step 3's poll, generalised for both tools: `waitUntil`
     asks a question every interval until it says yes, until the timeout, or until an
     `AbortSignal` says stop (primer §71); `sleep` is the abortable wait inside it. Read
     `waitUntil`'s doc comment for its three rules — never ask before the first interval, count
     time in intervals rather than by the clock, let a question already being asked finish —
     and the header for why the global `setTimeout` and not `node:timers/promises` (the tests'
     fake clock replaces only the global).
-39. **`test/unit/poll.test.ts`** — five minutes of polling in milliseconds, on Vitest's fake
+43. **`test/unit/poll.test.ts`** — five minutes of polling in milliseconds, on Vitest's fake
     clock: exactly a hundred questions, the abort before, during and between them, a check that
     rejects, an hour's jump of the clock that uses up nothing, the intervals refused (zero, less,
     `NaN`, `Infinity`), and no listener left on the signal (primer §65 for
     `advanceTimersByTimeAsync` — the plain `advanceTimersByTime` cannot drive a loop that awaits
     between timers).
-40. **`src/core/readinessFix.ts`** — the offers: for each way the probe says "not ready", the
+44. **`src/core/readinessFix.ts`** — the offers: for each way the probe says "not ready", the
     sentence, its colour, at most one button and what it runs (`offerFor`), plus the line shown
     once the step passed. Read the header for the rules every sentence follows (no "PR
     Cascade:" prefix, warning only when there is something to do, never a Cancel button),
@@ -489,8 +530,8 @@ the repository root; its §13 is the running log of decisions and deviations mad
     answer: the folder, the remote, the trunk's local branch, the setting, where Homebrew is and
     whether it has git-spice), `ConfigEntry`, `Fix` (a terminal command, some `git config` lines,
     or a web page), `OfferedFix`, `Offer` — then `offerFor`, which only picks (and why its chain of
-    `if`s needs no final case: primer §59): three members are worded right there, the other six
-    have a helper below. Three repay a slower read: `trunkBranchFor`, the one question asked of
+    `if`s needs no final case: primer §59): four members are worded right there (`gh-not-logged-in`
+    among them until M5 item 23b brings its line), the other six have a helper below. Three repay a slower read: `trunkBranchFor`, the one question asked of
     git before an init offer — `gs repo init --trunk` wants a *local* branch, and the trunk is
     usually `origin/main`; `gsTooOldOffer`, for how a Homebrew install is told from the others
     now that every official package is named `git-spice`; and `unrecognizedOffer` with
@@ -499,17 +540,17 @@ the repository root; its §13 is the running log of decisions and deviations mad
     guesses `<url>/api` for any GitHub url but exactly `https://github.com` (wrong for `*.ghe.com`)
     and a stale `apiUrl` from elsewhere would otherwise apply. `FORGE_NAMES` and
     `TOKEN_VARIABLE` are `Record`s over unions (primer §43).
-41. **`test/unit/readinessFix.test.ts`** — the offers as a specification: the first case of each
+45. **`test/unit/readinessFix.test.ts`** — the offers as a specification: the first case of each
     member compares the whole offer, so a changed word fails (messages are behaviour), and the
     cases after it pin the field they are about — each `Readiness` member and its variants, then
     `readyMessage`, then `trunkBranchFor` against the git fake — a local trunk, a remote-tracking
     one with and without its local branch, a fork's trunk on another remote, a tag, a commit, a
     name git does not know.
-42. **`test/git/trunkBranch.git.test.ts`** — the same question asked of real git, once per
+46. **`test/git/trunkBranch.git.test.ts`** — the same question asked of real git, once per
     kind of trunk — `origin/HEAD`, an ambiguous name and one that looks like an option included —
     because what `--symbolic-full-name` prints for each is exactly the kind of detail another git
     version could change.
-43. **`src/core/digest.ts`** — the first of M5 item 20a's files, and the smallest: the one git
+47. **`src/core/digest.ts`** — the first of M5 item 20a's files, and the smallest: the one git
     command whose text says whether anything `gs log` could answer has changed (plan §7.14.2's
     pre-filter), and the one fact read off it. Read the header for which three ref namespaces are
     in it and why — a commit, a fetch or push, any git-spice write, including the one `gs log`
@@ -519,13 +560,13 @@ the repository root; its §13 is the running log of decisions and deviations mad
     Then `readRefDigest` (verbatim stdout, compared whole, never parsed; `run`, so a failing git is
     E17) and `isInitialised`, the probe's step-2 fact found in text already in hand — the `m` flag
     on its pattern is primer §20's.
-44. **`test/unit/digest.test.ts`** — the command spelled, the text handed back untouched, E17 let
+48. **`test/unit/digest.test.ts`** — the command spelled, the text handed back untouched, E17 let
     through, and `isInitialised`'s table: the line first or last, no line, an empty digest, and the
     three near-misses the line start and the trailing space exclude.
-45. **`test/git/digest.git.test.ts`** — the real command on the fixture: the six lines it prints
+49. **`test/git/digest.git.test.ts`** — the real command on the fixture: the six lines it prints
     and their order, then what moves the text (a `refs/spice/data` written by `update-ref`, a
     commit, a push — each undone in `finally`) and what does not (a checkout — the D59 fact).
-46. **`test/unit/enrich.test.ts`** — `GitSpiceBackend.enrich` (item 33's second half) as a
+50. **`test/unit/enrich.test.ts`** — `GitSpiceBackend.enrich` (item 35's second half) as a
     specification against both fakes: what each `gs log` line becomes on its layer (E56 — the
     trunk's own line, the later of two lines, `change.status` kept), the exact one git command and
     two programs, the input never changed; nothing asked without a trunk or layers; the self-gate
@@ -535,13 +576,13 @@ the repository root; its §13 is the running log of decisions and deviations mad
     incomplete answer leaving unlisted layers *unknown*, not untracked; then the memo of plan
     §7.14.2 — one `gs log` for two loads, the answer applied to today's layers, a changed branch,
     remote ref or `refs/spice/data` re-running it, a failure never remembered, one memo per root.
-47. **`test/unit/track.test.ts`** — `GitSpiceBackend.track` as a specification: the `gs branch
+51. **`test/unit/track.test.ts`** — `GitSpiceBackend.track` as a specification: the `gs branch
     track` commands bottom to top with their bases, the layers left alone (tracked, git-spice's
     trunk line, not enriched) while still serving as bases, nothing run when nothing is `null`,
     the stop at the first failure with git-spice's words, the two guards before the first spawn
     (`refs/spice/data`, step 1 of the probe), and the three sentences for a trunk that cannot be
     the base — the `missing` one quoting `git branch <b> <trunk>` through `shellCommandLine`.
-48. **`test/unit/push.test.ts`** — `GitSpiceBackend.push` as a specification (M5 item 21a): the one
+52. **`test/unit/push.test.ts`** — `GitSpiceBackend.push` as a specification (M5 item 21a): the one
     `stack submit --no-publish --no-update-only` with its 120 s timeout after the one git question
     and the banner; `pushed` read from the `INF Pushed` lines and `notes` from every other (order; a
     `WRN` block, a CRLF on a pushed line and stdout; the `<name>-2` rename's two lines; nothing
@@ -553,7 +594,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
     before the restack); the stale-info, cannot-lock-ref, no-remote, partial-push (`pushed:
     ['api-refactor']`, the `ERR` remedy in `notes`), detached and timeout phrases; the appended git
     line's rules; the input unchanged; E17.
-49. **`test/helpers/gitspice.ts`** — the real git-spice for the three files that follow (M5 item
+53. **`test/helpers/gitspice.ts`** — the real git-spice for the three files that follow (M5 item
     22b): found once, synchronously, by its `--version` banner (`spawnSync`, primer §28) so
     `describe.skipIf` can read the answer while Vitest collects a file (§76); `PRCASCADE_TEST_GS`
     to point the files at another build and `PRCASCADE_REQUIRE_GS` for CI's promise;
@@ -561,22 +602,22 @@ the repository root; its §13 is the running log of decisions and deviations mad
     pins (every file's size, modification time in nanoseconds and inode — `BigInt` stats, §79);
     `loadState` and `initAndTrack`, the extension's pipeline without VS Code, so no test builds a
     RepoState by hand. No vitest import, as the fixture.
-50. **`test/git/gitspice.git.test.ts`** — the backend against the real thing, offline, on one
+54. **`test/git/gitspice.git.test.ts`** — the backend against the real thing, offline, on one
     fixture in story order: readiness before and after `repo init`, enrich on an uninitialised
     repository (no spawn) and after, track bottom to top and the raw `gs log` lines by name, the
     (k) pin (three `gs log` forms change nothing under `.git`), the memo, push (the origin's heads,
     the upstreams, `push {0, 0, false}`), a detached push, a pushed trunk commit and the restack
     refusal, the second (k) pin (a deleted branch pruned: `refs/spice/data` and objects only), and
-    an empty HOME at the end. Read it beside items 46–48: the same promises, now against the
+    an empty HOME at the end. Read it beside items 50–52: the same promises, now against the
     git-spice CI pins (`GIT_SPICE_VERSION` in `.github/workflows/ci.yml`) — or your own, when one
     is on PATH.
-51. **`test/git/gitspiceFacts.git.test.ts`** — git-spice run directly, pinned so a new version fails
+55. **`test/git/gitspiceFacts.git.test.ts`** — git-spice run directly, pinned so a new version fails
     loudly: the CI test that makes a missing git-spice a failure rather than a skip (`it.runIf`,
     §76), the exit-code table as `it.each` (§78: 0 and 1 only — plan §12 item 7), outside a
     repository, `init --trunk nope`, the `<name>-2` rename and its predicate (M7 item 26's guard
     will read these), and the push killed at its timeout with a slow pre-push hook — item 22a's
     kill measured against git-spice: the branch never lands.
-52. **`test/git/gitspiceOps.git.test.ts`** — what M9 will drive, as facts: a restack interrupted by
+56. **`test/git/gitspiceOps.git.test.ts`** — what M9 will drive, as facts: a restack interrupted by
     a conflict (git's `rebase-merge`, the `ERR` remedy lines, git-spice's own record, what
     `computeStack` sees), `rebase continue` and `abort` on git-spice's pause and on a plain git
     pause (the same remedy for both; only the upstack differs — and where HEAD ends: continue
@@ -585,32 +626,46 @@ the repository root; its §13 is the running log of decisions and deviations mad
     `upstack restack`, `branch create --below` (E49's
     graph), `branch onto`. Two fixtures; the pauses are made on the bottom layer and every trunk
     commit is pushed (the header says why).
-53. **`src/vscode/config.ts`** — the first file in `src/vscode/`: the five `prCascade.*`
+57. **`test/git/gh.git.test.ts`** — the real GitHub CLI, read-only and hermetic (an empty config,
+    data and state directory, every token variable deleted): the banner's shape and the floor met,
+    `stack --version` absent with its three-line hint and the probe's whole gh step answering "the
+    extension is missing", `extension list`'s exit 4 without a login and 0 under `GH_HOST` (why the
+    probe asks `stack --version`), `auth status`'s exit 1 for a host with no account both as a
+    terminal would ask it (the local sentence) and as the probe asks it (`GH_HOST` making gh
+    validate an empty default token over the network — the proxy proves where it went), for two
+    hosts, and the offline shape with a bogus token (the same exit 1 three times — why the probe
+    reads no stderr), `auth login` refused while a token variable for the host is set and not by
+    the other pair — gh then goes to that host's device-code URL (why the login line will unset a
+    pair per host), and the three directories still empty (why `GH_ENV` turns telemetry off). Every
+    `auth` row runs through a dead proxy, so the file is the same offline and on CI. Skipped without
+    `gh`; CI requires it (`PRCASCADE_REQUIRE_GH`) and installs nothing — the runner images ship gh.
+    Read it beside item 55, whose shape it borrows.
+58. **`src/vscode/config.ts`** — the first file in `src/vscode/`: the five `prCascade.*`
     settings — four strings, `gsPath` the newest (M5 item 19b), and the `statusBar` boolean
-    (item 58) — read out of VS Code
+    (item 63) — read out of VS Code
     into a plain object (`PrCascadeSettings`). Read it for
     the boundary it draws — settings live in VS Code's configuration API, and nothing in
     `src/core` ever sees that API — and for what happened to `gitPath` in M4: its default
     is now the empty string, which is *not* turned into `git` here any more but means
     "the git the built-in Git extension found", resolved in `src/extension.ts` with the
-    connection in hand (item 56, `gitExecutable`). All of them are taken as they come: a
+    connection in hand (item 61, `gitExecutable`). All of them are taken as they come: a
     wrong string fails where it is used, with a message (E4, E17); the boolean is read by
     the status bar item on each refresh. (M1's two repository-scan settings
     and their checked readers lived here until M4; primer §41 keeps the lesson.)
-54. **`src/vscode/contextKeys.ts`** — two exported strings and nothing else: the names of the
+59. **`src/vscode/contextKeys.ts`** — two exported strings and nothing else: the names of the
     context keys `src/extension.ts`'s load listener sets and `package.json`'s `when`/`enablement`
     clauses read (M5 item 21b). Read it for why a module this small exists: a key's value cannot
     be read back (primer §74), so `test/ext/commands.test.ts` compares the manifest against these
     constants — the one check possible — and a typo in either place becomes a failing test
     instead of two commands silently enabled for ever.
-55. **`src/vscode/git.d.ts`** — not ours: the built-in Git extension's public API,
+60. **`src/vscode/git.d.ts`** — not ours: the built-in Git extension's public API,
     copied verbatim from VS Code's `release/1.85` tag (`extensions/git/src/api/git.d.ts`,
     MIT, Microsoft's header kept). Read only the header, `GitExtension` at the bottom
     (`enabled`, `onDidChangeEnablement`, `getAPI(1)`), `API` above it (`state`,
     `repositories`, the two repository events, `git.path`) and `Repository` / `RepositoryState`
     for a sense of what the extension deliberately does *not* read (plan §7.14). Why the
     1.85 file and why a `.d.ts` can only be imported with `import type`: primer §60.
-56. **`src/vscode/gitApi.ts`** — the first M4 file, and the one M4 is built on: the
+61. **`src/vscode/gitApi.ts`** — the first M4 file, and the one M4 is built on: the
     connection to the built-in Git extension (plan §7.14). Read the header for the four
     things taken from it (plan §7.14 lists what stays a git spawn of ours), then the types
     top to bottom: `GitRepository` (the slice of a repository this extension reads — its
@@ -637,7 +692,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
     per-repository listeners (`watchRepositories`, `repositoriesChanged`) whose
     `state.onDidChange` the adapter relays as `onDidRunStatus`, one event per completed
     status, left for `extension.ts` to debounce (M4 item 12b).
-57. **`src/vscode/tree.ts`** — the Stack view. Four small node classes first: `LayerNode`
+62. **`src/vscode/tree.ts`** — the Stack view. Four small node classes first: `LayerNode`
     (the row is the branch name and nothing else — plan §7.1, E44 — with the count, since M5
     item 20b what git-spice knows (`#12`, `needs restack`, `needs push`, `not tracked` — read
     the comment on the parts for their order and for why nothing is added while `tracking` is
@@ -677,7 +732,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
     both, since every rebase pause point but `git am` detaches HEAD, and the rebase row is
     the one that says what to do — then the E5 row or the layers; E4 alone
     when there is no trunk.
-58. **`src/vscode/statusbar.ts`** — the status bar item (M4 item 14, plan §7.1.0).
+63. **`src/vscode/statusbar.ts`** — the status bar item (M4 item 14, plan §7.1.0).
     `stackStatusText` first: `$(layers) <branch> · n of N` — the current layer's name and
     its place counted from the bottom (`findIndex`, primer §25) — or `$(layers) not on a
     stack` when no layer is current (on trunk, E5; a detached HEAD, E3; no trunk, E4). Then
@@ -688,7 +743,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
     cannot be asked whether it is shown. Read the two doc comments — `stackStatusText`'s for
     why `n` equals `N` in v0.1 except for two branches on one commit (E6), the class's for
     why the item describes the first repository (D52; M6 moves to the active editor's).
-59. **`src/vscode/content.ts`** — the first of M3's two VS Code files, and the smaller:
+64. **`src/vscode/content.ts`** — the first of M3's two VS Code files, and the smaller:
     `StackDiffContentProvider`, the object VS Code asks for the text behind a
     `stackdiff:` URI. Read the class comment for what a content provider is and why the
     extension has a scheme of its own (plan §3 "Diff rendering": it was written to work
@@ -701,7 +756,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
     changes). The one method decodes the `vscode.Uri` with the core's `decodeStackDiff`
     — a Uri fits `UriComponents` by shape — and is `async` so a refused URI becomes a
     rejection VS Code shows in place of the document.
-60. **`src/vscode/commands.ts`** — `openDiff`, what a click on a file row does (plan
+65. **`src/vscode/commands.ts`** — `openDiff`, what a click on a file row does (plan
     §7.2 row `prCascade.openDiff`). Read the doc comment for the four cases: no node
     (the Command Palette) → a message; a binary file (E10) → the file itself, opened
     with the built-in `vscode.open`, when its layer is checked out and the file is on
@@ -713,41 +768,43 @@ the repository root; its §13 is the running log of decisions and deviations mad
     need nothing here: the provider's `''` is the empty pane. Then the body for the
     destructuring at the top (primer §54), the two toasts that are deliberately not
     awaited, and `??` picking the old path.
-61. **`src/vscode/terminal.ts`** — the first file of M5 item 19b, the VS Code side of the
+66. **`src/vscode/terminal.ts`** — the first file of M5 item 19b, the VS Code side of the
     git-spice offers: `runInTerminal`, a command typed into the repository's own terminal
     (`PR Cascade: <folder>`, at its root) and found again for the next step while its shell
     lives — by name *and* directory, so two repositories with one folder name keep theirs
     apart — with `cd <root> &&` in front, since the user may have changed directory in it, and a
     `usable` test so the flow can pass over a terminal it gave up waiting on. Read `TerminalLike` and `TerminalHost` for why VS Code's three terminal calls come in
-    as one object (primer §72) — the `GitExtensionHost` idea of item 56 — and what that buys:
+    as one object (primer §72) — the `GitExtensionHost` idea of item 61 — and what that buys:
     a test's fake terminals, and a file Vitest can load.
-62. **`src/vscode/login.ts`** — the setup flow (plan §4.2: "prompt → terminal → poll → re-run
+67. **`src/vscode/login.ts`** — the setup flow (plan §4.2: "prompt → terminal → poll → re-run
     action"). Read the header for the shape and its one rule — a single fix in flight per
     repository, claimed at the click and never while a notification is open — then
     `ReadinessHost` (everything asked of VS Code, as one object: notifications with buttons,
     the quick pick, the browser, terminals, the disk — primer §73), `ReadyRequest` and
-    `ReadyOutcome`, then `ReadinessFlows.ensureReady` and its `onePass`: the loop of probe → offer (item 40) →
+    `ReadyOutcome`, then `ReadinessFlows.ensureReady` and its `onePass`: the loop of probe → offer (item 44) →
     click → a look again (`fixIfStillNeeded`: the step may have been done meanwhile, and a second
     `gs repo init` would replace the trunk) → fix → wait → refresh → done line, until ready and
     the action runs. `runFix` for the three kinds of fix (a page the user will not let VS Code
-    open ends it), `waitForStep` for the wait — the poll of item 38 over the probe, passed only
-    when the probe gets *further* (`progressOf`), or for an install when Homebrew's git-spice
+    open ends it), `waitForStep` for the wait — the poll of item 42 over the probe, passed only
+    when the probe gets *further* (`progressOf`, a `Record` over every `Readiness` kind since M5
+    item 23a — primer §80 — so a member without a number does not compile), or for an install when
+    Homebrew's git-spice
     appears; stopped by the close of the fix's own terminal, then one last look — and `dispose`
     for the window closing. At the bottom, `chooseRepository` (the setup command's pick, and since
     M5 item 20b Track Stack's too, since 21b Push Whole Stack's — each asks its own question
     through the third parameter) and `machineFacts` (where Homebrew is, and whether it has
     git-spice).
-63. **`test/helpers/fakeReadinessHost.ts`** — the fakes for item 62's host: terminals that
+68. **`test/helpers/fakeReadinessHost.ts`** — the fakes for item 67's host: terminals that
     remember every line they were sent and every `show`, count their close listeners and take
     terminals that were there before (`addExisting`), and notifications
     answered from a script (a held answer keeps one open; a notification with no button never
     settles, so a flow that awaited one would hang). No Vitest or Mocha import, so both runners
     use it.
-64. **`test/unit/terminal.test.ts`** — `runInTerminal` on the fake: made, reused, replaced
+69. **`test/unit/terminal.test.ts`** — `runInTerminal` on the fake: made, reused, replaced
     when its shell has exited or the caller says not to use it, the `cd` in front, kept apart
     across two repositories of one folder name, and terminals made elsewhere with no directory or
     a `Uri` one.
-65. **`test/unit/login.test.ts`** — the flow as a specification on fake timers: the login
+70. **`test/unit/login.test.ts`** — the flow as a specification on fake timers: the login
     flow step by step (nothing asked before 3 s, the refresh, the done line, the action), the
     timeout, the terminal closed with and without a login in its last seconds, a second click,
     a notification held open, two repositories, the chain of init then login in one terminal,
@@ -756,13 +813,13 @@ the repository root; its §13 is the running log of decisions and deviations mad
     backwards, Homebrew's git-spice appearing, how far the probe got for each kind of fix), what
     the offer is told, a probe that rejects, the window closing at each point; then
     `chooseRepository` and `machineFacts`.
-66. **`test/ext/activate.test.ts`** — inside a real VS Code: the extension is found by its
+71. **`test/ext/activate.test.ts`** — inside a real VS Code: the extension is found by its
     id, activates, returns `{ provider, refresh }` (plan §9.1), and has its view and command
     registered — the view is checked by running the `prCascade.focus` command VS Code
     creates for every contributed view. Read it for the shape every extension-host test
     follows (arrange / act / assert, one idea per test, `describe`/`it` imported from
     `mocha`).
-67. **`test/ext/tree.test.ts`** — the view over the fixture workspace, through the two
+72. **`test/ext/tree.test.ts`** — the view over the fixture workspace, through the two
     calls VS Code itself makes (`getChildren`, `getTreeItem`): the workspace's two folders
     — a nested subfolder and the root — are one repository, found (E1b) and shown once (E2),
     so the layers sit at the top level; every label is a branch name, top first, with no
@@ -806,7 +863,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
     `gs log` for two loads, one more after the ref moved, none for a checkout. Read the block's
     comment for the two rules its cases keep (the fake before the ref; everything undone in
     `finally`).
-68. **`test/ext/statusbar.test.ts`** — the item live, through the handle `activate()`
+73. **`test/ext/statusbar.test.ts`** — the item live, through the handle `activate()`
     returns in test mode only (primer §68): `$(layers) retry-metrics · 3 of 3` as built,
     `add-retries · 2 of 2` on the middle layer (E44 — the layer above drops out under
     HEAD-only membership, plan §12 item 2), `api-refactor · 1 of 1`, `not on a stack` on
@@ -818,7 +875,7 @@ the repository root; its §13 is the running log of decisions and deviations mad
     stand-in item (the `ext/gitApi` pattern): hidden on `[]`, hidden while off, the first of
     several repositories with its root as tooltip, `2 of 3` from a three-layer state, E6's
     `1 of 2`, `not on a stack` for E3 and E4, name and command set once, dispose.
-69. **`test/ext/gitApi.test.ts`** — the built-in Git extension as the source of
+74. **`test/ext/gitApi.test.ts`** — the built-in Git extension as the source of
     repositories, live (M4, plan §9.4 row `ext/gitApi.test.ts`). Against the *real* Git
     extension: the handshake connects and its one repository for the two-folder workspace
     is the fixture (E1b, E2 delegated); the git it names runs (`git --version`); a second
@@ -850,10 +907,10 @@ the repository root; its §13 is the running log of decisions and deviations mad
     nothing after `dispose`. Last, the tree drawing a `GitUnavailableError` as a warning
     row. E1 — a
     repository *below* the workspace folder — is next door in
-    **`test/ext-parent/parentFolder.test.ts`**, in a VS Code launch of its own (item 73
+    **`test/ext-parent/parentFolder.test.ts`**, in a VS Code launch of its own (item 78
     says why): the Git extension's own scan opens `parent/one` at its default depth and
     not `parent/deep/two`, with no setting of ours, and the view shows that stack.
-70. **`test/ext/diff.test.ts`** — the diff on click, live (M3; plan §9.4 row
+75. **`test/ext/diff.test.ts`** — the diff on click, live (M3; plan §9.4 row
     `ext/diff.test.ts`): the command is registered; run with the bottom layer's `A  a`
     node it opens one tab whose input is a `TabInputTextDiff` with a `stackdiff:` URI on
     each side and the label `a (origin/main → api-refactor)`; each side decodes (with the
@@ -875,17 +932,18 @@ the repository root; its §13 is the running log of decisions and deviations mad
     that expects no tab waits instead (an event or a timer, whichever first),
     `onlyDiffInput` for the `instanceof` on a VS Code class, and `afterEach` for why every
     tab is closed between tests.
-71. **`test/ext/login.test.ts`** — the setup flow live, through the command a user runs
+76. **`test/ext/login.test.ts`** — the setup flow live, through the command a user runs
     ("PR Cascade: Set Up git-spice") on the fixture, with a fake git-spice and a fake host put
     into the seams `activate()` hands out in test mode only (primer §68): the init offer's line
     typed, then — once the ref is written — one refresh and the next offer; the login likewise,
     ending in "ready"; a second click; a logout noticed when asked again; a changed
     `prCascade.gsPath` making a new backend; VS Code's own terminals reused. Every case ends its
-    flow before it restores the fixture.
-72. **`test/ext/commands.test.ts`** — "Track Stack with git-spice" live (M5 item 20b), through
+    flow before it restores the fixture. Since M5 item 23a the fake answers gh too — every GitHub
+    row reaches step 5 — and the ready line names both tools.
+77. **`test/ext/commands.test.ts`** — "Track Stack with git-spice" live (M5 item 20b), through
     `executeCommand('prCascade.trackStack')` on the fixture with a fake git-spice and a fake host
     in the seams: registered, and the manifest's `…` entry word for word with its `when` (and,
-    since item 21b, its `enablement`, compared against item 54's constants); the three
+    since item 21b, its `enablement`, compared against item 59's constants); the three
     untracked layers tracked bottom to top — the bottom one on the trunk's local branch, each other
     on the layer below — one refresh and one sentence (E56, E83); the repository re-loaded before
     anything runs, so a branch tracked in a terminal meanwhile is left alone; a failure mid-way that
@@ -905,8 +963,8 @@ the repository root; its §13 is the running log of decisions and deviations mad
     and the sentence's tail; a second click while pushing — a `SlowRunner` that extends the fake
     to hold the submit's answer back (primer §13) and opens its gate first thing in the `finally`;
     and the pick, pinned live in a nested `describe` that adds a second repository to the
-    workspace the way item 69 does.
-73. **`.vscode-test.mjs`** — where those workspaces come from: the fixture builder (item 13,
+    workspace the way item 74 does.
+78. **`.vscode-test.mjs`** — where those workspaces come from: the fixture builder (item 13,
     its compiled copy under `out/`) makes the stack in a temporary directory, the top
     layer's commit is amended so it also moves `b` to `b2` (the comment says why it is
     that file — a rename only shows in a diff of two snapshots when the file exists at
@@ -925,38 +983,40 @@ the repository root; its §13 is the running log of decisions and deviations mad
 
 ## The toolchain (read once, then only when something breaks)
 
-74. **`tsconfig.json`** — how `tsc` type-checks `src/`, `test/` and `scripts/`. Emits nothing.
-75. **`esbuild.mjs`** — how `src/extension.ts` becomes `dist/extension.js` (build, watch,
+79. **`tsconfig.json`** — how `tsc` type-checks `src/`, `test/` and `scripts/`. Emits nothing.
+80. **`esbuild.mjs`** — how `src/extension.ts` becomes `dist/extension.js` (build, watch,
     analyze). The `target`/`external` lines explain the two constraints VS Code imposes.
-76. **`eslint.config.mjs`** — lint rules, including the one that enforces the architecture:
+81. **`eslint.config.mjs`** — lint rules, including the one that enforces the architecture:
     `src/core/**` must not import `vscode`.
-77. **`vitest.config.mts`** — the Node-side runner: `unit` and `git` projects, coverage on
+82. **`vitest.config.mts`** — the Node-side runner: `unit` and `git` projects, coverage on
     `src/core`, and why only the `git` project gets a longer `hookTimeout` (every real git
     command is a separate process; a `beforeAll` that builds six repositories went past the
     default once, under load). (`.mts` = TypeScript as an ES module; the header explains
     why not `.ts`.) And, since M5 item 22b, a
     `testTimeout` of thirty seconds for the same project — three git-spice calls in one test measured
     4.7 s on an idle Mac against Vitest's 5 s default.
-78. **`tsconfig.ext.json`** — the extension-host tests (and `test/helpers`, which
+83. **`tsconfig.ext.json`** — the extension-host tests (and `test/helpers`, which
     `.vscode-test.mjs` needs) compiled to `out/` for Mocha inside the downloaded VS Code.
-79. **`.vscode/launch.json`**, **`.vscode/tasks.json`** — F5 (plan §11.2): build, then open a
+84. **`.vscode/launch.json`**, **`.vscode/tasks.json`** — F5 (plan §11.2): build, then open a
     second VS Code with the extension loaded and `../fixture-repo/repo` open.
-80. **`scripts/fixture.ts`** — `npm run fixture`: the fixture builder pointed at
+85. **`scripts/fixture.ts`** — `npm run fixture`: the fixture builder pointed at
     `../fixture-repo`, so F5 has a stack to show — with the same four changes to the top
-    layer as item 73 (the `b` → `b2` move, the binary `logo.png`, the awkwardly named
+    layer as item 78 (the `b` → `b2` move, the binary `logo.png`, the awkwardly named
     `weird #1 ü?.txt`, the deleted `f`), so F5 shows a rename, a binary file, an E11 name
     and a deletion too. The comment above its import explains
     how esbuild bundles the script into `out/` and node runs it from there (the same tool
     that builds the extension; `&&` so a bundling error is not mistaken for success) and
     why Node's own type stripping was not used.
-81. **`.github/workflows/ci.yml`** — the same `npm test` and `npm run test:ext`, on Linux and
+86. **`.github/workflows/ci.yml`** — the same `npm test` and `npm run test:ext`, on Linux and
     macOS, on every pull request and on pushes to `main` — and, since M4 item 15, `npm run
     package` between them, so a packaging problem surfaces on a PR rather than on a tag — and,
     since M5 item 22b, an install step for git-spice between `setup-node` and `npm ci`: the
     release tarball for the runner's `uname`, checksum-verified, pinned to one version in the
     job's `env`, with `PRCASCADE_REQUIRE_GS=1` so a run where the step did not take fails (one
-    named test) rather than passing with the files skipped.
-82. **`.github/workflows/release.yml`** — what a pushed `v*` tag does (M4 item 15): the tag
+    named test) rather than passing with the files skipped — and, since M5 item 23a,
+    `PRCASCADE_REQUIRE_GH=1` with no install step: the runner images ship gh, and the require test
+    in item 57 says if one stops.
+87. **`.github/workflows/release.yml`** — what a pushed `v*` tag does (M4 item 15): the tag
     must equal `v` plus package.json's `version` and CHANGELOG.md must have that version's
     section, else it stops before building; then `npm test`, `npm run package`, and `gh
     release create` attaches the `.vsix` to a GitHub release whose notes are that CHANGELOG
@@ -965,17 +1025,17 @@ the repository root; its §13 is the running log of decisions and deviations mad
     (`test/git/gitspice*.git.test.ts`) skip here, on purpose: this workflow installs no git-spice
     and sets no `PRCASCADE_REQUIRE_GS`, because the tag's commit has already been through ci.yml
     with them — the header says so. Plain YAML and shell, read for what it does (primer intro).
-83. **`test/unit/release.test.ts`** — the release facts pinned on every `npm test` instead
+88. **`test/unit/release.test.ts`** — the release facts pinned on every `npm test` instead
     of discovered at tag time: a plain `major.minor.patch` version; CHANGELOG.md opening
     with that version's section and linking it to its release tag; the VS Code floor in
     `engines` equal to the `@types/vscode` version. The one test file that reads the
     repository's own files (`readFileSync`, primer §28) rather than importing from `src/`;
     `JSON.parse`'s answer is checked field by field (primer §51), never cast.
-84. **`scripts/depcheck.mjs`** — prints the dependency card (plan §11.3) that every PR adding
+89. **`scripts/depcheck.mjs`** — prints the dependency card (plan §11.3) that every PR adding
     a runtime library must include. First run in M5 PRs 16 and 17 (plan §10.1 items 16–17):
     `hosted-git-info` and `zod`, measured and declined — plan D54, D55. Plain JavaScript that runs ahead of
     the primer: read it for what it does, not how (primer intro).
-85. **`.vscodeignore`** — what is left out of the `.vsix`, so that exactly five files reach a
+90. **`.vscodeignore`** — what is left out of the `.vsix`, so that exactly five files reach a
     user: `dist/extension.js`, `package.json`, `README.md`, `CHANGELOG.md`, `LICENSE`; the
     reason `node_modules` never does.
 
@@ -994,8 +1054,10 @@ the repository root; its §13 is the running log of decisions and deviations mad
   than git: a result, never a rejection), `shell.ts` (a command's words as one terminal line),
   `poll.ts` (the wait for a fix to take), `readinessFix.ts` (what to say and run for each way
   the probe says "not ready"), `digest.ts` (the ref text that decides whether `gs log` runs,
-  and the initialised check read off it) and `backends/gitspice.ts` (the git-spice backend: the
-  readiness probe, `enrich`, `track` and `push`).
+  and the initialised check read off it), `version.ts` (a version as three numbers against a
+  floor), `ghstatus.ts` (gh for GitHub repositories: found, its extension, its login —
+  read-only) and `backends/gitspice.ts` (the git-spice backend: the readiness probe, `enrich`,
+  `track` and `push`).
   Finding the repositories was core's
   job in M1–M3 (`discovery.ts`); since M4 the built-in Git extension does it.
 - `src/vscode/` — adapters: `gitApi.ts` (the built-in Git extension: repositories, its

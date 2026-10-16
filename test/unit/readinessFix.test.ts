@@ -601,10 +601,10 @@ describe('offerFor', () => {
     });
   });
 
-  describe('gh-missing (E62b — drawn now, produced from item 23)', () => {
+  describe('gh-missing (E62b — the words of 19a, produced since item 23a)', () => {
     it('lists both when gh is not there at all', () => {
-      // act
-      const offer = offerFor({ kind: 'gh-missing', forge: GITHUB, missing: ['gh', 'gh-stack'], ghVersion: null, ghMinimum: '2.90.0' }, FACTS);
+      // act: nothing answered `gh --version` as gh, so there is no path to name either
+      const offer = offerFor({ kind: 'gh-missing', forge: GITHUB, missing: ['gh', 'gh-stack'], ghVersion: null, ghMinimum: '2.90.0', ghPath: null }, FACTS);
 
       // assert
       expect(offer).toStrictEqual({
@@ -616,7 +616,7 @@ describe('offerFor', () => {
 
     it('quotes the version of a gh that is too old', () => {
       // act
-      const offer = offerFor({ kind: 'gh-missing', forge: GITHUB, missing: ['gh'], ghVersion: '2.40.1', ghMinimum: '2.90.0' }, FACTS);
+      const offer = offerFor({ kind: 'gh-missing', forge: GITHUB, missing: ['gh'], ghVersion: '2.40.1', ghMinimum: '2.90.0', ghPath: 'gh' }, FACTS);
 
       // assert
       expect(offer.message).toBe('Pull requests on github.com need gh 2.90.0 or newer and its gh-stack extension; missing: gh (found 2.40.1). Pushing and the local git-spice operations still work.');
@@ -624,24 +624,50 @@ describe('offerFor', () => {
 
     it('lists only the extension when gh itself is fine', () => {
       // act
-      const offer = offerFor({ kind: 'gh-missing', forge: GITHUB, missing: ['gh-stack'], ghVersion: '2.91.0', ghMinimum: '2.90.0' }, FACTS);
+      const offer = offerFor({ kind: 'gh-missing', forge: GITHUB, missing: ['gh-stack'], ghVersion: '2.91.0', ghMinimum: '2.90.0', ghPath: 'gh' }, FACTS);
 
       // assert
       expect(offer.message).toBe('Pull requests on github.com need gh 2.90.0 or newer and its gh-stack extension; missing: gh-stack. Pushing and the local git-spice operations still work.');
     });
   });
+
+  describe('gh-not-logged-in (E23 — the words now, the button in item 23b)', () => {
+    it('names the host and the command to run, with no button — a warning, since there is something to do', () => {
+      // act: a remote that spells the host in capitals
+      const offer = offerFor({ kind: 'gh-not-logged-in', forge: { ...GITHUB, host: 'GitHub.com' }, ghPath: 'gh' }, FACTS);
+
+      // assert: the remote's spelling in the sentence, the host lower-cased after --hostname, as gh
+      // wants it (it does not fold the flag's case itself)
+      expect(offer).toStrictEqual({
+        severity: 'warning',
+        message: 'gh is not logged in to GitHub.com. Run gh auth login --hostname github.com --web in a terminal.',
+        fix: null,
+      });
+    });
+  });
 });
 
 describe('readyMessage', () => {
-  it('names the version, the repository and the host', () => {
-    // arrange
-    const ready: Ready = { kind: 'ready', gsPath: 'git-spice', gsVersion: '0.31.2', forge: GITHUB };
+  it('names the version, the repository and the host — for a repository where gh plays no part', () => {
+    // arrange: a GitLab host — step 5 asked nothing, so there is no gh to name (on GitHub `gh` is never null)
+    const ready: Ready = { kind: 'ready', gsPath: 'git-spice', gsVersion: '0.31.2', forge: { ...GITHUB, host: 'gitlab.com', kind: 'gitlab' }, gh: null };
 
     // act
     const message = readyMessage(ready, ROOT);
 
     // assert
-    expect(message).toBe('git-spice 0.31.2 is ready for app (github.com).');
+    expect(message).toBe('git-spice 0.31.2 is ready for app (gitlab.com).');
+  });
+
+  it('names both tools on GitHub — the gh the probe found, with its version (item 23a)', () => {
+    // arrange
+    const ready: Ready = { kind: 'ready', gsPath: 'git-spice', gsVersion: '0.31.2', forge: GITHUB, gh: { path: 'gh', version: '2.102.0' } };
+
+    // act
+    const message = readyMessage(ready, ROOT);
+
+    // assert
+    expect(message).toBe('git-spice 0.31.2 and gh 2.102.0 are ready for app (github.com).');
   });
 });
 
