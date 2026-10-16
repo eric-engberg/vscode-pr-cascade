@@ -366,8 +366,8 @@ const PANE_B_PART3: LayerViewRow = {
   node: 'filled',
   indicators: [
     { kind: 'needsRestack' },
-    { kind: 'pr', id: '#482', url: pullUrl(482), state: 'draft', reviewDecision: null, title: null },
     { kind: 'checks', failing: 2, total: 7 },
+    { kind: 'pr', id: '#482', url: pullUrl(482), state: 'draft', reviewDecision: null, title: null },
   ],
   age: '2d',
   dim: false,
@@ -631,22 +631,42 @@ describe('buildStackViewModel', () => {
         expect(indicatorsOf(buildStackViewModel(input()), 'retry-metrics')).toStrictEqual([]);
       });
 
-      it("is absent when only the remote is ahead: git-spice's needsPush means the tips differ (M4a), and a branch strictly behind draws nothing here (E76 is M9's)", () => {
+      it("remote ahead (M4a): only the remote is ahead — git-spice's needsPush means the tips differ — so the slot shows ↓n with the behind count, in the tail and in the tooltip (Ric, 2026-10-16)", () => {
         // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, push: { ahead: 0, behind: 1, needsPush: true } }] }));
 
         // assert
-        expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([]);
-        expect(rowOf(model, 'retry-metrics').tooltip[2]).toBe('git-spice: tracked on add-retries');
+        expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ kind: 'remoteAhead', behind: 1 }]);
+        expect(rowOf(model, 'retry-metrics').tooltip[2]).toBe('git-spice: tracked on add-retries · remote ahead by 1');
       });
 
-      it('diverged (M4b): the arrow carries ahead and ignores behind, in the tail and in the tooltip', () => {
+      it('diverged (M4b, E76): both counts above 0 is one mark carrying both, in the tail and in the tooltip — not ↑n', () => {
         // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, push: { ahead: 1, behind: 1, needsPush: true } }] }));
 
         // assert
-        expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ kind: 'needsPush', ahead: 1 }]);
-        expect(rowOf(model, 'retry-metrics').tooltip[2]).toBe('git-spice: tracked on add-retries · needs push');
+        expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ kind: 'diverged', ahead: 1, behind: 1 }]);
+        expect(rowOf(model, 'retry-metrics').tooltip[2]).toBe('git-spice: tracked on add-retries · diverged: 1 ahead, 1 behind');
+      });
+    });
+
+    describe("worktree — gs log's worktree path", () => {
+      it('marks a branch checked out in another worktree, with the path, in the tail and in the tooltip', () => {
+        // act
+        const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, worktree: '/work/app-wt' }] }));
+
+        // assert
+        expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ kind: 'worktree', path: '/work/app-wt' }]);
+        expect(rowOf(model, 'retry-metrics').tooltip[2]).toBe('git-spice: tracked on add-retries · checked out in /work/app-wt');
+      });
+
+      it("draws nothing for the repository's own root — that is this checkout, not another", () => {
+        // act
+        const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, worktree: ROOT }] }));
+
+        // assert
+        expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([]);
+        expect(rowOf(model, 'retry-metrics').tooltip[2]).toBe('git-spice: tracked on add-retries');
       });
     });
 
@@ -753,12 +773,12 @@ describe('buildStackViewModel', () => {
     });
 
     describe("checks — gh's statusCheckRollup, failing of total", () => {
-      it('is present after the PR circle when a check fails', () => {
+      it('is present before the PR mark when a check fails — the mark is last', () => {
         // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: CHANGE }], extras: new Map([['retry-metrics', { ...PLAIN_EXTRAS, checks: { failing: 2, total: 7 } }]]) }));
 
         // assert
-        expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([PR_7, { kind: 'checks', failing: 2, total: 7 }]);
+        expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ kind: 'checks', failing: 2, total: 7 }, PR_7]);
       });
 
       it('is absent when every check passes', () => {
@@ -802,13 +822,14 @@ describe('buildStackViewModel', () => {
   });
 
   describe('the fixed order', () => {
-    it("puts every indicator a tracked layer can carry in §7.1.1's tail order whatever order the sources came in: needs restack, unresolved, base drift, needs push, never pushed, the PR, the checks", () => {
+    it("puts every indicator a tracked layer can carry in §7.1.1's tail order whatever order the sources came in: needs restack, unresolved, base drift, the push slot, worktree, never pushed, failing checks, and the PR mark last", () => {
       // arrange: one line with everything on it
       const everything: GsLogEntry = {
         name: 'retry-metrics',
         down: { name: 'add-retries', needsRestack: true },
         change: { id: '#7', url: pullUrl(7), status: 'open', comments: { resolved: 0, unresolved: 3, total: 3 } },
         push: { ahead: 2, behind: 0, needsPush: true },
+        worktree: '/work/app-wt',
       };
       const model = buildStackViewModel(
         input({
@@ -824,9 +845,10 @@ describe('buildStackViewModel', () => {
         { kind: 'unresolved', count: 3 },
         { kind: 'baseDrift', prBase: 'main', localParent: 'add-retries' },
         { kind: 'needsPush', ahead: 2 },
+        { kind: 'worktree', path: '/work/app-wt' },
         { kind: 'neverPushed' },
-        { kind: 'pr', id: '#7', url: pullUrl(7), state: 'open', reviewDecision: 'approved', title: 'Retry metrics' },
         { kind: 'checks', failing: 1, total: 4 },
+        { kind: 'pr', id: '#7', url: pullUrl(7), state: 'open', reviewDecision: 'approved', title: 'Retry metrics' },
       ]);
     });
 

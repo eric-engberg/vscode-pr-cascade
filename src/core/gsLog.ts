@@ -73,7 +73,8 @@ export interface GsLogPush {
 
 /**
  * One line of `gs log short --all --json`: the fields `enrich` reads (plan §4.4, §7.8's local tier)
- * and, since item 23b, `change.comments` for the rail. The schema's `current`, `worktree`, `ups`
+ * and, since item 23b, `change.comments` and `worktree` for the rail (the latter on Ric's answer of
+ * 2026-10-16: a branch checked out in another worktree gets a mark). The schema's `current`, `ups`
  * and `commits` are documented (§7.13.2) and dropped here until something reads them — git
  * already tells the extension which branch is current and how the layers stack — and unknown
  * fields are dropped the same way (E57, D55).
@@ -87,6 +88,8 @@ export interface GsLogEntry {
   change?: GsLogChange;
   /** The push state, when the branch has a remote-tracking branch. */
   push?: GsLogPush;
+  /** The path of the worktree the branch is checked out in, when git-spice prints one (`worktree`). */
+  worktree?: string;
 }
 
 /** One line parseGsLog could not use. */
@@ -189,6 +192,12 @@ function entryFromJson(value: unknown): GsLogEntry {
   }
   if ('push' in value) {
     entry.push = pushFromJson(value.push);
+  }
+  if ('worktree' in value) {
+    if (typeof value.worktree !== 'string') {
+      throw new Error('worktree is not a string');
+    }
+    entry.worktree = value.worktree;
   }
   return entry;
 }

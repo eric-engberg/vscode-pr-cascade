@@ -136,14 +136,23 @@ describe('parseGsLog', () => {
       ]);
     });
 
-    it('drops the documented fields nothing reads yet — current, worktree, ups, commits (D55)', () => {
+    it('keeps worktree — the rail marks a branch checked out elsewhere — and drops the documented fields nothing reads yet: current, ups, commits (D55)', () => {
       // act
       const parsed = parseGsLog(
         '{"name":"x","current":true,"worktree":"/w","ups":[{"name":"y"}],"commits":[{"sha":"abc","subject":"s"}]}',
       );
 
       // assert
-      expect(parsed.entries).toStrictEqual([{ name: 'x' }]);
+      expect(parsed.entries).toStrictEqual([{ name: 'x', worktree: '/w' }]);
+    });
+
+    it('reports a worktree that is not a string', () => {
+      // act
+      const parsed = parseGsLog('{"name":"x","worktree":7}');
+
+      // assert
+      expect(parsed.entries).toStrictEqual([]);
+      expect(parsed.malformed).toStrictEqual([{ line: 1, problem: 'worktree is not a string' }]);
     });
 
     it('keeps the entries in output order and does not deduplicate', () => {

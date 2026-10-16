@@ -134,9 +134,26 @@ export type Indicator =
    * with plain `git push -u` has no `push` even once tracked (M1, M2), and whether it is ahead would
    * cost one `rev-list` per branch — it draws nothing here. Not `push.needsPush`: that flag is "the
    * two tips differ", so a branch strictly behind its remote prints `needsPush: true` with `ahead: 0`
-   * (M4a, 0.31.2) — E76's state, M9's banner, no glyph in this tail.
+   * (M4a, 0.31.2) — that is ↓n below. One of the three push marks at most.
    */
   | { readonly kind: 'needsPush'; readonly ahead: number }
+  /**
+   * ↓n — commits the remote branch has that this one lacks: `push.behind` above 0 with `ahead` 0 —
+   * someone pushed to the PR branch (M4a). Fetching and adopting them is M8's Sync Stack; the mark is
+   * this (Ric, 2026-10-16).
+   */
+  | { readonly kind: 'remoteAhead'; readonly behind: number }
+  /**
+   * ⇅ — both counts above 0: the remote branch was rewritten under this one (E76 — GitHub's "Rebase
+   * stack", `gh stack sync`, a co-worker's force-push; M4b), so a push would be refused and the mark
+   * is red. Carries both counts.
+   */
+  | { readonly kind: 'diverged'; readonly ahead: number; readonly behind: number }
+  /**
+   * ⊡ — checked out in another worktree: `gs log`'s `worktree` names a path that is not this
+   * repository's root, so a checkout here would fail (Ric, 2026-10-16).
+   */
+  | { readonly kind: 'worktree'; readonly path: string }
   /**
    * ⛅ — no remote-tracking branch of this name on any remote: never pushed (or pruned since). A
    * git fact read off the digest (`Enrichment.remoteBranches`), never off `push`, which git-spice
@@ -148,10 +165,11 @@ export type Indicator =
    */
   | { readonly kind: 'neverPushed' }
   /**
-   * The PR circle: the change request git-spice knows (`change`), its id as the forge spells it
-   * (`#482`, `!12` — text, never a number), its url, its state, and gh's review decision and title
-   * when M7 brings them (`null` until then, and on forges gh does not serve). The one indicator
-   * E80's condensed tail keeps.
+   * The PR mark — a renderer draws codicons' `git-pull-request` family in the state colour: the
+   * change request git-spice knows (`change`), its id as the forge spells it (`#482`, `!12` — text,
+   * never a number), its url, its state, and gh's review decision and title when M7 brings them
+   * (`null` until then, and on forges gh does not serve). The one indicator E80's condensed tail
+   * keeps, and the last in the list, so every row's mark sits in one column (Ric, 2026-10-16).
    */
   | { readonly kind: 'pr'; readonly id: string; readonly url: string; readonly state: PrState; readonly reviewDecision: ReviewDecision | null; readonly title: string | null }
   /** ✕ f/n — failing status checks on the pull request's head (gh's `statusCheckRollup`, M7; GitHub only); absent when none fails. */
@@ -503,10 +521,10 @@ function layerViewRow(row: LayerRow, facts: RowFacts): LayerViewRow {
   // below — gh's answer, the circle's state, the title line, `hasPR`, `isDraft` — reads this one value.
   const change = tracking?.down !== undefined ? tracking.change : undefined;
   const extra = change !== undefined ? facts.extras.get(row.name) : undefined;
-  const indicators = indicatorsFor(row, tracking, extra, facts.remoteBranches);
+  const indicators = indicatorsFor(row, tracking, extra, facts.remoteBranches, facts.repo);
   const prState = change !== undefined ? prStateOf(change.status, extra?.isDraft ?? false) : null;
   // see primer §16 (spread: git-spice's lines appended to the tooltip) and §17 (`typeof`: a title gh gave)
-  const tooltip = [`${row.name} @ ${shortSha(row.sha)}`, `base: ${row.parent} @ ${shortSha(parentSha)}`, ...trackingLines(tracking)];
+  const tooltip = [`${row.name} @ ${shortSha(row.sha)}`, `base: ${row.parent} @ ${shortSha(parentSha)}`, ...trackingLines(tracking, facts.repo)];
   if (typeof extra?.title === 'string') {
     tooltip.push(extra.title);
   }
@@ -572,7 +590,7 @@ function trackingOf(enrichment: Enrichment | undefined, name: string): Tracking 
  * change request by the caller; `remoteBranches` the digest's names (RowFacts).
  */
 // see primer §70 (`?.` through two optional fields), §30 (`??`) and §25 (arrays: push)
-function indicatorsFor(row: LayerRow, tracking: Tracking, extra: PrExtras | undefined, remoteBranches: ReadonlySet<string>): Indicator[] {
+function indicatorsFor(row: LayerRow, tracking: Tracking, extra: PrExtras | undefined, remoteBranches: ReadonlySet<string>, root: string): Indicator[] {
   if (tracking === undefined) {
     return [];
   }
@@ -582,7 +600,7 @@ function indicatorsFor(row: LayerRow, tracking: Tracking, extra: PrExtras | unde
   } else if (tracking.down === undefined) {
     return [];
   } else {
-    indicators = gitSpiceIndicators(tracking, tracking.down, extra);
+    indicators = gitSpiceIndicators(tracking, tracking.down, extra, root);
   }
   // ⛅ is a git fact, read off the digest: no remote-tracking branch of this name on any remote.
   if (!remoteBranches.has(row.name)) {
@@ -595,11 +613,12 @@ function indicatorsFor(row: LayerRow, tracking: Tracking, extra: PrExtras | unde
 }
 
 /**
- * The four indicators a tracked layer's own line can carry, in the bullet's order: ⇈ · 💬 · ⇄ · ↑n.
- * `down` is the entry's, passed separately as a `GsLogDown` so the compiler knows it is there (the
- * caller has tested it; a tracked layer always has one — only git-spice's trunk line lacks it).
+ * The indicators a tracked layer's own line can carry, in the bullet's order: ⇈ · 💬 · ⇄ · the push
+ * slot (one of ↑n, ↓n, ⇅) · ⊡. `down` is the entry's, passed separately as a `GsLogDown` so the
+ * compiler knows it is there (the caller has tested it; a tracked layer always has one — only
+ * git-spice's trunk line lacks it); `root` is the repository's, which is not "another" worktree.
  */
-function gitSpiceIndicators(entry: GsLogEntry, down: GsLogDown, extra: PrExtras | undefined): Indicator[] {
+function gitSpiceIndicators(entry: GsLogEntry, down: GsLogDown, extra: PrExtras | undefined, root: string): Indicator[] {
   const indicators: Indicator[] = [];
   if (down.needsRestack) {
     indicators.push({ kind: 'needsRestack' });
@@ -614,30 +633,46 @@ function gitSpiceIndicators(entry: GsLogEntry, down: GsLogDown, extra: PrExtras 
   if (extra !== undefined && extra.baseRef !== down.name) {
     indicators.push({ kind: 'baseDrift', prBase: extra.baseRef, localParent: down.name });
   }
-  // `push.ahead`, not `push.needsPush`: that flag is "the two tips differ" and is true for a
-  // branch strictly behind its remote too (measured, M4a), which has no glyph in this tail.
-  if (entry.push !== undefined && entry.push.ahead > 0) {
-    indicators.push({ kind: 'needsPush', ahead: entry.push.ahead });
+  // The push slot, from the two counts and never from `push.needsPush` ("the two tips differ",
+  // true for all three; measured, M4a/M4b): both above 0 is a rewritten remote, ahead alone is
+  // ours to push, behind alone is theirs to fetch.
+  // see primer §54 (destructuring two fields out of an object)
+  if (entry.push !== undefined) {
+    const { ahead, behind } = entry.push;
+    if (ahead > 0 && behind > 0) {
+      indicators.push({ kind: 'diverged', ahead, behind });
+    } else if (ahead > 0) {
+      indicators.push({ kind: 'needsPush', ahead });
+    } else if (behind > 0) {
+      indicators.push({ kind: 'remoteAhead', behind });
+    }
+  }
+  // Checked out in another worktree: git-spice names it; the repository's own root is this one.
+  if (entry.worktree !== undefined && entry.worktree !== root) {
+    indicators.push({ kind: 'worktree', path: entry.worktree });
   }
   return indicators;
 }
 
-/** The PR circle, and ✕ after it when gh counts a failing check: the two indicators a change request brings. */
+/**
+ * The two indicators a change request brings: ✕ when gh counts a failing check, then the PR mark —
+ * last, so every row's mark sits in one column beside the age (Ric, 2026-10-16; the ASCII mock and
+ * pane B drew it so).
+ */
 function changeIndicators(change: GsLogChange, extra: PrExtras | undefined): Indicator[] {
-  const indicators: Indicator[] = [
-    {
-      kind: 'pr',
-      id: change.id,
-      url: change.url,
-      state: prStateOf(change.status, extra?.isDraft ?? false),
-      reviewDecision: extra?.reviewDecision ?? null,
-      title: extra?.title ?? null,
-    },
-  ];
+  const indicators: Indicator[] = [];
   const checks = extra?.checks ?? null;
   if (checks !== null && checks.failing > 0) {
     indicators.push({ kind: 'checks', failing: checks.failing, total: checks.total });
   }
+  indicators.push({
+    kind: 'pr',
+    id: change.id,
+    url: change.url,
+    state: prStateOf(change.status, extra?.isDraft ?? false),
+    reviewDecision: extra?.reviewDecision ?? null,
+    title: extra?.title ?? null,
+  });
   return indicators;
 }
 
@@ -666,13 +701,13 @@ function prStateOf(status: string | undefined, isDraft: boolean): PrState {
  * word but for one test: none while unknown; `git-spice: not tracked`; `git-spice: trunk` for
  * git-spice's own trunk line; else `git-spice: tracked on <base>` — the base as git-spice names it,
  * the trunk's local branch for a bottom layer beside the row's `origin/main`: two spellings, not
- * drift — with ` · needs restack` and ` · needs push` appended when true, and the change request's
- * `<id> <url>` on a line of its own. The one changed test is `needs push`: `push.ahead > 0`, as the
- * tail's ↑n reads it, where the tree read `needsPush === true` — true for a branch strictly behind
- * its remote too (M4a); item 23j deletes the tree's copy.
+ * drift — with ` · needs restack` appended when true, the push slot's words (` · needs push`,
+ * ` · remote ahead by n`, ` · diverged: n ahead, m behind` — the tail's three marks, read off the two
+ * counts where the tree read `needsPush === true`; M4a/M4b), ` · checked out in <path>` for another
+ * worktree, and the change request's `<id> <url>` on a line of its own; item 23j deletes the tree's copy.
  */
 // see primer §25 (arrays: push, join, a typed empty array)
-function trackingLines(tracking: Tracking): string[] {
+function trackingLines(tracking: Tracking, root: string): string[] {
   if (tracking === undefined) {
     return [];
   }
@@ -686,8 +721,18 @@ function trackingLines(tracking: Tracking): string[] {
   if (tracking.down.needsRestack) {
     parts.push('needs restack');
   }
-  if (tracking.push !== undefined && tracking.push.ahead > 0) {
-    parts.push('needs push');
+  if (tracking.push !== undefined) {
+    const { ahead, behind } = tracking.push;
+    if (ahead > 0 && behind > 0) {
+      parts.push(`diverged: ${ahead} ahead, ${behind} behind`);
+    } else if (ahead > 0) {
+      parts.push('needs push');
+    } else if (behind > 0) {
+      parts.push(`remote ahead by ${behind}`);
+    }
+  }
+  if (tracking.worktree !== undefined && tracking.worktree !== root) {
+    parts.push(`checked out in ${tracking.worktree}`);
   }
   const lines = [parts.join(' · ')];
   if (tracking.change !== undefined) {
