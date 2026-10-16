@@ -16,8 +16,14 @@ in `package.json`, and a release's tag is that version with a `v` in front.
   `git-spice repo init`, the forge's `spice.forge.*` URLs, `git-spice auth login` in a
   terminal), waits for it to take, refreshes, and goes on to the next. On a GitHub repository it
   also checks that GitHub CLI (`gh`) 2.90 or newer and its `gh-stack` extension are installed and
-  that gh is logged in to the host, and the final line names both tools.
+  that gh is logged in to the host, offering each in turn — `brew install gh` or `brew upgrade gh`
+  (or gh's install page), `gh extension install github/gh-stack`, and `gh auth login --hostname
+  <host> --web` in the terminal with the one-time code in your browser — and the final line names
+  both tools. GitLab repositories are not asked for gh.
 - Setting `prCascade.gsPath`: the git-spice executable, when VS Code's PATH does not find it.
+- Settings `prCascade.ghPath` (the gh executable, when VS Code's PATH does not find it) and
+  `prCascade.gitProtocol` (empty by default, so gh asks once in the terminal and a host already set up keeps its protocol; or `https` / `ssh`: the git protocol gh is asked to store
+  when PR Cascade logs it in).
 - Each layer now shows what git-spice knows about it beside its count: its pull request's id
   (`#12`; the link is in the tooltip), `needs restack`, `needs push`, or `not tracked`. Nothing
   changes when git-spice is not set up; the Output panel says why.

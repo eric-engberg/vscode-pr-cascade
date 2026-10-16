@@ -27,7 +27,8 @@
  * (`setUpGitSpice`; `trackStack` for `chooseRepository`, item 20b), test/helpers/fakeReadinessHost.ts
  * (types), test/unit/login.test.ts, test/ext/login.test.ts.
  * Plan: §4.2, §7.5 steps 1–4, §7.6, §7.13.1, §8 E55/E59/E62/E67/E70/E83, §9.4 `ext/login`, §10.1
- * item 19b, §13.2 D58, D65 (item 23a: `progressOf` as a table), §13.4 (test-only hooks).
+ * item 19b, §13.2 D58, D65 (item 23a: `progressOf` as a table), D66 (item 23b: the gh offers through
+ * the same flow — `brewGh`, the two gh settings on the request), §13.4 (test-only hooks).
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -51,22 +52,27 @@ export const BREW_PATHS: readonly string[] = ['/opt/homebrew/bin/brew', '/usr/lo
 export interface MachineFacts {
   readonly brewPath: string | null;
   readonly brewGitSpice: string | null;
+  /** The `gh` beside `brew`, read as `brewGitSpice` is (item 23b). */
+  readonly brewGh: string | null;
 }
 
 /**
- * Where Homebrew is, and whether it has git-spice: the first of BREW_PATHS that exists, and the
- * `git-spice` beside it — where Homebrew links the one it installed. `exists` is handed in
- * (`fs.existsSync` in src/extension.ts) so a test can say what is on the disk.
+ * Where Homebrew is, and whether it has git-spice and gh: the first of BREW_PATHS that exists, and
+ * the `git-spice` and `gh` beside it — where Homebrew links what it installed, under one name each.
+ * `exists` is handed in (`fs.existsSync` in src/extension.ts) so a test can say what is on the disk.
  */
 // see primer §25 (arrays: `find`), §33 (a function as a parameter), §28 (`path.dirname`, `path.join`),
-// §30 (`??`) and §48 (the conditional expression)
+// §30 (`??`), §48 (the conditional expression) and §5 (an arrow function kept in a const)
 export function machineFacts(exists: (file: string) => boolean): MachineFacts {
   const brewPath = BREW_PATHS.find(exists) ?? null;
   if (brewPath === null) {
-    return { brewPath: null, brewGitSpice: null };
+    return { brewPath: null, brewGitSpice: null, brewGh: null };
   }
-  const beside = path.join(path.dirname(brewPath), 'git-spice');
-  return { brewPath, brewGitSpice: exists(beside) ? beside : null };
+  const beside = (name: string): string | null => {
+    const file = path.join(path.dirname(brewPath), name);
+    return exists(file) ? file : null;
+  };
+  return { brewPath, brewGitSpice: beside('git-spice'), brewGh: beside('gh') };
 }
 
 /** Everything the flow asks of VS Code, as one object: the real one in src/extension.ts, a test's from test/helpers/fakeReadinessHost.ts. */
@@ -101,6 +107,10 @@ export interface ReadyRequest {
   readonly trunk: string | null;
   /** `prCascade.gsPath` as read. */
   readonly gsPathSetting: string;
+  /** `prCascade.ghPath` as read (item 23b). */
+  readonly ghPathSetting: string;
+  /** `prCascade.gitProtocol` as read (item 23b) — the gh login line's `--git-protocol`. */
+  readonly gitProtocol: string;
   /** The readiness probe for this repository (src/extension.ts, `probeFor`): asked for the offer, during each wait, and after each fix. */
   readonly probe: () => Promise<Readiness>;
   /** git in this repository: the trunk question before an init offer, and the `git config` fixes. */
@@ -123,8 +133,11 @@ export type ReadyOutcome = 'acted' | 'not-ready' | 'gave-up' | 'in-flight';
 
 /**
  * Passes per question before the flow gives up — a guard against a loop, not a limit a real
- * chain meets: the longest is install, upgrade, initialise, set the forge's URLs, log in, and the
- * pass that finds ready.
+ * chain meets: the longest, counting an install and an upgrade of each tool as this comment has
+ * always counted, is install, upgrade, initialise, set the forge's URLs, log in, install gh,
+ * upgrade gh, install gh-stack, log gh in, and the pass that finds ready — ten, this limit exactly
+ * (the loop acts on its last pass); no real chain has both an install and an upgrade of one tool,
+ * so eight is the most a user meets.
  */
 export const MAX_STEPS = 10;
 
@@ -146,7 +159,12 @@ type FixResult = 'passed' | 'failed' | 'changed';
  * does not wait. A `Record` over every `kind`, so a member added to `Readiness` does not compile
  * here until it has a number — the `if` chain this replaced (item 19b) ended in `return 3`, and
  * item 23a's new member would have silently taken the forge step's place, so that a git-spice
- * login's wait could never have passed into it.
+ * login's wait could never have passed into it. `gh-missing` holds three steps — gh not found,
+ * gh too old, then its extension — because E62b wants everything named in one answer: after
+ * `brew install gh` the probe answers `gh-missing` again, with a version (an old gh) or with only
+ * `gh-stack` listed, and either is further (item 23b), as `gs-missing` → `gs-too-old` is for
+ * git-spice's two members; without the split every gh install's wait would have timed out in
+ * silence with gh installed.
  */
 // see primer §43 (`Record<K, V>`: one value for each member of a union of keys) and §80 (`Readiness['kind']`: the type of one field, read off the union)
 const PROGRESS: Record<Readiness['kind'], number> = {
@@ -159,12 +177,39 @@ const PROGRESS: Record<Readiness['kind'], number> = {
   'forge-unsupported': 3,
   'not-logged-in': 4,
   'gh-missing': 5,
-  'gh-not-logged-in': 6,
-  ready: 7,
+  'gh-not-logged-in': 8,
+  ready: 9,
 };
 
+/** `gh-missing` with a gh that answered but is below the floor: the step after a gh install, inside the same member. */
+const GH_TOO_OLD_STEP = 6;
+
+/** `gh-missing` with gh itself fine and only its extension missing: the step after a gh upgrade, inside the same member. */
+const GH_STACK_STEP = 7;
+
+// see primer §25 (arrays: `includes`) and §48 (the conditional expression)
 function progressOf(answer: Readiness): number {
+  if (answer.kind === 'gh-missing' && answer.ghVersion !== null) {
+    return answer.missing.includes('gh') ? GH_TOO_OLD_STEP : GH_STACK_STEP;
+  }
   return PROGRESS[answer.kind];
+}
+
+/**
+ * An install counted done by the disk rather than the probe: VS Code's PATH may never reach
+ * Homebrew's directory, so the probe could say "missing" for ever while `brew install` has finished
+ * — the next offer then names the path for the setting. For gh only when gh itself was absent
+ * (`ghVersion === null`): a too-old Homebrew gh is already on disk and must not pass an upgrade's
+ * wait, nor a gh-stack install's.
+ */
+function installAppeared(failing: NotReady, machine: MachineFacts): boolean {
+  if (failing.kind === 'gs-missing') {
+    return machine.brewGitSpice !== null;
+  }
+  if (failing.kind === 'gh-missing') {
+    return failing.ghVersion === null && machine.brewGh !== null;
+  }
+  return false;
 }
 
 /**
@@ -306,15 +351,17 @@ export class ReadinessFlows implements Disposable {
    * centre while the user did the step another way — and running `gs repo init` a second time
    * with another `--trunk` would quietly replace the trunk they chose (git-spice 0.31.2 does not
    * ask). When the probe's answer is still the member offered, runs the fix. Compared by `kind`
-   * only: the same step failing with other details (another host, another version) still runs
-   * the offer that was clicked.
+   * and by step (`progressOf`), never by field: the same step failing with other details (another
+   * host, another version) still runs the offer that was clicked, while the one kind that holds
+   * three steps, `gh-missing` (item 23b), does not run `brew install gh` for a second gh once the
+   * probe says only the extension — or an upgrade — is wanted.
    */
   private async fixIfStillNeeded(request: ReadyRequest, failing: NotReady, fix: Fix, flight: Flight): Promise<FixResult> {
     const now = await request.probe();
     if (this.disposed) {
       return 'failed';
     }
-    if (now.kind !== failing.kind) {
+    if (now.kind !== failing.kind || progressOf(now) !== progressOf(failing)) {
       return 'changed';
     }
     return (await this.runFix(request, failing, fix, flight)) ? 'passed' : 'failed';
@@ -359,9 +406,10 @@ export class ReadinessFlows implements Disposable {
   /**
    * Asks the probe again every interval until it gets further than the member that was offered
    * (`progressOf`) — the step passed; the next one may well fail, and gets its own offer on the
-   * next pass. For an install, the step also passed when Homebrew's `git-spice` appears beside its
-   * `brew`, though VS Code's PATH may never find it: the next offer then names its path for
-   * `prCascade.gsPath`, rather than the wait running out. The close of the fix's own terminal
+   * next pass. For an install, the step also passed when Homebrew's `git-spice` — or, since item
+   * 23b, its `gh` — appears beside its `brew`, though VS Code's PATH may never find it
+   * (`installAppeared`): the next offer then names its path for the setting, rather than the wait
+   * running out. The close of the fix's own terminal
    * stops the wait, and then one last look is taken: the user may have finished in the last
    * seconds and closed it. A timeout, or a close with nothing changed, gives up with one line in
    * the log and no notification (§7.5: "silent give-up"); a terminal given up on that way is not
@@ -376,8 +424,7 @@ export class ReadinessFlows implements Disposable {
     }
     const controller = new AbortController();
     flight.wait = controller;
-    const passed = async (): Promise<boolean> =>
-      progressOf(await request.probe()) > progressOf(failing) || (failing.kind === 'gs-missing' && this.deps.host.machine().brewGitSpice !== null);
+    const passed = async (): Promise<boolean> => progressOf(await request.probe()) > progressOf(failing) || installAppeared(failing, this.deps.host.machine());
     const closing =
       flight.terminal === undefined
         ? undefined
@@ -428,6 +475,9 @@ export class ReadinessFlows implements Disposable {
       gsPathSetting: request.gsPathSetting,
       brewPath: machine.brewPath,
       brewGitSpice: machine.brewGitSpice,
+      ghPathSetting: request.ghPathSetting,
+      brewGh: machine.brewGh,
+      gitProtocol: request.gitProtocol,
     };
   }
 

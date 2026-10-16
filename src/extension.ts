@@ -425,7 +425,7 @@ async function loadRepoState(output: vscode.OutputChannel, connected: ConnectedG
     // (E5) — get no line of their own.
     output.appendLine(`${root}: rebase in progress`);
   }
-  const backend = backendFor(git, gitExecutable(settings.gitPath, api.git.path), settings.gsPath);
+  const backend = backendFor(git, gitExecutable(settings.gitPath, api.git.path), settings.gsPath, settings.ghPath);
   const enriched = await backend.enrich(state);
   logEnrichment(output, enriched);
   return enriched;
@@ -536,28 +536,29 @@ async function loadFileAtRef(
 
 /**
  * The window's git-spice backend (core/backends/gitspice.ts), and what it was built from. Kept
- * between calls because it remembers `ready` answers — five programs per action saved — and
- * rebuilt, memo and all, when the git executable, `prCascade.gsPath` or (in a test) the command
- * runner changes (D56: "a changed setting means a new backend").
+ * between calls because it remembers `ready` answers — five programs per action saved, eight on
+ * GitHub — and rebuilt, memo and all, when the git executable, `prCascade.gsPath`,
+ * `prCascade.ghPath` (item 23b) or (in a test) the command runner changes (D56: "a changed setting
+ * means a new backend").
  */
 // see primer §8 (undefined: nothing built yet)
 let backend: { key: string; commands: CommandRunner; instance: GitSpiceBackend } | undefined;
 
-/** The backend for this git and this setting — the one kept, or a new one when either, or the runner, changed. */
+/** The backend for this git and these two settings — the one kept, or a new one when any of them, or the runner, changed. */
 // see primer §44 (`\0` as a separator), §12 (template strings) and §70 (`?.`: none built yet reads
 // `undefined`, which is never the key — and once that test is false, `backend` is there)
-function backendFor(git: RealGitRunner, executable: string, gsPath: string): GitSpiceBackend {
-  const key = `${executable}\0${gsPath}`;
+function backendFor(git: RealGitRunner, executable: string, gsPath: string, ghPath: string): GitSpiceBackend {
+  const key = `${executable}\0${gsPath}\0${ghPath}`;
   if (backend?.key !== key || backend.commands !== readinessDeps.commands) {
-    backend = { key, commands: readinessDeps.commands, instance: new GitSpiceBackend(git, readinessDeps.commands, gsPath) };
+    backend = { key, commands: readinessDeps.commands, instance: new GitSpiceBackend(git, readinessDeps.commands, gsPath, ghPath) };
   }
   return backend.instance;
 }
 
 /**
  * The readiness probe for one repository, as the setup flow asks it: through connectedGit on
- * every call, so `prCascade.gitPath` and `prCascade.gsPath` are read afresh for each question
- * (the remote and the trunk are fixed when the flow starts). With `fresh`, the remembered `ready`
+ * every call, so `prCascade.gitPath`, `prCascade.gsPath` and `prCascade.ghPath` are read afresh for
+ * each question (the remote and the trunk are fixed when the flow starts). With `fresh`, the remembered `ready`
  * is dropped first (`forget`): asked by hand, the user may just have logged out or re-initialised
  * in a terminal. M7's gated `createPRs` will pass false.
  */
@@ -565,7 +566,7 @@ function backendFor(git: RealGitRunner, executable: string, gsPath: string): Git
 function probeFor(gitExtension: GitExtensionAdapter, root: string, remote: string, fresh: boolean): () => Promise<Readiness> {
   return async () => {
     const { api, settings, git } = await connectedGit(gitExtension);
-    const probing = backendFor(git, gitExecutable(settings.gitPath, api.git.path), settings.gsPath);
+    const probing = backendFor(git, gitExecutable(settings.gitPath, api.git.path), settings.gsPath, settings.ghPath);
     if (fresh) {
       probing.forget(root, remote);
     }
@@ -594,6 +595,8 @@ async function setUpGitSpice(gitExtension: GitExtensionAdapter, flows: Readiness
     remote: settings.remote,
     trunk,
     gsPathSetting: settings.gsPath,
+    ghPathSetting: settings.ghPath,
+    gitProtocol: settings.gitProtocol,
     probe: probeFor(gitExtension, root, settings.remote, true),
     git,
     action: async (ready) => {
@@ -765,7 +768,7 @@ async function trackIn(output: vscode.OutputChannel, gitExtension: GitExtensionA
     return { tracked: [], problem: null };
   }
   const { api, settings, git } = connected;
-  const backend = backendFor(git, gitExecutable(settings.gitPath, api.git.path), settings.gsPath);
+  const backend = backendFor(git, gitExecutable(settings.gitPath, api.git.path), settings.gsPath, settings.ghPath);
   const result = await backend.track(root, fresh.layers, await trunkBranchFor(git, root, fresh.trunk));
   if (result.problem !== null) {
     void host.prompt('warning', result.problem, []);
@@ -873,7 +876,7 @@ async function pushIn(output: vscode.OutputChannel, gitExtension: GitExtensionAd
     return undefined;
   }
   const { api, settings, git } = connected;
-  const backend = backendFor(git, gitExecutable(settings.gitPath, api.git.path), settings.gsPath);
+  const backend = backendFor(git, gitExecutable(settings.gitPath, api.git.path), settings.gsPath, settings.ghPath);
   if (hasUntracked(fresh)) {
     const tracked = await backend.track(root, fresh.layers, await trunkBranchFor(git, root, fresh.trunk));
     if (tracked.problem !== null) {

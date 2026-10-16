@@ -5,9 +5,12 @@
  * refreshes and the next offer follows; the login offer's line likewise, and once the fake
  * git-spice says logged in, the "ready" notification; a second click while a fix runs; a ready
  * repository asked again after a logout; a changed `prCascade.gsPath` making a new backend; and
- * VS Code's own terminals reused by name and directory. The timing rules — 3 s, 5 min, aborts —
- * are test/unit/login.test.ts's, on fake timers; here the poll is 50 ms and the point is the
- * wiring.
+ * VS Code's own terminals reused by name and directory. Since M5 item 23b the gh rows: a changed
+ * `prCascade.ghPath` making a new backend; the gh-stack install and then gh's login in one
+ * terminal, ending in the ready line that names both tools; gh installed with the Homebrew the
+ * host was told about, then the extension's offer; both gh settings on the login line; and a
+ * GitLab repository asking nothing of gh. The timing rules — 3 s, 5 min, aborts — are
+ * test/unit/login.test.ts's, on fake timers; here the poll is 50 ms and the point is the wiring.
  *
  * Never the real git-spice, and never the real gh: the handle `activate()` returns under
  * `ExtensionMode.Test` (plan §13.4) carries the setup flow's seams, and the test puts a
@@ -19,7 +22,7 @@
  * Depends on: the running extension (what activate() returns in test mode), the fixture
  * workspace, test/helpers/fakeCommand.ts, test/helpers/fakeReadinessHost.ts,
  * src/vscode/terminal.ts. Depended on by: nothing. Plan: §7.5, §7.6, §7.13.1, §8
- * E21/E55/E59/E67/E83, §9.4 `ext/login`, §10.1 item 19b, §13.2 D58, §13.4.
+ * E21/E23/E24/E55/E59/E62b/E67/E83, §9.4 `ext/login`, §10.1 items 19b and 23b, §13.2 D58, D66, §13.4.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -34,7 +37,7 @@ import type { ExtensionApi, ReadinessDeps } from '../../src/extension';
 import type { ReadyOutcome } from '../../src/vscode/login';
 import { runInTerminal } from '../../src/vscode/terminal';
 import type { StackTreeProvider } from '../../src/vscode/tree';
-import { exited, FakeCommandRunner } from '../helpers/fakeCommand';
+import { exited, FakeCommandRunner, neverStarted } from '../helpers/fakeCommand';
 import { fakeReadinessHost } from '../helpers/fakeReadinessHost';
 import type { FakeReadinessHost } from '../helpers/fakeReadinessHost';
 
@@ -159,6 +162,28 @@ async function undoGitHub(): Promise<void> {
   runGit(['remote', 'remove', 'github']);
   runGit(['update-ref', '-d', 'refs/spice/data']);
 }
+
+/** The fixture as a GitLab repository, the same way (item 23b): a gitlab.com remote and `prCascade.remote` pointing at it — the probe's step 5 has nothing to ask there. */
+async function makeItGitLab(): Promise<void> {
+  runGit(['update-ref', 'refs/spice/data', 'HEAD']);
+  try {
+    runGit(['remote', 'remove', 'gitlab']);
+  } catch {
+    // not there — the usual case
+  }
+  runGit(['remote', 'add', 'gitlab', 'git@gitlab.com:org/repo.git']);
+  await vscode.workspace.getConfiguration('prCascade').update('remote', 'gitlab', vscode.ConfigurationTarget.Workspace);
+}
+
+/** Undoes makeItGitLab. */
+async function undoGitLab(): Promise<void> {
+  await vscode.workspace.getConfiguration('prCascade').update('remote', undefined, vscode.ConfigurationTarget.Workspace);
+  runGit(['remote', 'remove', 'gitlab']);
+  runGit(['update-ref', '-d', 'refs/spice/data']);
+}
+
+/** What gh prints for `stack --version` when the extension is absent (measured 2.102.0). */
+const GH_STACK_ABSENT = exited(1, '', 'gh stack is available as an official extension.\nTo install it, run:\n  gh extension install github/gh-stack\n');
 
 // see primer §5 (arrow functions) and §6 (async / await)
 describe('PR Cascade: Set Up git-spice (plan §7.13.1, D58)', () => {
@@ -352,6 +377,193 @@ describe('PR Cascade: Set Up git-spice (plan §7.13.1, D58)', () => {
     } finally {
       await configuration.update('gsPath', undefined, vscode.ConfigurationTarget.Workspace);
       await undoGitHub();
+    }
+  });
+
+  it('builds a new backend when prCascade.ghPath changes — the next probe runs the gh it names (D56, item 23b)', async () => {
+    // arrange: one fake runner for both runs; the second gh exists only in the fake, with all three answers
+    await makeItGitHub();
+    const { runner } = fakeGitSpice([
+      { key: AUTH, result: exited(0) },
+      { key: '/opt/fake/gh --version', result: exited(0, GH_BANNER) },
+      { key: '/opt/fake/gh stack --version', result: exited(0, 'gh stack version 0.1.1\n') },
+      { key: '/opt/fake/gh auth status --hostname github.com', result: exited(0) },
+    ]);
+    const host = fakeReadinessHost();
+    useFakes(runner, host);
+    const configuration = vscode.workspace.getConfiguration('prCascade');
+    try {
+      assert.strictEqual(await setUp(), 'acted');
+      const before = runner.calls.length;
+
+      // act
+      await configuration.update('ghPath', '/opt/fake/gh', vscode.ConfigurationTarget.Workspace);
+      const outcome = await setUp();
+
+      // assert: after the change the new backend asked the gh named and never `gh`; the ready line is the same
+      assert.strictEqual(outcome, 'acted');
+      const after = runner.calls.slice(before);
+      assert.ok(after.some((call) => call.executable === '/opt/fake/gh'));
+      assert.ok(after.every((call) => call.executable !== 'gh'));
+      assert.deepStrictEqual(host.asked[1], { severity: 'information', message: 'git-spice 0.31.2 and gh 2.102.0 are ready for repo (github.com).', buttons: [] });
+    } finally {
+      await configuration.update('ghPath', undefined, vscode.ConfigurationTarget.Workspace);
+      await undoGitHub();
+    }
+  });
+
+  it('installs gh-stack, then logs gh in, in one terminal, and says the repository is ready (E62b, E23, E83)', async () => {
+    // arrange: git-spice logged in; gh there but its extension missing, and gh not logged in
+    await makeItGitHub();
+    const { runner, results } = fakeGitSpice([
+      { key: AUTH, result: exited(0) },
+      { key: GH_STACK, result: GH_STACK_ABSENT },
+      { key: GH_AUTH, result: exited(1, '', 'You are not logged into any accounts on github.com\n') },
+    ]);
+    const host = fakeReadinessHost({ answers: ['Install gh-stack', 'Log in'] });
+    useFakes(runner, host);
+    let treeChanges = 0;
+    const counting = provider.onDidChangeTreeData(() => {
+      treeChanges += 1;
+    });
+    let flow: Thenable<ReadyOutcome | undefined> | undefined;
+    try {
+      // act: the command; once the install line is typed the extension "appears"; once the login
+      // line is typed the user logs in
+      flow = setUp();
+      const install = await host.terminals.nextSent();
+      results.set(GH_STACK, exited(0, 'gh stack version 0.2.1\n'));
+      const login = await host.terminals.nextSent();
+      const beforeWait = runner.calls.length;
+      results.set(GH_AUTH, exited(0));
+      const outcome = await flow;
+
+      // assert: both lines in the repository's one terminal, `command` past any alias, the token pair unset
+      const cd = shellCommandLine(['cd', repositoryRoot()]);
+      assert.deepStrictEqual(install, { name: 'PR Cascade: repo', cwd: repositoryRoot(), text: `${cd} && command gh extension install github/gh-stack`, execute: true });
+      // the default protocol setting is empty, so the line ends at --web and gh asks
+      assert.strictEqual(login.text, `${cd} && env -u GH_TOKEN -u GITHUB_TOKEN gh auth login --hostname github.com --web`);
+      assert.strictEqual(outcome, 'acted');
+      assert.deepStrictEqual(host.asked, [
+        { severity: 'warning', message: 'gh 2.102.0 is installed, but its gh-stack extension is not; pull requests on github.com need it. Install it?', buttons: ['Install gh-stack'] },
+        { severity: 'information', message: 'gh-stack installed.', buttons: [] },
+        { severity: 'warning', message: 'gh is not logged in to github.com.', buttons: ['Log in'] },
+        { severity: 'information', message: 'gh is logged in to github.com.', buttons: [] },
+        { severity: 'information', message: 'git-spice 0.31.2 and gh 2.102.0 are ready for repo (github.com).', buttons: [] },
+      ]);
+      assert.strictEqual(treeChanges, 2);
+      assert.strictEqual(host.terminals.created.length, 1);
+      // asked once the login line was typed — the wait's poll that found the login, then the next pass's
+      // probe before the ready line: two, where a wait that never polled would give one — and nothing of
+      // ours ever installed or logged in
+      const ghCalls = runner.calls.filter((call) => call.executable === 'gh');
+      assert.ok(runner.calls.slice(beforeWait).filter((call) => `${call.executable} ${call.args.join(' ')}` === GH_AUTH).length >= 2);
+      assert.ok(ghCalls.every((call) => !call.args.includes('login') && !call.args.includes('install')));
+      // every gh spawn from the repository, for its host, with the probe's hygiene and timeout
+      for (const call of ghCalls) {
+        assert.strictEqual(call.cwd, repositoryRoot());
+        assert.strictEqual(call.env?.GH_HOST, 'github.com');
+        assert.strictEqual(call.env?.GH_PROMPT_DISABLED, '1');
+        assert.strictEqual(call.timeoutMs, 15_000);
+      }
+    } finally {
+      await endFlow(host, flow);
+      counting.dispose();
+      await undoGitHub();
+    }
+  });
+
+  it('installs gh with the Homebrew it was told about, waits for gh to answer, then offers the extension (E24, E62b)', async () => {
+    // arrange: nothing answers as gh; the host knows where brew is
+    await makeItGitHub();
+    const { runner, results } = fakeGitSpice([
+      { key: AUTH, result: exited(0) },
+      { key: GH_VERSION, result: neverStarted('not-found') },
+      { key: GH_STACK, result: GH_STACK_ABSENT },
+    ]);
+    const host = fakeReadinessHost({ answers: ['Install with Homebrew', undefined], machine: { brewPath: '/opt/homebrew/bin/brew', brewGitSpice: null, brewGh: null } });
+    useFakes(runner, host);
+    let treeChanges = 0;
+    const counting = provider.onDidChangeTreeData(() => {
+      treeChanges += 1;
+    });
+    let flow: Thenable<ReadyOutcome | undefined> | undefined;
+    try {
+      // act: once the install line is typed, gh "appears"; the extension's offer is then closed
+      flow = setUp();
+      const sent = await host.terminals.nextSent();
+      results.set(GH_VERSION, exited(0, GH_BANNER));
+      const outcome = await flow;
+
+      // assert
+      assert.strictEqual(sent.text, `${shellCommandLine(['cd', repositoryRoot()])} && /opt/homebrew/bin/brew install gh`);
+      assert.strictEqual(outcome, 'not-ready');
+      assert.deepStrictEqual(
+        host.asked.map((asked) => asked.message),
+        [
+          "Pull requests on github.com need gh 2.90.0 or newer and its gh-stack extension, and gh was not found in VS Code's PATH. Install it with Homebrew — or, if it is already installed, set prCascade.ghPath to its full path.",
+          'gh installed.',
+          'gh 2.102.0 is installed, but its gh-stack extension is not; pull requests on github.com need it. Install it?',
+        ],
+      );
+      assert.strictEqual(treeChanges, 1);
+    } finally {
+      await endFlow(host, flow);
+      counting.dispose();
+      await undoGitHub();
+    }
+  });
+
+  it('reads prCascade.ghPath and prCascade.gitProtocol on the login line — the gh named, the protocol set', async () => {
+    // arrange: both settings set in the workspace; the gh named answers, and is not logged in
+    await makeItGitHub();
+    const configuration = vscode.workspace.getConfiguration('prCascade');
+    await configuration.update('ghPath', '/opt/fake/gh', vscode.ConfigurationTarget.Workspace);
+    await configuration.update('gitProtocol', 'ssh', vscode.ConfigurationTarget.Workspace);
+    const { runner, results } = fakeGitSpice([
+      { key: AUTH, result: exited(0) },
+      { key: '/opt/fake/gh --version', result: exited(0, GH_BANNER) },
+      { key: '/opt/fake/gh stack --version', result: exited(0, 'gh stack version 0.1.1\n') },
+      { key: '/opt/fake/gh auth status --hostname github.com', result: exited(1) },
+    ]);
+    const host = fakeReadinessHost({ answers: ['Log in'] });
+    useFakes(runner, host);
+    let flow: Thenable<ReadyOutcome | undefined> | undefined;
+    try {
+      // act
+      flow = setUp();
+      const sent = await host.terminals.nextSent();
+      results.set('/opt/fake/gh auth status --hostname github.com', exited(0));
+      const outcome = await flow;
+
+      // assert
+      assert.strictEqual(sent.text, `${shellCommandLine(['cd', repositoryRoot()])} && env -u GH_TOKEN -u GITHUB_TOKEN /opt/fake/gh auth login --hostname github.com --web --git-protocol ssh`);
+      assert.strictEqual(outcome, 'acted');
+    } finally {
+      await endFlow(host, flow);
+      await configuration.update('ghPath', undefined, vscode.ConfigurationTarget.Workspace);
+      await configuration.update('gitProtocol', undefined, vscode.ConfigurationTarget.Workspace);
+      await undoGitHub();
+    }
+  });
+
+  it('asks nothing of gh for a GitLab repository (E24)', async () => {
+    // arrange: a gitlab.com remote, git-spice logged in to GitLab
+    await makeItGitLab();
+    const { runner } = fakeGitSpice([{ key: 'git-spice --no-prompt auth status --forge gitlab', result: exited(0) }]);
+    const host = fakeReadinessHost({ answers: [undefined] });
+    useFakes(runner, host);
+    try {
+      // act
+      const outcome = await setUp();
+
+      // assert: ready, naming git-spice alone, and no gh spawned
+      assert.strictEqual(outcome, 'acted');
+      assert.deepStrictEqual(host.asked, [{ severity: 'information', message: 'git-spice 0.31.2 is ready for repo (gitlab.com).', buttons: [] }]);
+      assert.ok(runner.calls.every((call) => call.executable !== 'gh'));
+    } finally {
+      await endFlow(host, undefined);
+      await undoGitLab();
     }
   });
 

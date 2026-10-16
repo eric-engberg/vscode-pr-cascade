@@ -216,7 +216,7 @@ export function fakeReadinessHost(script: FakeHostScript = {}): FakeReadinessHos
     picked: [],
     opened: [],
     terminals: new FakeTerminalHost(),
-    machineFacts: script.machine ?? { brewPath: null, brewGitSpice: null },
+    machineFacts: script.machine ?? { brewPath: null, brewGitSpice: null, brewGh: null },
     prompt(severity, message, buttons) {
       host.asked.push({ severity, message, buttons: [...buttons] });
       if (buttons.length === 0) {

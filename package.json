@@ -126,6 +126,22 @@
           "type": "string",
           "default": "",
           "markdownDescription": "The git-spice executable. Empty (the default) tries `git-spice`, then `gs` — the old name, which on a Mac with Homebrew is often Ghostscript instead — in VS Code's own PATH. If **PR Cascade: Set Up git-spice** says git-spice was not found while a terminal has it, set its full path here, such as `/opt/homebrew/bin/git-spice`; a set value is the only one tried. Read again on each check, like every setting here."
+        },
+        "prCascade.ghPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "The GitHub CLI executable. Empty (the default) tries `gh` in VS Code's own PATH. If **PR Cascade: Set Up git-spice** says gh was not found while a terminal has it, set its full path here, such as `/opt/homebrew/bin/gh`; a set value is the only one tried. Only GitHub repositories use gh. Read again on each check, like every setting here."
+        },
+        "prCascade.gitProtocol": {
+          "type": "string",
+          "enum": ["", "https", "ssh"],
+          "enumDescriptions": [
+            "No flag: gh asks once in the terminal which protocol to use, and a host it is already set up for keeps what it has.",
+            "gh fetches and pushes over HTTPS, and offers to act as git's credential helper for the host.",
+            "gh uses your SSH key, and offers to upload one when it logs in."
+          ],
+          "default": "",
+          "markdownDescription": "Empty (the default) passes no `--git-protocol`, so gh asks once in the terminal and a host already set up keeps its protocol. `https` or `ssh` is passed to `gh auth login --git-protocol` when **PR Cascade: Set Up git-spice** logs gh in. It is the protocol gh itself uses for git on that host — its clones and its credential helper; PR Cascade's own pushes use your remote's URL as it is, whatever this says. `https` needs no key and asks the fewest questions. gh applies it to every account on the host."
         }
       }
     }

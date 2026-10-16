@@ -7,14 +7,15 @@
  * TrunkOptions object of plain strings, and this file is what builds it. Depends on: the
  * `vscode` module. Depended on by: src/extension.ts, on every refresh and every click.
  * The settings and their defaults are declared in package.json "contributes.configuration".
- * Plan: §7.3, §7.14.1 (`gitPath`), §7.13.1 (`gsPath`, M5 item 19b), §13.4.
+ * Plan: §7.3, §7.14.1 (`gitPath`), §7.13.1 (`gsPath`, M5 item 19b; `ghPath`, item 23b), §7.5
+ * (`gitProtocol`, item 23b), §13.4.
  */
 
 // see primer §1 (import / export) and §2 (the vscode module)
 import * as vscode from 'vscode';
 
 /**
- * The five settings the extension reads, as plain values — no VS Code types, so a test can build
+ * The seven settings the extension reads, as plain values — no VS Code types, so a test can build
  * one by hand and core code can take it without importing `vscode`. Each field's doc says
  * what the setting means; package.json "contributes.configuration" is what the user sees
  * in the Settings editor, and the two must agree. (M1 also read two repository-scan
@@ -43,6 +44,20 @@ export interface PrCascadeSettings {
    * `gitPath` is.
    */
   gsPath: string;
+  /**
+   * `prCascade.ghPath` (M5 item 23b): the gh executable, or `''` — the default — for `gh` in VS
+   * Code's PATH (core/ghstatus.ts). A full path when VS Code's PATH misses it; a wrong one is E62b,
+   * naming it. Passed on exactly as read, as `gsPath` is.
+   */
+  ghPath: string;
+  /**
+   * `prCascade.gitProtocol` (M5 item 23b): `https` or `ssh`, what `gh auth login --git-protocol` is
+   * given when the setup command logs gh in — or empty, the default, for no flag at all: gh asks
+   * once in the terminal and a host already set up keeps its protocol (Ric, 2026-10-16). Taken as
+   * it comes, like the rest: a value gh does not know fails in the terminal the user is watching,
+   * with gh's own words.
+   */
+  gitProtocol: string;
 }
 
 /**
@@ -70,5 +85,7 @@ export function readSettings(): PrCascadeSettings {
     remote: configuration.get<string>('remote', 'origin'),
     statusBar: configuration.get<boolean>('statusBar', true),
     gsPath: configuration.get<string>('gsPath', ''),
+    ghPath: configuration.get<string>('ghPath', ''),
+    gitProtocol: configuration.get<string>('gitProtocol', ''),
   };
 }
