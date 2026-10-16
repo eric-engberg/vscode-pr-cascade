@@ -3,7 +3,8 @@
  * "Protocol", E79): the model one way, a command or a drop the other. Types only — no code runs
  * from here, so the browser bundles carry nothing of the host's and the host nothing of the
  * views'; `import type` from core is what §4.1 allows this folder, and the lint rule that refuses
- * anything else in `src/webview/` arrives with 23c's build (plan §10.1).
+ * anything else in `src/webview/` is eslint.config.mjs's second layering block (item 23c, D69), with
+ * tsconfig.webview.json as the compiler's half.
  *
  * The rules around the messages are the host's (item 23d), written here so both sides read them
  * in one place: every model the host posts carries a rising `seq`, and a message from a view whose
@@ -20,8 +21,10 @@
  * files and the focused row) and later can add members without changing a field.
  *
  * Layer: webview (plan §4.1: no `vscode`, no Node built-ins; types from core only). Depends on:
- * core/viewmodel.ts (`StackViewModel`, a type). Depended on by: src/vscode/views/base.ts (item 23d)
- * and the two renderers (items 23e, 23i). Plan: §4.1, §4.2, §7.1.3, §7.2.1 (drag and drop), §7.14.3
+ * core/viewmodel.ts (`StackViewModel`, a type). Depended on by: src/webview/host.ts (item 23c, the three
+ * message types) and src/webview/smartlog/render.ts (item 23c's plain-text rows, rewritten in place by
+ * 23e), src/vscode/views/base.ts (item 23d), the graph renderer (item 23i), test/webview/host.test.ts,
+ * test/webview/helpers/models.ts. Plan: §4.1, §4.2, §7.1.3, §7.2.1 (drag and drop), §7.14.3
  * (the host's notices), §8 E17/E77/E79/E81/E82, §10.1 item 23b (M6), §13.2 D68. Pending item 5
  * (several repositories in one window) decides how `repos` and `activeRepo` are shown; this file
  * only carries them.

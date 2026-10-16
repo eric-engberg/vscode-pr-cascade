@@ -3,15 +3,19 @@
   //
   // Layer: tooling. Used by `npm run typecheck` (tsc --noEmit): it type-checks src/, test/
   // and scripts/ (only the .ts files there; the .mjs ones are plain JavaScript and are
-  // ESLint's) and emits nothing. Building the shippable file is esbuild's job (esbuild.mjs),
-  // which reads only the options it needs from here. tsconfig.ext.json extends this one
-  // to compile the extension-host tests to out/. Plan: §11 skeleton, §3 "Language".
+  // ESLint's) and emits nothing — all but the browser world, src/webview/ and test/webview/,
+  // which tsconfig.webview.json checks with the DOM's types in place of Node's (the second
+  // half of `npm run typecheck`; see "exclude" below). Building the shippable files is
+  // esbuild's job (esbuild.mjs), which reads only the options it needs from here.
+  // tsconfig.ext.json extends this one to compile the extension-host tests to out/. Plan: §11
+  // skeleton, §3 "Language", §4.1 (the two worlds).
   "compilerOptions": {
     // The JavaScript level tsc assumes. ES2022 has everything we use; esbuild lowers the
     // bundle to what the VS Code runtime supports (see esbuild.mjs "target").
     "target": "ES2022",
     // The built-in type declarations tsc loads: the ES2022 standard library and nothing
     // else — no browser DOM, because the extension runs inside VS Code's Node, not a page.
+    // (The webview code, which does run in a page, gets the DOM from tsconfig.webview.json.)
     "lib": ["ES2022"],
     // VS Code loads extensions as CommonJS modules (require/module.exports). esbuild does
     // the actual translation of our `import`/`export` (esbuild.mjs `format: 'cjs'`); this
@@ -39,5 +43,11 @@
     // import fails to type-check instead of failing at run time.
     "types": ["node"]
   },
-  "include": ["src", "test", "scripts"]
+  "include": ["src", "test", "scripts"],
+  // The browser world is tsconfig.webview.json's: the DOM in `lib` and no Node types, which
+  // cannot both hold in one program. A file here that imports a *type* from src/webview
+  // (src/vscode/views/*.ts from item 23d, `import type` from protocol.ts) is still followed and
+  // checked — exclude only trims what `include` gathers; it never cuts an import — and a file
+  // here that imported view *code* would fail on `window` (TS2304): the host side of §4.1.
+  "exclude": ["src/webview", "test/webview"]
 }

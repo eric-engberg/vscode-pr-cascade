@@ -2,10 +2,12 @@
  * vitest.config.mts — configuration for the Node-side test runner (Vitest).
  *
  * Layer: tooling. Vitest runs the tests that do not need a VS Code process: pure unit
- * tests in test/unit and real-git integration tests in test/git (plan §9.1 layers 1–2).
- * They are two "projects" so each can be run alone (`npm run test:unit`, `npm run
- * test:git`) and so a slow git suite never hides a fast unit failure. The extension-host
- * tests in test/ext use a different runner (see .vscode-test.mjs). Plan: §9.2.
+ * tests in test/unit, real-git integration tests in test/git and, since M6, the views'
+ * renderer tests in test/webview under a DOM (plan §9.1 layers 1, 1b and 2). They are three
+ * "projects" so each can be run alone (`npm run test:unit`, `npm run test:webview`, `npm run
+ * test:git`), so a slow git suite never hides a fast unit failure, and so only the webview
+ * project has a `document`. The extension-host tests in test/ext use a different runner (see
+ * .vscode-test.mjs). Plan: §9.2.
  *
  * Why `.mts` and not `.ts`: this file uses `import`/`export` (ES-module syntax). Our
  * package.json has no `"type": "module"` line, so Node treats `.js` files as CommonJS, and
@@ -18,10 +20,29 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    // No `passWithNoTests`: both folders have tests now, so a run that finds none (a typo
+    // No `passWithNoTests`: every folder has tests now, so a run that finds none (a typo
     // in a path, a misnamed file) fails loudly instead of reporting success.
     projects: [
       { test: { name: 'unit', include: ['test/unit/**/*.test.ts'] } },
+      {
+        test: {
+          name: 'webview',
+          include: ['test/webview/**/*.test.ts'],
+          // The code under src/webview runs in a browser, so its tests need `window` and
+          // `document`: happy-dom supplies them inside the Node process (plan §9.1 layer 1b; a
+          // built-in Vitest environment — happy-dom over jsdom is item 23c's §11.3 decision, D69).
+          // Only this project gets a DOM — under the other two a `document` in core code is a
+          // ReferenceError, which is what §4.1 wants it to be. happy-dom lays nothing out: every
+          // element width and rect is 0 (`window.innerWidth` is the viewport setting, 1024 by
+          // default, not a measurement) and its ResizeObserver never calls back, so a test that
+          // needs a width stubs `clientWidth` and fires `resize` (item 23e's E80 tests); and it has no
+          // DragEvent (the global is an alias of Event), so a drag test dispatches plain events
+          // and the renderer keeps the dragged row itself (item 23h); and no `window.origin` —
+          // `location.origin` is `http://localhost:3000`, and a dispatched MessageEvent's `origin`
+          // is '' unless its init names one (the fake API's `postFromHost` does).
+          environment: 'happy-dom',
+        },
+      },
       {
         test: {
           name: 'git',

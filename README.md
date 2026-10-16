@@ -250,7 +250,7 @@ folder in a second window, the **Extension Development Host**.
    three-layer stack at `../fixture-repo/repo`, with its bare origin beside it at
    `../fixture-repo/origin.git` so `origin/main` exists. That sibling folder is the only
    thing this project writes outside its own directory.
-3. Terminal 1: `npm run watch` — esbuild rebuilds `dist/extension.js` on every save.
+3. Terminal 1: `npm run watch` — esbuild rebuilds `dist/extension.js` and `dist/webview/` on every save.
 4. Press **F5** ("Run Extension"). A second VS Code window opens with the extension loaded
    and `../fixture-repo/repo` open. Its Source Control side bar has a **Stack** view listing
    the three branches, top layer first. Open a layer to see the files it changes against
@@ -275,13 +275,14 @@ To live with a build in your normal VS Code: `npm run package`, then
 
 | Command | What it runs |
 |---|---|
-| `npm test` | typecheck + lint + unit + git tests — run this before every push |
-| `npm run typecheck` | `tsc --noEmit` over `src/`, `test/` and `scripts/` |
-| `npm run lint` | ESLint, including the rule that `src/core` never imports `vscode` |
+| `npm test` | typecheck + lint + unit + webview + git tests — run this before every push |
+| `npm run typecheck` | `tsc --noEmit` twice: `src/`, `test/` and `scripts/` under Node's types, then `src/webview` and `test/webview` under the browser's (`tsconfig.webview.json`) |
+| `npm run lint` | ESLint, including the two layering rules: `src/core` never imports `vscode`; `src/webview` never imports `vscode`, a Node built-in or anything but types from `src/core` |
 | `npm run test:unit` | Vitest, `test/unit` — pure logic, no git, no VS Code |
+| `npm run test:webview` | Vitest, `test/webview` — the views' browser code under happy-dom (a DOM inside Node); no VS Code, no git |
 | `npm run test:git` | Vitest, `test/git` — real `git` in throwaway temp repos; three files (`gitspice*.git.test.ts`) also run a real git-spice (`git-spice` or `gs` on PATH, whichever names itself git-spice) and are skipped when there is none, and one (`gh.git.test.ts`) runs the real GitHub CLI read-only against an empty gh config and is skipped without `gh` — so a green run without them has not run those files |
 | `npm run test:ext` | Mocha inside a real VS Code, `test/ext` and `test/ext-parent` — two launches, one workspace each (see `.vscode-test.mjs`); downloads VS Code into `.vscode-test/` on first run (slow, once) |
-| `npm run build` / `watch` / `analyze` | esbuild: one bundle / rebuild on save / bundle plus per-package size report |
+| `npm run build` / `watch` / `analyze` | esbuild: two bundles (`dist/extension.js` for the extension host, `dist/webview/smartlog.js` for the view) with the codicon stylesheet and font copied beside the second / rebuild both on save / both bundles plus one per-file size report |
 | `npm run package` | `vsce package` → a `.vsix` you can install with `code --install-extension` |
 | `npm run depcheck -- <pkg>` | the dependency card a PR must include before adding a runtime library |
 
@@ -308,7 +309,10 @@ src/vscode/          adapters: the built-in Git extension's API (gitApi: reposit
                      signal, the git executable), config (settings → plain values), the Stack tree
                      view, the status bar item, the stackdiff: content provider, the commands,
                      terminals, and the git-spice setup flow (login)
-test/unit, test/git  Vitest (see vitest.config.mts)
+src/webview/         browser code for the views (M6): the bridge to the host (host.ts) and the
+                     smartlog renderer (plain text until 23e); no vscode, no Node, types only from
+                     core — enforced by lint and its own tsconfig
+test/unit, test/git, test/webview  Vitest (see vitest.config.mts; test/webview runs under happy-dom)
 test/helpers/        the fake git and command runners, a fake for VS Code's terminals and
                      notifications, and the fixture builder (a real throwaway stack)
 test/ext, test/ext-parent   Mocha inside VS Code, one launch per folder (see .vscode-test.mjs)
@@ -318,4 +322,6 @@ scripts/             developer tooling (never shipped)
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). The icons the views draw with (M6, from item 23e) are Microsoft's
+[codicons](https://github.com/microsoft/vscode-codicons) — CC BY 4.0 for the font, MIT for the
+stylesheet — see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

@@ -1,0 +1,7 @@
+{
+  // The editor's pointer to the browser world's config: VS Code's TypeScript service takes the
+  // nearest tsconfig.json above a file, and the root one excludes this folder
+  // (tsconfig.webview.json says why). Vitest's transform of these tests takes the nearest
+  // tsconfig.json too, so keep this at `extends` alone. `npm run typecheck` never reads it.
+  "extends": "../../tsconfig.webview.json"
+}

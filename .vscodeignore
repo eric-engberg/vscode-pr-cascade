@@ -1,7 +1,11 @@
 # .vscodeignore — what `vsce package` leaves OUT of the .vsix.
-# The .vsix ships five files: dist/extension.js, package.json, README.md, CHANGELOG.md and
-# LICENSE (plan §11.3; `npx vsce ls --no-dependencies` lists them). Sources, tests, tooling and
-# node_modules stay behind.
+# The .vsix ships five root files — package.json, README.md, CHANGELOG.md, LICENSE and, since M6
+# item 23c, THIRD-PARTY-NOTICES.md (the codicons' attribution) — and dist/: the host bundle
+# dist/extension.js and, under dist/webview/, one bundle per view beside the codicon stylesheet and
+# font (plan §11.3; `npx vsce ls --no-dependencies` lists them, and test/unit/vsix.test.ts pins the
+# root list on every `npm test`). Sources, tests, tooling, both worlds' source maps and node_modules
+# stay behind. Root tooling files are named one by one below, so a new root file SHIPS unless a line
+# here leaves it out — run `vsce ls` after adding one.
 .vscode/**
 .vscode-test/**
 .vscode-test.mjs
@@ -13,8 +17,11 @@ scripts/**
 out/**
 coverage/**
 node_modules/**
+# The source maps of both worlds: a user's VS Code never reads them; the dev host reads them from
+# this folder's dist/, not from a .vsix.
 **/*.map
-# `npm run analyze` leaves its raw metafile next to the bundle; it is a report, not code.
+# `npm run analyze` leaves its raw metafile (both bundles' records) next to the bundles; it is a
+# report, not code.
 dist/meta.json
 **/*.ts
 esbuild.mjs
