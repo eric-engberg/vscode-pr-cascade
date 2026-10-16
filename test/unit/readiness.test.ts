@@ -70,6 +70,8 @@ const GH_ENV_LITERAL = {
   GH_NO_EXTENSION_UPDATE_NOTIFIER: '1',
   NO_COLOR: '1',
   GH_TELEMETRY: 'false',
+  CI: undefined,
+  GITHUB_ACTIONS: undefined,
   GH_HOST: 'github.com',
 };
 

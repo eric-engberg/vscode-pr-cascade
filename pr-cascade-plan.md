@@ -2956,8 +2956,8 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
   `CommandRequest.env` admits `undefined` as "remove", which Node honours by leaving the entry out (measured;
   `git/command` pins it) — so a read-only step stays read-only wherever VS Code was started (the eleventh commit;
   the question had been: a `CI=true` inherited from an Actions job would make `gh stack --version` install the
-  extension). Eleven commits, each green — the seventh the review's fixes, the ninth the CI fix, the tenth the second
-  run's numbers, the eleventh Ric's answer: a four-lens panel with sceptics over a scratch copy found 37 things, 24 of
+  extension). Twelve commits — the seventh the review's fixes, the ninth the CI fix, the tenth the second run's
+  numbers, the eleventh Ric's answer (red on two test literals it missed), the twelfth those literals: a four-lens panel with sceptics over a scratch copy found 37 things, 24 of
   them taken (several one defect seen by two lenses: `GhFound` had been placed between the union's doc and the union,
   orphaning it; poll.ts's header named a dependant that does not import it; the `unit/login` count was two short since
   20b; reading-order item 26 and primer §59 still said ten members; the §7.5 as-built text described 23b's poll and
