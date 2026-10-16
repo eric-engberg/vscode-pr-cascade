@@ -7,7 +7,7 @@
  * "Show Only This Stack", which has to reach layoutGraph before lanes are assigned.
  *
  * Layer: core, pure (no VS Code imports, no git; plan §4.1). Depends on: core/graph.ts
- * (`layoutGraph` and its types), core/model.ts (`RepoState`,
+ * (`layoutGraph` and its types), core/gsLog.ts (`GsLogEntry`, a type), core/model.ts (`RepoState`,
  * `Enrichment`, `PrExtras`, `ReviewDecision`). Depended on by: src/webview/protocol.ts (types only —
  * the message that carries a model), src/extension.ts from item 23d (which reads the graph texts,
  * the change lists, the clock and the settings and calls buildStackViewModel once per repository
@@ -24,6 +24,7 @@
 // see primer §1 (import / export) and §9 (`import type`)
 import { layoutGraph } from './graph';
 import type { GraphInput, GraphRow, LayerRow, TrunkRow, WorkingTreeRow } from './graph';
+import type { GsLogEntry } from './gsLog';
 import type { Enrichment, PrExtras, RepoState, ReviewDecision } from './model';
 
 /**
@@ -339,6 +340,15 @@ const MONTH = 2_629_800;
 const YEAR = 31_536_000;
 
 /**
+ * The three things a branch's git-spice line can be once looked up by name: an entry (tracked —
+ * git-spice's own trunk line included), `null` (untracked: absent from a complete answer, E56),
+ * or `undefined` (unknown: nothing was asked, nothing came back, or the answer was incomplete —
+ * E57). The same three values `StackLayer.tracking` takes, resolved here for any branch.
+ */
+// see primer §10 (union types: `| null | undefined`)
+type Tracking = GsLogEntry | null | undefined;
+
+/**
  * What every row of one model is built from, besides its graph row: the input's plain facts and
  * the two lookups prepared once — a layer's `sha` by name (for `parentSha`) and the enrichment.
  * One object, handed to viewRowFor, so the row builders take two arguments and not nine.
@@ -459,16 +469,28 @@ function viewRowFor(row: GraphRow, facts: RowFacts): ViewRow {
 
 /**
  * 7a: a layer. The drawn fields copied from the graph row; `parentSha` looked up by the parent's
- * name; the age from the committer date. What git-spice and the forge say about the branch — the
- * indicators, the dim name, the tooltip's third and later lines, the context's git-spice keys —
- * arrives with the next commit: for now every layer reads as unknown (E57's shape).
+ * name; the age from the committer date; then what git-spice knows about the branch, looked up by
+ * name (trackingOf), and what gh knows — read once, and only for a branch whose line carries a
+ * change request: gh keys by head branch and lists pull requests, so an entry for a branch
+ * git-spice knows no pull request for is stale or belongs to one opened outside the stack, and a
+ * red ✕ beside no circle, or a "Mark Ready" item for a row with no pull request, would draw that
+ * stale answer. `dim` is §7.1.1's two cases — untracked, or merged while the branch is still here
+ * (E15); unknown is not dim, nothing being known.
  */
-// see primer §30 (`??`) and §48 (the conditional expression that keeps `joinsLane` absent, not `undefined`)
+// see primer §70 (`?.`), §30 (`??`) and §48 (the conditional expression that keeps `joinsLane` absent, not `undefined`)
 function layerViewRow(row: LayerRow, facts: RowFacts): LayerViewRow {
   const parentSha = facts.shaByName.get(row.parent);
   if (parentSha === undefined) {
     // Cannot happen — core/graph.ts draws every kept row's parent — but the compiler is not told that.
     throw new Error(`buildStackViewModel: ${row.name}'s parent ${row.parent} is not a row`);
+  }
+  const tracking = trackingOf(facts.enrichment, row.name);
+  const extra = tracking?.change !== undefined ? facts.extras.get(row.name) : undefined;
+  const indicators = indicatorsFor(row, tracking, extra, facts.enrichment);
+  const prState = tracking?.change !== undefined ? prStateOf(tracking.change.status, extra?.isDraft ?? false) : null;
+  const tooltip = [`${row.name} @ ${shortSha(row.sha)}`, `base: ${row.parent} @ ${shortSha(parentSha)}`, ...trackingLines(tracking)];
+  if (extra?.title !== undefined && extra.title !== null) {
+    tooltip.push(extra.title);
   }
   const base: LayerViewRow = {
     kind: 'layer',
@@ -479,23 +501,160 @@ function layerViewRow(row: LayerRow, facts: RowFacts): LayerViewRow {
     forks: row.forks,
     lane: row.lane,
     node: row.node,
-    indicators: [],
+    indicators,
     age: formatAge(row.committedAt, facts.now),
-    dim: false,
-    tooltip: [`${row.name} @ ${shortSha(row.sha)}`, `base: ${row.parent} @ ${shortSha(parentSha)}`],
+    dim: tracking === null || prState === 'merged',
+    tooltip,
     context: {
       webviewSection: 'layer',
       repo: facts.repo,
       layer: row.name,
       isCurrent: row.node === 'filled',
-      isTracked: false,
-      isUntracked: false,
-      isTrunkLine: false,
-      hasPR: false,
-      isDraft: false,
+      isTracked: tracking !== undefined && tracking !== null,
+      isUntracked: tracking === null,
+      isTrunkLine: tracking !== undefined && tracking !== null && tracking.down === undefined,
+      hasPR: tracking?.change !== undefined,
+      isDraft: extra?.isDraft ?? false,
     },
   };
   return row.joinsLane === undefined ? base : { ...base, joinsLane: row.joinsLane };
+}
+
+/**
+ * What git-spice knows about the branch called `name`, looked up in the whole answer rather than
+ * on HEAD's layer, so a layer of any stack gets the same three-way answer `withTracking`
+ * (core/backends/gitspice.ts) gives HEAD's: an entry — git-spice's own trunk line is one too;
+ * `null` when a complete answer does not list it (untracked, E56); `undefined` when nothing was
+ * asked (no `enrichment`), nothing came back (`not-enriched`), or the answer was incomplete — a
+ * malformed line names no branch, so absence proves nothing (E57). For HEAD's layers this agrees
+ * with `StackLayer.tracking` by construction, since `byName` is the map that filled it.
+ */
+// see primer §59 (narrowing on `kind`) and §48 (the conditional expression)
+function trackingOf(enrichment: Enrichment | undefined, name: string): Tracking {
+  if (enrichment === undefined || enrichment.kind === 'not-enriched') {
+    return undefined;
+  }
+  const entry = enrichment.byName.get(name);
+  if (entry !== undefined) {
+    return entry;
+  }
+  return enrichment.complete ? null : undefined;
+}
+
+/**
+ * The tail of a layer row, pushed in §7.1.1's fixed order and never sorted — `untracked` first (the
+ * exclusive state, which only ⛅ may join), then the bullet's ⇈ · 💬 · ⇄ · ↑n · ⛅ · the PR circle ·
+ * ✕ — each present only when its source field says so (Indicator's members name the fields).
+ * Nothing at all for an unknown layer: "degrade without touching the tree" (E57), the cloud
+ * included — its fact lives on the same enrichment and already vanishes with it for every
+ * `not-enriched` cause, so one unknown row with a cloud would be the inconsistency. Nothing either
+ * for git-spice's own trunk line (an entry with no `down`): a local `main` ahead of its remote is
+ * tracked, yet nothing in this tail is true of it. `extra` is gh's answer, already gated on a
+ * change request by the caller.
+ */
+// see primer §70 (`?.` through two optional fields), §30 (`??`) and §25 (arrays: push)
+function indicatorsFor(row: LayerRow, tracking: Tracking, extra: PrExtras | undefined, enrichment: Enrichment | undefined): Indicator[] {
+  const indicators: Indicator[] = [];
+  if (tracking === undefined) {
+    return indicators;
+  }
+  if (tracking === null) {
+    indicators.push({ kind: 'untracked' });
+  } else if (tracking.down === undefined) {
+    return indicators;
+  } else {
+    if (tracking.down.needsRestack) {
+      indicators.push({ kind: 'needsRestack' });
+    }
+    const unresolved = tracking.change?.comments?.unresolved ?? 0;
+    if (unresolved > 0) {
+      indicators.push({ kind: 'unresolved', count: unresolved });
+    }
+    // The forge's base against git-spice's, both local branch names: the rail's `parent` would
+    // differ for two names on one commit (E6) and after a plain-git rebase git-spice was not told
+    // about, where ⇈ already speaks.
+    if (extra !== undefined && extra.baseRef !== tracking.down.name) {
+      indicators.push({ kind: 'baseDrift', prBase: extra.baseRef, localParent: tracking.down.name });
+    }
+    // `push.ahead`, not `push.needsPush`: that flag is "the two tips differ" and is true for a
+    // branch strictly behind its remote too (measured, M4a), which has no glyph in this tail.
+    if (tracking.push !== undefined && tracking.push.ahead > 0) {
+      indicators.push({ kind: 'needsPush', ahead: tracking.push.ahead });
+    }
+  }
+  // ⛅ is a git fact, read off the digest: no remote-tracking branch of this name on any remote.
+  if (enrichment !== undefined && enrichment.kind === 'enriched' && !enrichment.remoteBranches.has(row.name)) {
+    indicators.push({ kind: 'neverPushed' });
+  }
+  if (tracking !== null && tracking.change !== undefined) {
+    indicators.push({
+      kind: 'pr',
+      id: tracking.change.id,
+      url: tracking.change.url,
+      state: prStateOf(tracking.change.status, extra?.isDraft ?? false),
+      reviewDecision: extra?.reviewDecision ?? null,
+      title: extra?.title ?? null,
+    });
+    if (extra?.checks !== undefined && extra.checks !== null && extra.checks.failing > 0) {
+      indicators.push({ kind: 'checks', failing: extra.checks.failing, total: extra.checks.total });
+    }
+  }
+  return indicators;
+}
+
+/**
+ * The PR circle's state from `change.status` — text the parser kept as it came (core/gsLog.ts), so
+ * a value a later git-spice adds is `unknown` rather than a malformed line — and gh's `isDraft`,
+ * which marks an open pull request GitHub flags: a draft over `open`, or over `unknown` when the
+ * local tier has no status yet (M7's `--cr-status` brings it), never over `merged` or `closed`.
+ */
+// see primer §45 (narrowing a `string` to an exact-string union with `===`)
+function prStateOf(status: string | undefined, isDraft: boolean): PrState {
+  if (status === 'merged') {
+    return 'merged';
+  }
+  if (status === 'closed') {
+    return 'closed';
+  }
+  if (isDraft) {
+    return 'draft';
+  }
+  return status === 'open' ? 'open' : 'unknown';
+}
+
+/**
+ * The tooltip's lines from git-spice — the tree's `trackingLines` (vscode/tree.ts, item 20b) word for
+ * word but for one test: none while unknown; `git-spice: not tracked`; `git-spice: trunk` for
+ * git-spice's own trunk line; else `git-spice: tracked on <base>` — the base as git-spice names it,
+ * the trunk's local branch for a bottom layer beside the row's `origin/main`: two spellings, not
+ * drift — with ` · needs restack` and ` · needs push` appended when true, and the change request's
+ * `<id> <url>` on a line of its own. The one changed test is `needs push`: `push.ahead > 0`, as the
+ * tail's ↑n reads it, where the tree read `needsPush === true` — true for a branch strictly behind
+ * its remote too (M4a); item 23j deletes the tree's copy.
+ */
+// see primer §25 (arrays: push, join, a typed empty array)
+function trackingLines(tracking: Tracking): string[] {
+  if (tracking === undefined) {
+    return [];
+  }
+  if (tracking === null) {
+    return ['git-spice: not tracked'];
+  }
+  if (tracking.down === undefined) {
+    return ['git-spice: trunk'];
+  }
+  const parts = [`git-spice: tracked on ${tracking.down.name}`];
+  if (tracking.down.needsRestack) {
+    parts.push('needs restack');
+  }
+  if (tracking.push !== undefined && tracking.push.ahead > 0) {
+    parts.push('needs push');
+  }
+  const lines = [parts.join(' · ')];
+  if (tracking.change !== undefined) {
+    lines.push(`${tracking.change.id} ${tracking.change.url}`);
+  }
+  return lines;
 }
 
 /**
