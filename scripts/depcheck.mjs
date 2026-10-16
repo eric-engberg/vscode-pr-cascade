@@ -143,18 +143,18 @@ console.log(printable(
 ));
 
 // Pass/fail against the floors in plan §11.3. `?` means the value could not be measured.
-const allowedLicenses = ['MIT', 'ISC', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0'];
+const allowedLicenses = new Set(['MIT', 'ISC', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0']);
 // §11.3's licence floor has a second clause since M6 item 23c (D69, Ric 2026-10-16): CC-BY-4.0 is
 // admitted for an asset that ships as a file (icons, a font) with its attribution in
 // THIRD-PARTY-NOTICES.md, and for nothing else. No registry field says whether a package is such
 // an asset, so that case is a third answer here, not a PASS — the PR body says which it is.
-const assetLicenses = ['CC-BY-4.0'];
+const assetLicenses = new Set(['CC-BY-4.0']);
 /** The licence row's three answers, worded in full. */
 function licenseVerdict(license) {
-  if (allowedLicenses.includes(license)) {
+  if (allowedLicenses.has(license)) {
     return 'PASS  license MIT/ISC/BSD/Apache-2.0';
   }
-  if (assetLicenses.includes(license)) {
+  if (assetLicenses.has(license)) {
     return `ASSET ONLY  license ${license}: admitted for a file that ships unchanged (icons, a font) with its attribution in THIRD-PARTY-NOTICES.md (plan §11.3, D69); FAIL for code`;
   }
   return 'FAIL  license MIT/ISC/BSD/Apache-2.0 (CC-BY-4.0 for a shipped asset only)';
