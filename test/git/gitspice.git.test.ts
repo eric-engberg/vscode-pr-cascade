@@ -6,8 +6,12 @@
  * plan §13.4 (k) pin (three `gs log` forms change nothing under `.git`), the memo, push (the
  * origin's heads, the upstreams, `push {0, 0, false}`), a detached push, a pushed trunk commit
  * and the restack refusal, the second (k) pin (a deleted branch pruned: `refs/spice/data` and
- * objects only) and an empty HOME at the end. The unit tests pin what the backend spawns and how
- * it reads the answers; this file checks that real git-spice gives the answers they assume.
+ * objects only) and an empty HOME at the end — and, since M6 item 23b, the view model over the
+ * real answer and the real digest at two of those points (after init: every layer untracked and
+ * never pushed; after the push: no indicator anywhere), the one place the digest's `refs/remotes`
+ * lines and git-spice's `push` are real rather than typed. The unit tests pin what the backend
+ * spawns and how it reads the answers; this file checks that real git-spice gives the answers
+ * they assume.
  *
  * One fixture for the whole file, because the rows are one story — fresh → initialised → tracked
  * → pushed → trunk moved → pruned — and each `it` leaves the repository where the next expects it
@@ -18,8 +22,9 @@
  * Layer: test, git integration (plan §9.1 layer 2; Vitest, real git and real git-spice in a
  * throwaway directory, no VS Code, no network). Depends on: src/core/backends/gitspice.ts,
  * src/core/digest.ts, src/core/git.ts, src/core/command.ts, src/core/readinessFix.ts,
- * test/helpers/gitspice.ts, test/helpers/fixture.ts. Plan: §10.1 item 22b, §7.6, §7.8, §7.13.2,
- * §7.13.3, §8 E3/E21/E56/E59/E76/E83, §9.4, §9.6, §13.2 D59/D61/D64, §13.4 (k).
+ * src/core/graph.ts and src/core/viewmodel.ts (the two view-model rows), test/helpers/gitspice.ts,
+ * test/helpers/fixture.ts. Plan: §10.1 items 22b and 23b (M6), §7.6, §7.8, §7.13.2, §7.13.3, §8
+ * E3/E21/E56/E59/E76/E83, §9.4, §9.6, §13.2 D59/D61/D64/D68, §13.4 (k).
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -32,9 +37,11 @@ import type { GitSpiceBackend } from '../../src/core/backends/gitspice';
 import { RealCommandRunner } from '../../src/core/command';
 import { isInitialised, readRefDigest } from '../../src/core/digest';
 import { RealGitRunner } from '../../src/core/git';
+import { readGraphInput } from '../../src/core/graph';
 import type { GsLogEntry } from '../../src/core/gsLog';
 import type { RepoState } from '../../src/core/model';
 import { trunkBranchFor } from '../../src/core/readinessFix';
+import { buildStackViewModel } from '../../src/core/viewmodel';
 import { buildStack } from '../helpers/fixture';
 import type { Fixture } from '../helpers/fixture';
 import { backendFor, changedPaths, filesUnder, GIT_SPICE, loadState, logLinesByName, requireGitSpice, runGitSpice, snapshotGitDir, stderrLines } from '../helpers/gitspice';
@@ -86,6 +93,21 @@ function trackingOf(state: RepoState): (GsLogEntry | null | undefined)[] {
 }
 
 /** The origin's branch heads, as sorted ref names: what a push changed. */
+/** What git says `ref` points at, as the 40-character SHA. */
+// see primer §23 (`trim`)
+function shaOf(ref: string): string {
+  return fixture.git(['rev-parse', ref]).trim();
+}
+
+/** `ref`'s committer date, unix seconds — what the graph's refs text carries and the model's ages count from. */
+// see primer §27 (Number)
+function dateOf(ref: string): number {
+  return Number(fixture.git(['show', '-s', '--format=%ct', ref]).trim());
+}
+
+/** A day in seconds: the view-model rows ask the model two days after the fixture's commits, so every age reads `2d`. */
+const DAY = 86_400;
+
 function originHeads(): string[] {
   return fixture
     .git(['ls-remote', '--heads', 'origin'])
@@ -187,6 +209,31 @@ describe.skipIf(GIT_SPICE === null)(`GitSpiceBackend against real git-spice ${GI
       remoteBranches: new Set(['HEAD', 'main']),
     });
     expect(trackingOf(enriched)).toStrictEqual([null, null, null]);
+  });
+
+  it('the view model after init, nothing tracked or pushed: every layer "not tracked" and never pushed, dim, neither tracked nor trunk; the trunk row bare', async () => {
+    // act: the model over the real answer and the real digest (M6 item 23b)
+    const graph = await readGraphInput(git, fixture.dir, 'origin/main');
+    const model = buildStackViewModel({ state: enriched, graph, workingTreeFiles: 0, now: dateOf('retry-metrics') + 2 * DAY, showOnlyThisStack: false, behindTrunk: null, extras: new Map() });
+
+    // assert
+    expect(model.messages).toStrictEqual([]);
+    expect(model.lanes).toBe(1);
+    expect(model.rows.map((row) => row.kind)).toStrictEqual(['layer', 'layer', 'layer', 'trunk']);
+    for (const row of model.rows) {
+      if (row.kind === 'layer') {
+        expect(row.indicators, row.name).toStrictEqual([{ kind: 'untracked' }, { kind: 'neverPushed' }]);
+        expect(row.dim, row.name).toBe(true);
+        expect(row.tooltip[2], row.name).toBe('git-spice: not tracked');
+        expect(row.context.isTracked, row.name).toBe(false);
+        expect(row.context.isUntracked, row.name).toBe(true);
+        expect(row.age, row.name).toBe('2d');
+      } else if (row.kind === 'trunk') {
+        expect(row.indicators).toStrictEqual([]);
+        expect(row.node).toBe('hollow');
+        expect(row.tooltip).toStrictEqual([`origin/main @ ${shaOf('origin/main').slice(0, 7)}`]);
+      }
+    }
   });
 
   it('track: three branch track calls bottom to top with main as the first base; enrich then shows the bases and no needsRestack', async () => {
@@ -302,6 +349,50 @@ describe.skipIf(GIT_SPICE === null)(`GitSpiceBackend against real git-spice ${GI
     } finally {
       fixture.git(['checkout', '-q', 'retry-metrics']);
     }
+  });
+
+  it('the view model after the push: every layer tracked and pushed, so no indicator at all; the bases as git-spice names them; the filled top; no elided row', async () => {
+    // arrange: a layer row as the model draws one here — hollow, clean, tracked
+    const sha7 = (ref: string): string => shaOf(ref).slice(0, 7);
+    const layerRow = (name: string, parent: string, parentRef: string, trackedOn: string, node: 'hollow' | 'filled') => ({
+      kind: 'layer' as const,
+      name,
+      sha: shaOf(name),
+      parent,
+      parentSha: shaOf(parentRef),
+      forks: [shaOf('origin/main')],
+      lane: 0,
+      node,
+      indicators: [],
+      age: '2d',
+      dim: false,
+      tooltip: [`${name} @ ${sha7(name)}`, `base: ${parent} @ ${sha7(parentRef)}`, `git-spice: tracked on ${trackedOn}`],
+      context: { webviewSection: 'layer' as const, repo: fixture.dir, layer: name, isCurrent: node === 'filled', isTracked: true, isUntracked: false, isTrunkLine: false, hasPR: false, isDraft: false },
+    });
+
+    // act: over the `enriched` the push test left
+    const graph = await readGraphInput(git, fixture.dir, 'origin/main');
+    const model = buildStackViewModel({ state: enriched, graph, workingTreeFiles: 0, now: dateOf('retry-metrics') + 2 * DAY, showOnlyThisStack: false, behindTrunk: null, extras: new Map() });
+
+    // assert: every fork is trunk's tip — the fixture's one line forks there — so nothing is elided
+    expect(model.rows).toStrictEqual([
+      layerRow('retry-metrics', 'add-retries', 'add-retries', 'add-retries', 'filled'),
+      layerRow('add-retries', 'api-refactor', 'api-refactor', 'api-refactor', 'hollow'),
+      layerRow('api-refactor', 'origin/main', 'origin/main', 'main', 'hollow'),
+      {
+        kind: 'trunk',
+        name: 'origin/main',
+        sha: shaOf('origin/main'),
+        lane: 0,
+        node: 'hollow',
+        indicators: [],
+        age: '2d',
+        tooltip: [`origin/main @ ${sha7('origin/main')}`],
+        context: { webviewSection: 'trunk', repo: fixture.dir, trunk: 'origin/main', isCurrent: false },
+      },
+    ]);
+    expect(model.lanes).toBe(1);
+    expect(model.messages).toStrictEqual([]);
   });
 
   it('a commit on trunk marks the bottom layer needsRestack; push refuses before the submit; stack restack clears it', async () => {
