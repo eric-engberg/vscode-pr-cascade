@@ -303,11 +303,14 @@ the implementations elsewhere, and `npm run typecheck` as its only test.
 
 `src/webview/protocol.ts` (M6 item 23b) is the first file outside `src/core` and `src/vscode` to import from
 core — `import type { StackViewModel } from '../core/viewmodel'` — and there the `type` keyword is
-load-bearing, not a statement of intent. The webview code is bundled for a browser (item 23c), where nothing
+load-bearing, not a statement of intent. The webview code is bundled for a browser (item 23c's `esbuild.mjs`, item 92), where nothing
 of Node's exists; a plain `import { … }` from a core file would pull that file, and everything it imports,
 into the browser bundle. `import type` is erased before bundling, so the view shares the shape and none of
-the code — the same reason §60 gives for the vendored `.d.ts`, applied to our own files. Item 23c adds the
-lint rule that says so in the compiler's place.
+the code — the same reason §60 gives for the vendored `.d.ts`, applied to our own files. Item 23c added the
+lint rule that says so beside the compiler — `eslint.config.mjs`'s second layering block (item 94), with
+`tsconfig.webview.json` (item 91) as the compiler's own half: that program has no Node types, so a value import
+of a core file that reaches Node — `git.ts`, say — fails there too, on the first `node:` import; the lint rule is
+what refuses the pure ones, `viewmodel.ts` among them.
 
 An interface that `extends` another may also *narrow* a member it inherits to a more particular
 type, as long as every value of the new type still fits the old: `FakeReadinessHost` in
@@ -643,7 +646,10 @@ the user's shell says and `PATH` is still the user's. `...` works inside `[ ]` t
 is its first use in `src/`: `[...request.args]` (`src/core/command.ts`) is a new array with the
 same elements — a copy, so a later change to the caller's array cannot reach the record — and
 `['--no-prompt', ...args]` (`src/core/backends/gitspice.ts`) puts a fixed element in front of
-whatever the call passed.
+whatever the call passed. Spreading a conditional whose other side is `[]` — `...(message.repos.length > 1 ?
+[repo.repo] : [])` in `src/webview/smartlog/render.ts` (M6 item 23c), its first use in `src/` — puts one element in
+when the condition holds and nothing when it does not, since spreading an empty array adds no elements: the
+`if`-less way to make a line optional inside a literal (§48 is the conditional itself).
 
 Two more places `...` appears from M5 item 19b. In a **call**, it spreads a list into separate
 arguments: `vscode.window.showWarningMessage(message, ...buttons)` (`src/extension.ts`) passes
@@ -657,6 +663,15 @@ A `Map` spread the same way gives its `[key, value]` pairs: `new Map([...BY_NAME
 TOP_TRACKING]])` (`test/unit/enrich.test.ts`, M6 item 23b) is a copy of one Map with a pair added —
 the pairs out into `[ ]`, one more pair after them, and §19's `new Map` of pairs to close it. The
 original is untouched, as every spread leaves its source.
+
+**Method shorthand** is a fourth way of writing a key, and the first whose value is a function:
+`{ onModel(handler) { … }, postCommand(command, args) { … } }` — what `connect` returns in
+`src/webview/host.ts` (M6 item 23c) — writes a function-valued property as the name followed straight by
+its parameter list and body, with no `: function` and no arrow; §61's getter is the same family. The two
+methods share `connect`'s local `lastSeq` through the closure (§64): the one piece of state in the view, kept
+where only the bridge can touch it. Their parameter types are not written, because the literal is returned
+as a `HostConnection` and the compiler takes `handler`, `command` and `args` from the interface's method
+signatures, as it takes a callback's parameters from the function that receives it (§5).
 
 ## 17. Narrowing with typeof
 
@@ -893,7 +908,11 @@ repository with no other refs. The space at the end is part of the pattern on pu
 `refs/spice/database` or `refs/spice/data/x` would otherwise match too. Flags go after the closing
 slash, one letter each; the others most often met are `i` (ignore case) and `g` (every match
 rather than the first) — `i` is not used here; `g` arrives with M5 item 21a in `relayedGitLine`
-(`core/backends/gitspice.ts`), `.replaceAll(/\s+/g, ' ')`, explained beside `replaceAll` in §23.
+(`core/backends/gitspice.ts`), `.replaceAll(/\s+/g, ' ')`, explained beside `replaceAll` in §23 — and with
+`text.match(pattern)` in `test/unit/build.test.ts` (M6 item 23c), the third regex method: with `g` it answers
+every match as an array of strings (whole matches, no captures), or `null` when there is none — hence the
+`?? []` (§30) in `inputComments`, which reads esbuild's `// src/…` input comments out of the bundle, `m` making
+`^` hold at each line as in `SPICE_DATA_LINE`; without `g` it answers as `exec` does.
 
 ## 21. Set
 
@@ -1004,7 +1023,10 @@ Strings carry their own methods, called with a dot like a method on any object:
   `slice(0, -1)` is everything but the last character. Leave `end` out and it runs to the
   end of the string: `ref.slice('refs/heads/'.length)` in `core/stack.ts` is everything
   after that prefix (checked first with `startsWith`). Arrays have the same `slice`.
-- `trim()` — a copy with whitespace (spaces, tabs, newlines) removed from both ends.
+- `trim()` — a copy with whitespace (spaces, tabs, newlines) removed from both ends. `trimEnd()` strips the
+  right end only (`trimStart()` the left): `view.trimEnd().split('\n').slice(-2)` in `test/unit/build.test.ts`
+  (M6 item 23c) drops a bundle's final newline so that the last two lines are the IIFE's close and the source-map
+  comment — `slice(-2)` on an array with a negative start alone is "the last two", `tail -2`.
   `core/git.ts` uses it on stderr, where whitespace around the message is noise. Discovery
   deliberately does *not* use it on the path git prints: a directory name may end in a
   space, and `trim()` would eat that along with the newline. When exactly one known
@@ -1191,6 +1213,12 @@ never changed — `src/core/readinessFix.ts`'s `GITHUB_COM_TOKENS` and `ENTERPRI
 the two pairs. §78 has met tuples already as the row type of an `it.each` table; these are the first
 written as an annotation on a constant in `src/`.
 
+**`Array.from(list, fn)`** — the two-argument form: an array built from any iterable *and* mapped in one step.
+`Array.from(root.children, (line) => line.textContent)` (`linesOf` in `test/webview/render.test.ts`, M6 item
+23c) turns the DOM's `HTMLCollection` (§87) — array-like, not an array, so it has no `map` of its own — into the
+lines' texts. The one-argument form, `Array.from(iterable)`, is `[...iterable]` (§16) by another name; the
+second argument saves the `.map` that would follow it.
+
 ## 26. sort and comparison functions
 
 *First seen in `src/core/stack.ts`.*
@@ -1358,6 +1386,19 @@ throw is wanted. A third `execFileSync` option, `input: text`, hands the program
 standard input and then closes it — `git show --format= <ref> | git patch-id --stable` in shell;
 `patchId` in `test/git/gitspiceOps.git.test.ts` (item 22b) needs it, and makes its own call because
 the fixture's `git()` closes stdin (`stdio: ['ignore', …]`) and so can never be given any.
+
+`execFileSync(process.execPath, ['esbuild.mjs', '--dist', dist], { cwd: ROOT, stdio: 'pipe' })`
+(`test/unit/build.test.ts`, M6 item 23c) runs the build script as a child process and waits for it:
+`process.execPath` is the path of the Node that is running the test, so the script runs under the same Node
+`npm run build` would use on this machine, and `stdio: 'pipe'` keeps esbuild's summary lines out of the test's
+output (the result is read from disk, not from stdout). `fs.mkdtempSync` (above) gives the build a directory
+of its own and `fs.rmSync(dir, { recursive: true, force: true })` in `afterAll` removes it. `ROOT` is
+`path.resolve(__dirname, '..', '..')`: `__dirname` is the directory of the file that is running, a name
+CommonJS gives every module — `@types/node` declares it, so the root's `types: ["node"]` sees it and the webview
+program's `types: []` does not (TS2304) — first seen as `path.join(__dirname, 'no-such-home')` in
+`test/git/remote.git.test.ts`, explained inline in `test/unit/release.test.ts`, and bare since. The same move as
+this section's `execFileSync('git', …)`, with our own script as the program: a test of a tool, running the tool
+the way its users do.
 
 ## 29. Counted for loops
 
@@ -3347,6 +3388,12 @@ the test and remembers the old value; `vi.stubEnv(name, undefined)` *deletes* th
 in `afterAll` puts everything back. The real-git files have used `vi.stubEnv` since M1 for `HOME`
 and the `GIT_CONFIG_*` variables.
 
+**`vi.stubGlobal(name, value)`** is the same idea for a global: it sets `globalThis[name]` (§84) for the test
+— so the `declare`d `acquireVsCodeApi` has a value to call — and `vi.unstubAllGlobals()` in `afterEach` takes
+it away again. `test/webview/helpers/fakeVsCodeApi.ts` (M6 item 23c) is its first use, and the fake is a plain
+object that records what the view posted, not a `vi.fn()`: `postMessage` only needs to be remembered, and a
+`posted` array says so in one word.
+
 ## 66. The status bar: `window.createStatusBarItem` and `StatusBarItem`
 
 *First seen in `src/extension.ts` (the item is made there) and `src/vscode/statusbar.ts`
@@ -4107,7 +4154,8 @@ function viewRowFor(row: GraphRow, facts: RowFacts): ViewRow {
 `switch (x) { case a: … }` is the shell's `case $x in a) … ;; esac`: one value, compared with `===` against
 each `case` label, the first match's statements run. Two things differ. There is no `;;`: a `case` whose
 statements do not end in `return` (or `break`) *falls through* into the next label's statements, which is
-why every case here returns and this codebase writes a `switch` only in that shape. And the compiler reads
+why every case here returns, and the one fall-through this codebase writes is the *empty* label — two
+labels, one body, below. And the compiler reads
 the labels: inside `case 'layer':` the row *is* a `LayerRow` (§59's narrowing, one label at a time), so
 `row.forks` is there without a check, and `row.parent` under `case 'trunk':` is a compile error.
 
@@ -4120,6 +4168,15 @@ say that; §59's `offerFor` reached the same check with a run of `if`s and a las
 member left. A `switch` is the shape when every member gets a line of its own and the test is one
 exact-string field; the `if` run when members are handled a few at a time. There is deliberately no
 `default:` — it would answer for the fifth kind in silence, the fall-through §34 warned about.
+
+Two labels may share one body: `case 'layer':` followed at once by `case 'trunk':` and then the statements
+(`rowText` in `src/webview/smartlog/render.ts`, M6 item 23c, where the two kinds print alike). The first
+label has no statements of its own, so it falls into the second's — the one deliberate fall-through, and the
+one this codebase writes, because there is nothing between the labels to run by mistake. The compiler
+narrows under that body to the *union* of the two labels, `LayerViewRow | TrunkViewRow`: `row.node`,
+`row.name`, `row.indicators` and `row.age` are on both and read without a check; `row.parent`, which only a
+layer has, is TS2339 there ("does not exist on type 'TrunkViewRow'") — §10's rule for a union, applied to
+the two members a pair of labels lets through.
 
 ## 83. A template literal type: `` `prCascade.${string}` ``
 
@@ -4151,3 +4208,182 @@ What it does not do is the half the plan's E79 asks of the host. A message a web
 proved `gs log`'s lines. So the host (item 23d) still tests `command.startsWith('prCascade.')` on the text
 that arrives. The type is the view's promise about what it sends; the check is the host's distrust of what
 it gets. Both are needed, and neither is the other.
+
+## 84. `declare`: a name the page provides and we never define
+
+*First seen in `src/webview/host.ts` (`acquireVsCodeApi`, M6 item 23c).*
+
+```ts
+export interface VsCodeApi {
+  postMessage(message: unknown): void;
+}
+
+declare function acquireVsCodeApi(): VsCodeApi;
+```
+
+Every name used so far was either defined in our own files or brought in with an `import`. `acquireVsCodeApi`
+is neither: VS Code injects the function into every webview page before our script runs (its webview
+bootstrap, `pre/index.html`), so at run time the name is simply there, a global. The compiler does not know
+that, and would refuse the call — TS2304, "Cannot find name". `declare function …` tells it: this exists at run
+time; here is its type. It is an **ambient declaration** — a statement about the world, checked against every
+call, and emitted as nothing. Take the type annotations off that line and nothing is left of it; the bundle
+calls the page's `acquireVsCodeApi()` as a free name, and `test/unit/build.test.ts` looks for exactly that text
+in `dist/webview/smartlog.js`.
+
+The idea is not new to the codebase, only the spelling. §60's vendored `git.d.ts` is a whole *file* of such
+declarations — another extension's API, types only, nothing emitted — and `@types/node` and `@types/vscode`
+are the same thing for Node and for VS Code's `vscode` module. The difference is where the thing comes from.
+§2's `import * as vscode from 'vscode'` names a module VS Code hands to `require`; a webview page has no
+`require` at all, so what VS Code provides there is a global function, and a global function is declared with
+`declare function`. (A global variable would be `declare const`; a global object with members, an interface
+and a `declare const` of that type.)
+
+Two choices sit in that one line. It is *module-scoped*: a `declare` at the top level of a file that has
+imports or exports is visible to that file alone, so `host.ts` is the only file that can name
+`acquireVsCodeApi`, and every renderer must go through `connect()` — the compiler enforces "called once per
+page" (VS Code throws on a second call, "An instance of the VS Code API has already been acquired") by making
+a second caller fail to compile. `declare global { function acquireVsCodeApi(): … }` would have put the name
+in every file of the webview program instead. And it is hand-written: `@types/vscode-webview` on npm declares
+the same function, with its two other members, in a package under plan §11.3's downloads floor; one line,
+naming the one member something reads (D55), is the cheaper truth.
+
+The test's side of this is **`globalThis`**: the object every global is a property of — `window` in a browser,
+`global` in Node, `globalThis` in both. A `declare`d name gets a value in a test by putting one there, which is
+what `vi.stubGlobal('acquireVsCodeApi', …)` does (§65); under happy-dom the test's `globalThis` *is* the page's
+`window`, so the fake sits where VS Code's function would.
+
+## 85. The browser's globals and the `lib` that declares them: `window`, `document`, `addEventListener`, `MessageEvent<T>`
+
+*First seen in `src/webview/host.ts` (`connect`, M6 item 23c).*
+
+```ts
+window.addEventListener('message', (event: MessageEvent<unknown>) => {
+  if (isModelMessage(event.data)) {
+    lastSeq = event.data.seq;
+    handler(event.data);
+  }
+});
+```
+
+Why does this compile under `src/webview` and not under `src/core`? One line in each tsconfig. `lib` is the
+list of built-in declaration files the compiler loads: `ES2022` is the language's own objects — `Map`,
+`Promise`, `Math`, `flatMap` — and nothing about any particular host; `DOM` adds the browser's page —
+`window`, `document`, one type per element kind (`HTMLElement`, `HTMLDivElement`), every event type,
+`fetch`; `DOM.Iterable` adds the `for … of` forms of the DOM's collections (`root.children` is an
+`HTMLCollection`, not an array). The root `tsconfig.json` leaves `DOM` out on purpose — the extension runs in
+VS Code's Node, where there is no `document`, and its comment says so (reading-order item 90).
+`tsconfig.webview.json` (item 91) puts it in, with `types: []` so that Node's globals are gone: two worlds,
+one compiler, two runs (`npm run typecheck`). Hand the root program this file and it reports three errors —
+TS2304 `Cannot find name 'window'`; TS2584 `Cannot find name 'document'. … Try changing the 'lib' compiler
+option to include 'dom'`; and TS2315 `Type 'MessageEvent' is not generic`, because without the DOM lib the
+name resolves to `@types/node`'s `MessageEvent`, which takes no type argument. The second error names the fix.
+
+`addEventListener(type, handler)` is the browser's `on(…)`: §32's `EventEmitter` idea with the event's name as
+a string and one argument, the event object — and `window` the emitter that hears everything posted to the
+page. The sending side is `window.dispatchEvent(event)` — §32's `.fire(value)` in the browser's words — and an
+event is an object one constructs: `new MessageEvent('message', { data })` builds what the browser would
+deliver, `type` first, then an init object whose `data` becomes the listener's `event.data`; every listener
+for that type runs before `dispatchEvent` returns, which is why `test/webview/host.test.ts` asserts straight
+after `postFromHost` with no `await` (first seen in `test/webview/helpers/fakeVsCodeApi.ts`, M6 item 23c; 23e's
+`new Event('resize')` is the same move). `MessageEvent<T>` is §31's generics on an event type: `T` is the type
+of `event.data`, what the sender
+put in. It is written `unknown` here, not `ModelMessage`, because what arrives is data — the host's
+`postMessage` argument, copied into the page — and a type says nothing about data until a check has proved its
+shape (§51, §86): §83's last paragraph, now from the view's side. The handler is an arrow function (§5);
+`lastSeq` is `connect`'s local, reached through the closure (§64); and `event.data` is read twice inside the
+`if` with the compiler knowing its type both times, because the predicate narrowed it.
+
+**The lib's price.** The DOM lib also declares `window`'s properties as bare globals — `name`, `parent`,
+`length`, `event`, `status`, `top`, `self`, `open`, `close`, `location`, … — because a browser script may
+write `name` for `window.name`. So a renderer that writes `parent` for `row.parent`, or `name` for `row.name`,
+compiles — against `window.parent` and `window.name` — and ships; the compiler cannot refuse a name that
+exists. `eslint.config.mjs`'s `no-restricted-globals` (item 94) makes seventeen of those names a lint error
+under `src/webview`, with a message naming the `window.` property the compiler read. And the editor's own view
+of these files is the nested `src/webview/tsconfig.json` (item 91): VS Code's TypeScript service takes the
+nearest `tsconfig.json` above a file, and without that one-line pointer it would check `host.ts` with the DOM
+on and `strict` off, silent on what `npm run typecheck` refuses.
+
+## 86. A type predicate: `message is ModelMessage`
+
+*First seen in `src/webview/host.ts` (`isModelMessage`, M6 item 23c).*
+
+```ts
+function isModelMessage(message: unknown): message is ModelMessage {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    'type' in message &&
+    message.type === 'model' &&
+    'seq' in message &&
+    typeof message.seq === 'number' &&
+    'repos' in message &&
+    Array.isArray(message.repos)
+  );
+}
+
+if (isModelMessage(event.data)) {
+  lastSeq = event.data.seq; // event.data is a ModelMessage in here
+}
+```
+
+A function whose return type is written `x is T` — `x` one of its parameters, `T` a type — is a **type
+predicate**. It returns a boolean like any other function, and it tells the compiler one thing more: when the
+answer is `true`, the argument *is* a `T` from then on in the caller. So `event.data`, an `unknown` (§18)
+before the `if`, is a `ModelMessage` inside it — `.seq` reads as a number, `.repos` as the array — and
+`unknown` again after. §51's ladder narrowed a parsed value step by step inside one function; a predicate
+packages the ladder so that the narrowing crosses a function call, which a plain `boolean` return never does
+(a function returning `boolean` says nothing to the compiler about its argument).
+
+Inside, the ladder is §51's — `typeof … === 'object'`, `!== null`, `'type' in message` — written as one `&&`
+chain rather than nested `if`s. `&&` evaluates left to right and stops at the first `false`, so each clause
+runs only when the one before it held: `message.type` is read only after `'type' in message` has proved the
+property exists, and the compiler follows the same order, narrowing `message` a little further at each `&&`.
+`Array.isArray` is §41's. Three clauses, not one: the tag alone would let `{ type: 'model' }` through, and
+`lastSeq = event.data.seq` would then store `undefined` — the design measured it — so the predicate checks
+exactly what the bridge reads, a numeric `seq` and a `repos` array, and no more.
+
+What it is not: a cast. `event.data as ModelMessage` would *assert* the shape and check nothing at run time.
+The predicate checks, and the compiler trusts only what its body claims — write `message is ModelMessage`
+over a body that tests `typeof message === 'object'` alone and the compiler believes you, which is why the body
+has to earn the claim and the test posts six things that are not a model. The host (item 23d) asks the same
+question of what *it* receives, with more suspicion — that direction is a click — and §83's last paragraph says
+why both halves are needed.
+
+## 87. The DOM as a tree: `createElement`, `textContent`, `append`, `replaceChildren`, `querySelector`
+
+*First seen in `src/webview/smartlog/render.ts` (`render`, `lineElement`, M6 item 23c).*
+
+```ts
+function lineElement(text: string): HTMLElement {
+  const line = document.createElement('div');
+  line.textContent = text;
+  return line;
+}
+
+root.replaceChildren(...lines.map(lineElement));
+```
+
+A web page is a tree of elements — the **DOM**, the Document Object Model — and a script changes what the page
+shows by building and rewiring nodes of that tree; nothing is "printed". `document.createElement('div')` makes
+a new element, attached nowhere yet; its type is the DOM lib's for that tag (`HTMLDivElement`, an `HTMLElement`
+— §85's lib declares one type per element kind, and `HTMLElement` is the one a function takes when any will
+do). `line.textContent = text` makes that text the whole content of the element, *as text*: the characters are
+shown exactly as given, `<b>` included, because a text node has no markup in it. `root.append(node)` hangs one
+or more nodes under `root`, after whatever is there; `root.replaceChildren(...nodes)` swaps everything under
+`root` for the new list in one call — the `...` is §16's spread of an array into a call's arguments — so a
+second `render` starts clean and nothing of the previous model survives (the test "replaces what it drew
+before" is that rule). `root.children` is the element's children as an `HTMLCollection`: array-like, iterable
+under `DOM.Iterable`, but with no `map` of its own, which is why the test reads it through `Array.from(root.children, fn)` (§25).
+
+Why never `innerHTML`. That property fills an element too, but it *parses* its string as HTML:
+`root.innerHTML = '<b>' + name + '</b>'` with a branch named `<img src=x onerror=…>` would put a live element
+into the page. A branch name is data from git, and plan §7.1.3's "nothing is interpolated into markup" is
+exactly this one property: `textContent` for text, `createElement` for structure. The test puts `<b>bold</b>`
+in a name and asserts `root.querySelector('b')` is `null` — `querySelector(selector)` searches the subtree
+for the first element matching a CSS selector (here a tag name; the DOM lib types that form `HTMLElement |
+null`) and returns `null` when nothing matches, so `toBeNull()` reads as "no element was made from the
+name"; `querySelectorAll` is the same over every match (23e's tests) — and that the text came through whole. And why one
+element per line rather than one text node with newlines in it: under the browser's default `white-space:
+normal` a text node's newlines collapse to spaces, so the DOM carries the structure (one `<div>` per line — a
+block element, which the browser starts on a new line) and a stylesheet, when 23e brings one, carries the
+looks. 23e adds `classList`, `dataset` and the keyboard here when it draws the rail.
