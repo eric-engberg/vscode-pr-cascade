@@ -11,7 +11,8 @@
  * `Enrichment`, `PrExtras`, `ReviewDecision`). Depended on by: src/webview/protocol.ts (types only —
  * the message that carries a model), src/extension.ts from item 23d (which reads the graph texts,
  * the change lists, the clock and the settings and calls buildStackViewModel once per repository
- * and refresh), the renderers of items 23e and 23i (types only), test/unit/viewmodel.test.ts,
+ * and refresh), src/webview/smartlog/render.ts (item 23c's plain-text rows; types only) and the
+ * renderers of items 23e and 23i (types only), test/unit/viewmodel.test.ts,
  * test/git/gitspice.git.test.ts (the two view-model rows over real git-spice). Nothing in src/
  * imports this file at run time until 23d — protocol.ts's `import type` is erased when compiled
  * (primer §9), so the bundle carries nothing of it. The rows a host shows when no RepoState exists — no
