@@ -144,13 +144,23 @@ console.log(printable(
 
 // Pass/fail against the floors in plan §11.3. `?` means the value could not be measured.
 const allowedLicenses = ['MIT', 'ISC', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0'];
+// §11.3's licence floor has a second clause since M6 item 23c (D69, Ric 2026-10-16): CC-BY-4.0 is
+// admitted for an asset that ships as a file (icons, a font) with its attribution in
+// THIRD-PARTY-NOTICES.md, and for nothing else. No registry field says whether a package is such
+// an asset, so that case is a third answer here, not a PASS — the PR body says which it is.
+const assetLicenses = ['CC-BY-4.0'];
+const licenseLine = allowedLicenses.includes(view.license)
+  ? 'PASS  license MIT/ISC/BSD/Apache-2.0'
+  : assetLicenses.includes(view.license)
+    ? `ASSET ONLY  license ${view.license}: admitted for a file that ships unchanged (icons, a font) with its attribution in THIRD-PARTY-NOTICES.md (plan §11.3, D69); FAIL for code`
+    : 'FAIL  license MIT/ISC/BSD/Apache-2.0 (CC-BY-4.0 for a shipped asset only)';
 const checks = [
   ['downloads/week ≥ 500,000', downloads !== null && downloads >= 500_000],
   ['last release ≤ 12 months', lastRelease !== '' && daysSince(lastRelease) <= 365],
   ['last push ≤ 6 months', lastPush !== '' && daysSince(lastPush) <= 183],
   ['not archived', github?.archived === false],
   ['not deprecated', !view.deprecated],
-  ['license MIT/ISC/BSD/Apache-2.0', allowedLicenses.includes(view.license)],
+  licenseLine,
   ['no install scripts', installScripts.length === 0],
   // `gypfile` means node-gyp compiles C++ on install; `binary` is how node-pre-gyp and
   // prebuild describe a downloaded .node file. Neither can ship in one .vsix.
@@ -160,8 +170,14 @@ const checks = [
     maintainers.length >= 2 || (downloads !== null && downloads >= 10_000_000)],
 ];
 console.log('');
-for (const [label, passed] of checks) {
-  console.log(`${passed ? 'PASS' : 'FAIL'}  ${label}`);
+for (const check of checks) {
+  // The licence row arrives already worded (three answers); the rest are a label and a verdict.
+  if (typeof check === 'string') {
+    console.log(check);
+  } else {
+    const [label, passed] = check;
+    console.log(`${passed ? 'PASS' : 'FAIL'}  ${label}`);
+  }
 }
 // Two §11.3 floors that no registry field settles; the PR body records the answer.
 console.log('CHECK BY HAND  native code: .node files or per-platform optionalDependencies in the tarball');

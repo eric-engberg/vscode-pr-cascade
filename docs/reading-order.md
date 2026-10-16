@@ -1270,7 +1270,8 @@ the repository root; its §13 is the running log of decisions and deviations mad
     a runtime library must include. First run in M5 PRs 16 and 17 (plan §10.1 items 16–17):
     `hosted-git-info` and `zod`, measured and declined — plan D54, D55. Run again in M6 item 23c for `happy-dom` and
     `jsdom` (the first cards for a dev dependency — the plan said the §11.3 table chooses the test DOM) and for
-    `@vscode/codicons`, the first card to fail a row: the licence (plan D69). Plain JavaScript that runs ahead of
+    `@vscode/codicons`, the first card to fail a row — the licence — until Ric widened the floor for shipped assets and
+    the card learnt a third answer for `CC-BY-4.0` (plan D69). Plain JavaScript that runs ahead of
     the primer: read it for what it does, not how (primer intro).
 104. **`.vscodeignore`** — what is left out of the `.vsix`, so that only five root files reach a user — `package.json`,
     `README.md`, `CHANGELOG.md`, `LICENSE` and, since M6 item 23c, `THIRD-PARTY-NOTICES.md` (item 106) — and `dist/`:
@@ -1288,8 +1289,9 @@ the repository root; its §13 is the running log of decisions and deviations mad
 106. **`THIRD-PARTY-NOTICES.md`** — what ships that is not ours: Microsoft's codicons (the font under CC BY 4.0,
     which asks for this attribution wherever the icons are distributed — here, the `.vsix` — with the licence link, the
     warranty disclaimer, the link to the material and "no changes"; the stylesheet under MIT, whose text is reproduced).
-    Read it beside plan §11.3's "Icons in the webviews" row and D69: the one dependency whose licence is not on the plan's
-    list, shipped with the question open for Ric.
+    Read it beside plan §11.3's "Icons in the webviews" row and D69: the one dependency whose licence was not on the plan's
+    list until Ric widened the floor for shipped assets (2026-10-16) — the attribution checked against CC BY 4.0 §3(a)(1)
+    clause by clause first.
 
 ## Where the layers live
 
