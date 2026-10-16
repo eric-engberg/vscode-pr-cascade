@@ -8,7 +8,8 @@
  * core/model.ts (`GsLogEntry` and `MalformedLine`, as types — a layer carries its line, item
  * 20a), core/backends/gitspice.ts `enrich` (item 20a), which runs the command and hands the text
  * here. Plan: §7.13.2 (the documented schema), §8 E57, §9.4 `unit/gsLog`, §13.2 D55 (hand-rolled
- * after measuring zod; fields nothing reads yet are dropped), D59.
+ * after measuring zod; fields nothing reads yet are dropped), D59, D68 (item 23b keeps
+ * `change.comments`, which the rail's unresolved count reads).
  */
 
 /**
@@ -26,6 +27,19 @@ export interface GsLogDown {
   needsRestack: boolean;
 }
 
+/**
+ * The review comments on the change request, counted; present only with `--cr-status` (plan
+ * §7.8's network tier, M7). All three numbers are required when the object is there: the rail
+ * (core/viewmodel.ts, item 23b) reads `unresolved`, and a count that is not a number would make
+ * the whole line malformed as every documented field does.
+ */
+// see primer §9 (interface) and §14 (readonly)
+export interface GsLogComments {
+  readonly resolved: number;
+  readonly unresolved: number;
+  readonly total: number;
+}
+
 /** The change request (PR or MR) git-spice knows for the branch. */
 export interface GsLogChange {
   /**
@@ -41,6 +55,8 @@ export interface GsLogChange {
    */
   // see primer §11 (optional `?` fields)
   status?: string;
+  /** Present only with `--cr-status`; the rail's 💬n reads `unresolved` (item 23b). */
+  comments?: GsLogComments;
 }
 
 /** How the branch compares with its remote-tracking branch. */
@@ -54,11 +70,11 @@ export interface GsLogPush {
 }
 
 /**
- * One line of `gs log short --all --json`: the fields `enrich` reads (plan §4.4, §7.8's local tier).
- * The schema's `current`, `worktree`, `ups`, `commits` and `change.comments` are documented
- * (§7.13.2) and dropped here until something reads them — git already tells the extension
- * which branch is current and how the layers stack — and unknown fields are dropped the same
- * way (E57, D55).
+ * One line of `gs log short --all --json`: the fields `enrich` reads (plan §4.4, §7.8's local tier)
+ * and, since item 23b, `change.comments` for the rail. The schema's `current`, `worktree`, `ups`
+ * and `commits` are documented (§7.13.2) and dropped here until something reads them — git
+ * already tells the extension which branch is current and how the layers stack — and unknown
+ * fields are dropped the same way (E57, D55).
  */
 export interface GsLogEntry {
   /** The branch name, exactly as git-spice prints it. */
@@ -193,7 +209,7 @@ function downFromJson(value: unknown): GsLogDown {
   return down;
 }
 
-/** The `change` object → GsLogChange; `status` is kept only when present, `comments` is dropped. */
+/** The `change` object → GsLogChange; `status` and `comments` are kept only when present. */
 function changeFromJson(value: unknown): GsLogChange {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error('change is not an object');
@@ -211,7 +227,30 @@ function changeFromJson(value: unknown): GsLogChange {
     }
     change.status = value.status;
   }
+  if ('comments' in value) {
+    change.comments = commentsFromJson(value.comments);
+  }
   return change;
+}
+
+/**
+ * The `comments` object → GsLogComments: three numbers, each required, checked in the schema's
+ * order so the first one wrong is the one named (item 23b).
+ */
+function commentsFromJson(value: unknown): GsLogComments {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('change.comments is not an object');
+  }
+  if (!('resolved' in value) || typeof value.resolved !== 'number') {
+    throw new Error('change.comments.resolved is not a number');
+  }
+  if (!('unresolved' in value) || typeof value.unresolved !== 'number') {
+    throw new Error('change.comments.unresolved is not a number');
+  }
+  if (!('total' in value) || typeof value.total !== 'number') {
+    throw new Error('change.comments.total is not a number');
+  }
+  return { resolved: value.resolved, unresolved: value.unresolved, total: value.total };
 }
 
 /** The `push` object → GsLogPush; `needsPush` defaults to false when absent. */

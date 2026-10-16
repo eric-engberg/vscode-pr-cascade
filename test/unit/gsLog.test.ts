@@ -90,14 +90,22 @@ describe('parseGsLog', () => {
       ]);
     });
 
-    it('keeps change.status as text when --cr-status adds it, and drops comments', () => {
+    it('keeps change.status as text when --cr-status adds it, and keeps comments as its three numbers (item 23b: the rail\'s unresolved count)', () => {
       // act
       const parsed = parseGsLog(
         '{"name":"x","change":{"id":"#1","url":"u","status":"open","comments":{"resolved":1,"unresolved":0,"total":1}}}',
       );
 
       // assert
-      expect(parsed.entries).toStrictEqual([{ name: 'x', change: { id: '#1', url: 'u', status: 'open' } }]);
+      expect(parsed.entries).toStrictEqual([{ name: 'x', change: { id: '#1', url: 'u', status: 'open', comments: { resolved: 1, unresolved: 0, total: 1 } } }]);
+    });
+
+    it('ignores a field inside comments that the schema does not document, as it ignores unknown fields everywhere', () => {
+      // act
+      const parsed = parseGsLog('{"name":"x","change":{"id":"#1","url":"u","comments":{"resolved":1,"unresolved":2,"total":3,"pending":4}}}');
+
+      // assert
+      expect(parsed.entries).toStrictEqual([{ name: 'x', change: { id: '#1', url: 'u', comments: { resolved: 1, unresolved: 2, total: 3 } } }]);
     });
 
     it('keeps a status outside open/closed/merged as the text it is, rather than refusing the line', () => {
@@ -250,6 +258,22 @@ describe('parseGsLog', () => {
 
       // assert
       expect(parsed.malformed).toStrictEqual([{ line: 1, problem: 'change.status is not a string' }]);
+    });
+
+    it('reports comments that are not an object — a string, null, an array — and a count that is not a number', () => {
+      // act
+      const text = parseGsLog('{"name":"x","change":{"id":"#1","url":"u","comments":"none"}}');
+      const nothing = parseGsLog('{"name":"x","change":{"id":"#1","url":"u","comments":null}}');
+      const list = parseGsLog('{"name":"x","change":{"id":"#1","url":"u","comments":[]}}');
+      const wrongCount = parseGsLog('{"name":"x","change":{"id":"#1","url":"u","comments":{"resolved":1,"unresolved":"2","total":3}}}');
+      const missingCount = parseGsLog('{"name":"x","change":{"id":"#1","url":"u","comments":{"resolved":1,"unresolved":2}}}');
+
+      // assert: the first failing check only, naming the path
+      expect(text.malformed).toStrictEqual([{ line: 1, problem: 'change.comments is not an object' }]);
+      expect(nothing.malformed).toStrictEqual([{ line: 1, problem: 'change.comments is not an object' }]);
+      expect(list.malformed).toStrictEqual([{ line: 1, problem: 'change.comments is not an object' }]);
+      expect(wrongCount.malformed).toStrictEqual([{ line: 1, problem: 'change.comments.unresolved is not a number' }]);
+      expect(missingCount.malformed).toStrictEqual([{ line: 1, problem: 'change.comments.total is not a number' }]);
     });
 
     it('reports a push that is not an object — an array, null, a string', () => {
