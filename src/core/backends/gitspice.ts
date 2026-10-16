@@ -15,9 +15,10 @@
  *
  * Layer: core (no VS Code imports; plan §4.1). Depends on: core/backend.ts (the contract and
  * the answers), core/command.ts (how programs are run), core/digest.ts (`readRefDigest`,
- * `isInitialised`), core/forge.ts (detectForge, and `Forge` as a type), core/ghstatus.ts (step
- * 5's three questions, item 23a), core/gsLog.ts (`parseGsLog`), core/model.ts (GitRunner,
- * RepoState, StackLayer, Enrichment), core/readinessFix.ts (`TrunkBranch`, a type),
+ * `isInitialised`; `remoteBranches` since M6 item 23b), core/forge.ts (detectForge, and `Forge`
+ * as a type), core/ghstatus.ts (step 5's three questions, item 23a), core/gsLog.ts (`parseGsLog`;
+ * `GsLogEntry` and `MalformedLine` as types), core/model.ts (GitRunner, RepoState, StackLayer,
+ * Enrichment), core/readinessFix.ts (`TrunkBranch`, a type),
  * core/shell.ts (`shellCommandLine`, for the sentence that names a git command), core/version.ts
  * (the floor compare — its own module since item 23a, shared with the gh reader). Depended on by:
  * src/extension.ts (item 19b, which builds one per window and calls `forget` before the setup
@@ -33,11 +34,11 @@
 // see primer §1 (import / export) and §9 (`import type`)
 import type { GhFound, PushResult, Readiness, StackBackend, TrackResult } from '../backend';
 import type { CommandResult, CommandRunner } from '../command';
-import { isInitialised, readRefDigest } from '../digest';
+import { isInitialised, readRefDigest, remoteBranches } from '../digest';
 import { detectForge } from '../forge';
 import type { Forge } from '../forge';
 import { ghReadiness } from '../ghstatus';
-import type { GsLogEntry } from '../gsLog';
+import type { GsLogEntry, MalformedLine } from '../gsLog';
 import { parseGsLog } from '../gsLog';
 import type { Enrichment, EnrichmentCause, GitRunner, RepoState, StackLayer } from '../model';
 import type { TrunkBranch } from '../readinessFix';
@@ -283,7 +284,8 @@ export class GitSpiceBackend implements StackBackend {
 
   /**
    * Plan §7.8's local tier — StackBackend.enrich (core/backend.ts) says what it promises. In
-   * order: nothing to ask → the same object back; the digest (one git command, ~10 ms; a
+   * order: nothing to ask (no trunk, or no layers — the second only until item 23d, whose views
+   * need the other stacks' lines when HEAD is on trunk; D68) → the same object back; the digest (one git command, ~10 ms; a
    * failing git rejects, E17); no `refs/spice/data` line in it → not enriched with **no program
    * run** (plan §7.6: on an uninitialised repository `gs log` would try to initialise it and,
    * under `--no-prompt`, die at the trunk prompt — exit 1, nothing written, verified 0.31.2;
@@ -299,6 +301,9 @@ export class GitSpiceBackend implements StackBackend {
   // see primer §46 (a cache: a hit is `remembered.digest === digest`, set on success only)
   async enrich(state: RepoState): Promise<RepoState> {
     if (state.trunk === null || state.layers.length === 0) {
+      // Nothing to ask. The second half of this test goes in item 23d: the M6 views draw every
+      // stack and need the answer when HEAD is on trunk too, which is 23d's pipeline, Output line
+      // and ext fixtures to change (D68).
       return state;
     }
     const digest = await readRefDigest(this.git, state.root);
@@ -307,7 +312,7 @@ export class GitSpiceBackend implements StackBackend {
     }
     const remembered = this.logByRoot.get(state.root);
     if (remembered !== undefined && remembered.digest === digest) {
-      return withTracking(state, remembered, { kind: 'enriched', ranGsLog: false, malformed: [] });
+      return withTracking(state, remembered, digest, false, []);
     }
     const located = await locateGitSpice(this.commands, this.gsPath, state.root);
     if (located.kind !== 'located') {
@@ -326,7 +331,7 @@ export class GitSpiceBackend implements StackBackend {
     }
     const answer: RememberedLog = { digest, byName, complete: parsed.malformed.length === 0 };
     this.logByRoot.set(state.root, answer);
-    return withTracking(state, answer, { kind: 'enriched', ranGsLog: true, malformed: parsed.malformed });
+    return withTracking(state, answer, digest, true, parsed.malformed);
   }
 
   /**
@@ -684,11 +689,15 @@ function relayedGitLine(ftlLines: readonly string[]): string | null {
  * naming it; `null` when a complete answer does not list it (untracked, E56); and no key at all
  * when an *incomplete* answer does not list it — a malformed line names no branch (core/gsLog.ts),
  * so absence proves nothing (unknown), and `null` there would read "not tracked" and let Track
- * Stack run `gs branch track` on a branch git-spice already tracks, moving its base. New state
- * and layer objects: the input is never changed, and a test can compare it with what it was.
+ * Stack run `gs branch track` on a branch git-spice already tracks, moving its base. The
+ * `enrichment` built here also carries the answer whole — `byName`, `complete` and the digest's
+ * remote-tracking names — for core/viewmodel.ts (M6 item 23b), which draws every stack and cannot
+ * reach the other stacks' lines through HEAD's layers; the view model applies the three rules
+ * above to any branch by name. New state and layer objects: the input is never changed, and a
+ * test can compare it with what it was.
  */
 // see primer §25 (arrays: `map`) and §16 (object literals: spread copies a layer, then adds a field)
-function withTracking(state: RepoState, answer: RememberedLog, enrichment: Enrichment): RepoState {
+function withTracking(state: RepoState, answer: RememberedLog, digest: string, ranGsLog: boolean, malformed: readonly MalformedLine[]): RepoState {
   const layers = state.layers.map((layer) => {
     const entry = answer.byName.get(layer.name);
     if (entry !== undefined) {
@@ -699,6 +708,19 @@ function withTracking(state: RepoState, answer: RememberedLog, enrichment: Enric
     }
     return { ...layer };
   });
+  // The whole answer rides along for the views (M6 item 23b): the memo record's own map, by
+  // reference — nothing can `set` on a ReadonlyMap, and a record is replaced, never edited, when the
+  // digest moves — and the remote-tracking names read off this call's digest, memo hit or not: a push
+  // or a `fetch --prune` moves a `refs/remotes/` ref and so the digest, which is why a hit means the
+  // set is unchanged too, but reading it afresh is the invariant's statement, not a coincidence.
+  const enrichment: Enrichment = {
+    kind: 'enriched',
+    ranGsLog,
+    malformed,
+    byName: answer.byName,
+    complete: answer.complete,
+    remoteBranches: remoteBranches(digest),
+  };
   return { ...state, layers, enrichment };
 }
 

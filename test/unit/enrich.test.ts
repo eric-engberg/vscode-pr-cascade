@@ -18,7 +18,8 @@ import { describe, expect, it } from 'vitest';
 import { GitSpiceBackend, GS_ENV, PROBE_TIMEOUT_MS } from '../../src/core/backends/gitspice';
 import type { CommandResult } from '../../src/core/command';
 import { DIGEST_ARGS } from '../../src/core/digest';
-import type { RepoState, StackLayer } from '../../src/core/model';
+import type { GsLogEntry } from '../../src/core/gsLog';
+import type { Enrichment, RepoState, StackLayer } from '../../src/core/model';
 import { offerFor } from '../../src/core/readinessFix';
 import type { OfferFacts } from '../../src/core/readinessFix';
 import { exited, FakeCommandRunner, neverStarted, timedOut } from '../helpers/fakeCommand';
@@ -59,13 +60,29 @@ const LINES = TRUNK + BOTTOM + MIDDLE;
 
 // Those two lines as parseGsLog types them: `needsRestack` and `needsPush` filled in when absent,
 // `ups` dropped (core/gsLog.ts).
-const BOTTOM_TRACKING = {
+const BOTTOM_TRACKING: GsLogEntry = {
   name: 'api-refactor',
   down: { name: 'main', needsRestack: false },
   change: { id: '#12', url: PR_URL },
   push: { ahead: 0, behind: 0, needsPush: false },
 };
-const MIDDLE_TRACKING = { name: 'add-retries', down: { name: 'api-refactor', needsRestack: true }, push: { ahead: 1, behind: 0, needsPush: true } };
+const MIDDLE_TRACKING: GsLogEntry = { name: 'add-retries', down: { name: 'api-refactor', needsRestack: true }, push: { ahead: 1, behind: 0, needsPush: true } };
+/** git-spice's trunk line and the top layer's, as parseGsLog types them. */
+const TRUNK_TRACKING: GsLogEntry = { name: 'main' };
+const TOP_TRACKING: GsLogEntry = { name: 'retry-metrics', down: { name: 'add-retries', needsRestack: false } };
+/** LINES by name, the trunk line among them — what `enrich` remembers and hands the view model (item 23b). */
+// see primer §19 (Map) and §14 (`ReadonlyMap`: the type the field declares; a Map satisfies it)
+const BY_NAME = new Map<string, GsLogEntry>([
+  ['main', TRUNK_TRACKING],
+  ['api-refactor', BOTTOM_TRACKING],
+  ['add-retries', MIDDLE_TRACKING],
+]);
+/** REFS's `refs/remotes/origin/HEAD` and `…/main`, as bare branch names (item 23b). */
+const REMOTE_BRANCHES = new Set(['HEAD', 'main']);
+/** A complete answer from a run, and the same one from the memo. */
+const ENRICHED: Enrichment = { kind: 'enriched', ranGsLog: true, malformed: [], byName: BY_NAME, complete: true, remoteBranches: REMOTE_BRANCHES };
+// see primer §16 (object literals: spread — a copy with one field changed)
+const REMEMBERED: Enrichment = { ...ENRICHED, ranGsLog: false };
 
 // A `gs log` failure's reason starts with the command it names.
 const FAILED = 'gs log short --all --json failed: ';
@@ -121,7 +138,7 @@ function fakes(options: { refs?: string | Error; version?: CommandResult; log?: 
 // see primer §5 (arrow functions) and §6 (async / await)
 describe('GitSpiceBackend.enrich', () => {
   describe('what each line becomes (E56)', () => {
-    it('puts each line on the layer it names, `null` on a layer a complete answer does not list, and says it ran', async () => {
+    it('puts each line on the layer it names, `null` on a layer a complete answer does not list, remembers the whole answer by name with the remote-tracking branches, and says it ran', async () => {
       // arrange
       const { backend } = fakes();
       const state = threeLayers();
@@ -135,7 +152,7 @@ describe('GitSpiceBackend.enrich', () => {
         { ...state.layers[1], tracking: MIDDLE_TRACKING },
         { ...state.layers[2], tracking: null },
       ]);
-      expect(result.enrichment).toStrictEqual({ kind: 'enriched', ranGsLog: true, malformed: [] });
+      expect(result.enrichment).toStrictEqual(ENRICHED);
       expect(result.root).toBe(ROOT);
       expect(result.trunk).toBe('origin/main');
       expect(result.head).toBe('retry-metrics');
@@ -167,7 +184,7 @@ describe('GitSpiceBackend.enrich', () => {
       // assert
       // see primer §25 (arrays: `map`)
       expect(commands.calls.map((call) => call.executable)).toStrictEqual(['/opt/x/git-spice', '/opt/x/git-spice']);
-      expect(result.enrichment).toStrictEqual({ kind: 'enriched', ranGsLog: true, malformed: [] });
+      expect(result.enrichment).toStrictEqual(ENRICHED);
     });
 
     it("gives a layer named like the trunk git-spice's own trunk line — an entry with no `down` — never `null` (a local main ahead of origin/main)", async () => {
@@ -237,11 +254,39 @@ describe('GitSpiceBackend.enrich', () => {
       const result = await backend.enrich(paused);
 
       // assert: the same answer as on a branch, the two fields copied through
-      expect(result.enrichment).toStrictEqual({ kind: 'enriched', ranGsLog: true, malformed: [] });
+      expect(result.enrichment).toStrictEqual(ENRICHED);
       expect(result.layers[0].tracking).toStrictEqual(BOTTOM_TRACKING);
       expect(result.head).toBeNull();
       expect(result.rebaseInProgress).toBe(true);
       expect(commands.calls.length).toBe(2);
+    });
+
+    it("lists every remote-tracking branch of the digest by its bare name — any remote, HEAD among them — and nothing from refs/heads or refs/spice (the cloud's source, item 23b)", async () => {
+      // arrange: a second remote holding a branch of its own
+      const { backend } = fakes({ refs: `${NO_SPICE}refs/remotes/upstream/feat/x eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\n${SPICE_LINE}` });
+
+      // act
+      const result = await backend.enrich(threeLayers());
+
+      // assert
+      expect(result.enrichment).toStrictEqual({ ...ENRICHED, remoteBranches: new Set(['HEAD', 'main', 'feat/x']) });
+    });
+
+    it("hands the memo's own map back on a hit — the same object, not a copy — so the view model and the memo cannot disagree", async () => {
+      // arrange
+      const { backend } = fakes();
+      const first = await backend.enrich(threeLayers());
+
+      // act
+      const second = await backend.enrich(threeLayers());
+
+      // assert
+      // see primer §59 (narrowing on `kind` before a member only one shape has is read)
+      expect(first.enrichment?.kind).toBe('enriched');
+      expect(second.enrichment?.kind).toBe('enriched');
+      if (first.enrichment?.kind === 'enriched' && second.enrichment?.kind === 'enriched') {
+        expect(second.enrichment.byName).toBe(first.enrichment.byName);
+      }
     });
   });
 
@@ -421,7 +466,7 @@ describe('GitSpiceBackend.enrich', () => {
       const result = await backend.enrich(threeLayers());
 
       // assert
-      expect(result.enrichment).toStrictEqual({ kind: 'enriched', ranGsLog: true, malformed: [] });
+      expect(result.enrichment).toStrictEqual(ENRICHED);
       expect(result.layers[0].tracking).toStrictEqual(BOTTOM_TRACKING);
     });
 
@@ -435,7 +480,15 @@ describe('GitSpiceBackend.enrich', () => {
       const result = await backend.enrich(state);
 
       // assert: the unknown layers are new objects too, not the input's handed back
-      expect(result.enrichment).toStrictEqual({ kind: 'enriched', ranGsLog: true, malformed: [{ line: 3, problem: 'push.ahead is not a number' }] });
+      expect(result.enrichment).toStrictEqual({
+        kind: 'enriched',
+        ranGsLog: true,
+        malformed: [{ line: 3, problem: 'push.ahead is not a number' }],
+        // the two lines that parsed; the answer is incomplete, so an unlisted layer is unknown, not untracked
+        byName: new Map([['main', TRUNK_TRACKING], ['api-refactor', BOTTOM_TRACKING]]),
+        complete: false,
+        remoteBranches: REMOTE_BRANCHES,
+      });
       expect(result.layers[0].tracking).toStrictEqual(BOTTOM_TRACKING);
       expect('tracking' in result.layers[1]).toBe(false);
       expect('tracking' in result.layers[2]).toBe(false);
@@ -458,6 +511,9 @@ describe('GitSpiceBackend.enrich', () => {
           { line: 2, problem: 'not JSON' },
           { line: 3, problem: 'not JSON' },
         ],
+        byName: new Map(),
+        complete: false,
+        remoteBranches: REMOTE_BRANCHES,
       });
       // see primer §25 (arrays: `every`)
       expect(result.layers.every((candidate) => !('tracking' in candidate))).toBe(true);
@@ -476,7 +532,7 @@ describe('GitSpiceBackend.enrich', () => {
       // assert
       expect(git.calls.length).toBe(2);
       expect(commands.calls.length).toBe(2);
-      expect(second.enrichment).toStrictEqual({ kind: 'enriched', ranGsLog: false, malformed: [] });
+      expect(second.enrichment).toStrictEqual(REMEMBERED);
       expect(second.layers).toStrictEqual(first.layers);
     });
 
@@ -496,7 +552,7 @@ describe('GitSpiceBackend.enrich', () => {
       expect(commands.calls.length).toBe(2);
       expect(result.layers[0].tracking).toStrictEqual(BOTTOM_TRACKING);
       expect(result.layers[3]).toStrictEqual({ ...grown.layers[3], tracking: null });
-      expect(result.enrichment).toStrictEqual({ kind: 'enriched', ranGsLog: false, malformed: [] });
+      expect(result.enrichment).toStrictEqual(REMEMBERED);
     });
 
     it('remembers that an answer was incomplete: a later hit reports no bad line again, and still leaves the unlisted layers unknown', async () => {
@@ -507,8 +563,15 @@ describe('GitSpiceBackend.enrich', () => {
       // act
       const second = await backend.enrich(threeLayers());
 
-      // assert
-      expect(second.enrichment).toStrictEqual({ kind: 'enriched', ranGsLog: false, malformed: [] });
+      // assert: the memo keeps the incomplete map, and says so
+      expect(second.enrichment).toStrictEqual({
+        kind: 'enriched',
+        ranGsLog: false,
+        malformed: [],
+        byName: new Map([['main', TRUNK_TRACKING], ['api-refactor', BOTTOM_TRACKING]]),
+        complete: false,
+        remoteBranches: REMOTE_BRANCHES,
+      });
       expect(second.layers[0].tracking).toStrictEqual(BOTTOM_TRACKING);
       expect('tracking' in second.layers[1]).toBe(false);
       expect('tracking' in second.layers[2]).toBe(false);
@@ -533,7 +596,8 @@ describe('GitSpiceBackend.enrich', () => {
 
         // assert: the banner and the log once more, the top now tracked
         expect(commands.calls.length, change.name).toBe(4);
-        expect(result.enrichment, change.name).toStrictEqual({ kind: 'enriched', ranGsLog: true, malformed: [] });
+        // see primer §16 (spread: a Map's pairs into `[ ]`, one pair added) and §19 (`new Map` of pairs)
+        expect(result.enrichment, change.name).toStrictEqual({ ...ENRICHED, byName: new Map([...BY_NAME, ['retry-metrics', TOP_TRACKING]]) });
         expect(result.layers[2].tracking, change.name).toStrictEqual({ name: 'retry-metrics', down: { name: 'add-retries', needsRestack: false } });
       }
     });
@@ -553,7 +617,7 @@ describe('GitSpiceBackend.enrich', () => {
 
       // assert: the failed run neither replaced nor dropped the REFS answer
       expect(failed.enrichment?.kind).toBe('not-enriched');
-      expect(result.enrichment).toStrictEqual({ kind: 'enriched', ranGsLog: false, malformed: [] });
+      expect(result.enrichment).toStrictEqual(REMEMBERED);
       expect(result.layers[0].tracking).toStrictEqual(BOTTOM_TRACKING);
       expect(commands.calls.length).toBe(4);
     });
@@ -569,7 +633,7 @@ describe('GitSpiceBackend.enrich', () => {
 
       // assert
       expect(first.enrichment?.kind).toBe('not-enriched');
-      expect(second.enrichment).toStrictEqual({ kind: 'enriched', ranGsLog: true, malformed: [] });
+      expect(second.enrichment).toStrictEqual(ENRICHED);
       expect(commands.calls.length).toBe(4);
     });
 
@@ -587,8 +651,8 @@ describe('GitSpiceBackend.enrich', () => {
       const secondB = await backend.enrich(b);
 
       // assert
-      expect(secondA.enrichment).toStrictEqual({ kind: 'enriched', ranGsLog: true, malformed: [] });
-      expect(secondB.enrichment).toStrictEqual({ kind: 'enriched', ranGsLog: false, malformed: [] });
+      expect(secondA.enrichment).toStrictEqual(ENRICHED);
+      expect(secondB.enrichment).toStrictEqual(REMEMBERED);
       expect(commands.calls.map((call) => call.cwd)).toStrictEqual(['/w/a', '/w/a', '/w/b', '/w/b', '/w/a', '/w/a']);
     });
   });

@@ -9,8 +9,10 @@
  * from item 20a; gsLog.ts itself depends on nothing, so no cycle). Depended on by: every core
  * module — core/git.ts implements GitRunner; core/trunk.ts, core/stack.ts and core/changes.ts
  * take one; core/stack.ts builds the RepoState and core/changes.ts the ChangedFiles;
- * core/backends/gitspice.ts `enrich` fills `tracking` and `enrichment` (item 20a). Plan: §4.3,
- * §7.8, §8 E56/E57, §13.2 D59.
+ * core/backends/gitspice.ts `enrich` fills `tracking` and `enrichment` (item 20a; since M6 item
+ * 23b the `enriched` member also carries the whole answer, which core/viewmodel.ts reads for
+ * every stack); `PrExtras` and `ReviewDecision` are M7's gh tier, declared here for the view
+ * model to read and core/prstatus.ts to fill. Plan: §4.3, §7.8, §8 E56/E57, §13.2 D59, D68.
  */
 
 // see primer §9 (`import type`: a types-only import — model.ts stays a file of shapes)
@@ -116,23 +118,77 @@ export interface StackLayer {
 export type EnrichmentCause = 'not-initialised' | 'gs-missing' | 'gs-too-old' | 'gs-log-failed';
 
 /**
- * How `enrich` went for one repository: what the Output channel says, never a row (E57
- * "without touching the tree"). Two members with two different payloads, told apart by `kind`.
+ * How `enrich` went for one repository, and what it learnt (item 20a; M6 item 23b added the
+ * three last fields of the first member): what the Output channel says, never a row (E57
+ * "without touching the tree"), and what the view model reads for every stack. Two members with
+ * two different payloads, told apart by `kind`.
  */
-// see primer §59 (tagged unions) and §14 (readonly)
+// see primer §59 (tagged unions) and §14 (readonly; `ReadonlyMap`, `ReadonlySet`)
 export type Enrichment =
   /**
    * Every layer a complete answer covers carries `tracking` — from a `gs log` run this time
    * (`ranGsLog`) or remembered for an unchanged digest (then `malformed` is `[]`: a bad line
    * is reported once, by the run that met it, and the answer stays incomplete in the memo).
    */
-  | { readonly kind: 'enriched'; readonly ranGsLog: boolean; readonly malformed: readonly MalformedLine[] }
+  | {
+      readonly kind: 'enriched';
+      readonly ranGsLog: boolean;
+      readonly malformed: readonly MalformedLine[];
+      /**
+       * The whole answer by branch name, git-spice's trunk line among them (item 23b): `StackLayer.
+       * tracking` holds a line for HEAD's layers only, and the views draw every stack (§12 item 2),
+       * so a row of any stack asks here. The later of two lines naming one branch wins, as the
+       * layers' did. The memo's own map when `ranGsLog` is false — shared, never copied; it is a
+       * ReadonlyMap, so nothing reading it can change what the memo remembers.
+       */
+      readonly byName: ReadonlyMap<string, GsLogEntry>;
+      /**
+       * Whether every line of the answer parsed. A branch absent from a complete answer is not
+       * tracked (E56); absent from an incomplete one it is unknown (a malformed line names no
+       * branch, E57) — the rule withTracking applied to HEAD's layers, stated once for every row.
+       */
+      readonly complete: boolean;
+      /**
+       * The branch name of every remote-tracking ref in this refresh's digest, any remote, `HEAD`
+       * among them (core/digest.ts `remoteBranches`): the fact behind the rail's ⛅ (item 23b) — a
+       * branch with no remote-tracking branch of its name has never been pushed. Bare names, not
+       * `<remote>/<branch>`: the remote git-spice pushes to is not in its `gs log` output and need
+       * not be `prCascade.remote` (D13's fork measures trunk against `upstream`). From the fresh
+       * digest every time, memo hit or not: the remote's state is not what the memo remembers.
+       */
+      readonly remoteBranches: ReadonlySet<string>;
+    }
   /**
    * No layer carries `tracking`. `cause` is which step said no, and `reason` is one phrase:
    * not initialised, git-spice missing or too old, or how `gs log` failed. Nothing is
    * remembered.
    */
   | { readonly kind: 'not-enriched'; readonly cause: EnrichmentCause; readonly reason: string };
+
+/**
+ * gh's review decision for a pull request, in this codebase's spelling (M7's core/prstatus.ts maps
+ * `APPROVED` / `CHANGES_REQUESTED` / `REVIEW_REQUIRED`); declared with `PrExtras` below.
+ */
+// see primer §10 (union types: exact strings as members)
+export type ReviewDecision = 'approved' | 'changes-requested' | 'review-required';
+
+/**
+ * Plan §7.8's GitHub-only tier for one branch's pull request — what `gs log` does not know and
+ * `gh pr list --json isDraft,reviewDecision,statusCheckRollup,baseRefName,title` does. Declared
+ * here so the view model (M6 item 23b) can carry its indicators from the day the views exist; M7's
+ * core/prstatus.ts is the one producer, and until then every map of these is empty.
+ */
+export interface PrExtras {
+  readonly isDraft: boolean;
+  /** `null` when gh reports none (an empty `reviewDecision`). */
+  readonly reviewDecision: ReviewDecision | null;
+  /** The status checks on the head commit, or `null` when the pull request has none. */
+  readonly checks: { readonly failing: number; readonly total: number } | null;
+  /** The branch the pull request targets, as the forge spells it (`main`, `feat/x`). */
+  readonly baseRef: string;
+  /** The pull request's title (§7.1.1: "number and title in the tooltip"); `null` when gh did not answer. */
+  readonly title: string | null;
+}
 
 /**
  * How one file changed between a layer and its parent, in git's own letters
@@ -195,8 +251,9 @@ export interface RepoState {
   layers: StackLayer[];
   /**
    * Whether and how `enrich` ran for this repository (item 20a); absent when it was not asked
-   * — no trunk, no layers — and never assigned `undefined`, so a state `enrich` did not touch
-   * is the same shape computeStack built.
+   * — no trunk, or no layers until item 23d, whose views draw the other stacks and need their
+   * lines when HEAD is on trunk — and never assigned `undefined`, so a state `enrich` did not
+   * touch is the same shape computeStack built.
    */
   enrichment?: Enrichment;
 }
