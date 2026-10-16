@@ -7,7 +7,9 @@
  * it is. Item 23e adds what the rail needs (lanes, `joinsLane`, pane B's fourteen rows).
  *
  * Layer: test, webview (plan §9.1 layer 1b). Depends on: src/core/viewmodel.ts, src/webview/protocol.ts (types).
+ * Depended on by: test/webview/render.test.ts; 23e's rail tests inherit it.
  */
+// see primer §1 (import / export) and §9 (`import type`)
 import type {
   ElidedViewRow,
   LayerViewRow,

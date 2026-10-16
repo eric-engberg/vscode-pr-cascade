@@ -33,8 +33,9 @@ export default defineConfig({
           // built-in Vitest environment — happy-dom over jsdom is item 23c's §11.3 decision, D69).
           // Only this project gets a DOM — under the other two a `document` in core code is a
           // ReferenceError, which is what §4.1 wants it to be. happy-dom lays nothing out: every
-          // width and rect is 0 and its ResizeObserver never calls back, so a test that needs a
-          // width stubs `clientWidth` and fires `resize` (item 23e's E80 tests); and it has no
+          // element width and rect is 0 (`window.innerWidth` is the viewport setting, 1024 by
+          // default, not a measurement) and its ResizeObserver never calls back, so a test that
+          // needs a width stubs `clientWidth` and fires `resize` (item 23e's E80 tests); and it has no
           // DragEvent (the global is an alias of Event), so a drag test dispatches plain events
           // and the renderer keeps the dragged row itself (item 23h).
           environment: 'happy-dom',

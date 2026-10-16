@@ -9,6 +9,7 @@
  * Layer: webview (plan §4.1). Depends on: ../host.ts, ./render.ts. Depended on by: esbuild.mjs
  * (as an entry). Plan: §7.1.3, §9.2, §10.1 item 23c.
  */
+// see primer §1 (import / export)
 import { connect } from '../host';
 import { render } from './render';
 

@@ -9,7 +9,8 @@ bundles into `dist/extension.js` would be listed here too; today there are none 
 
 `dist/webview/codicon.ttf` and `dist/webview/codicon.css` are copied unchanged from the npm package
 `@vscode/codicons`, Microsoft's [vscode-codicons](https://github.com/microsoft/vscode-codicons),
-when the extension is built (`esbuild.mjs`). The views draw their icons with them.
+when the extension is built (`esbuild.mjs`). The views will draw their icons with them from item
+23e; the files ship from 23c, so the notice travels with them.
 
 - **The icons** (the font, `codicon.ttf`) — Copyright (c) Microsoft Corporation. Licensed under the
   Creative Commons Attribution 4.0 International licence (CC BY 4.0),

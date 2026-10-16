@@ -43,7 +43,7 @@ export default defineConfig([
   // TypeScript sources, tests and vitest.config.mts: ESLint's recommended rules plus
   // typescript-eslint's.
   {
-    files: ['**/*.ts', '**/*.mts'],
+    files: ['**/*.ts', '**/*.mts', '**/*.cts'],
     extends: [js.configs.recommended, tseslint.configs.recommended],
   },
 
@@ -58,7 +58,7 @@ export default defineConfig([
   // The layering rule (plan §4.1): src/core is pure logic and must stay runnable outside
   // VS Code. Importing `vscode` there is a lint error, not a code-review comment.
   {
-    files: ['src/core/**/*.ts'],
+    files: ['src/core/**/*.{ts,mts,cts}'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -80,14 +80,20 @@ export default defineConfig([
   // every Node built-in, in both spellings; and a *value* import from src/core. A type import
   // from core (`import type { StackViewModel } …`) is allowed, because the compiler erases it and
   // so it carries no host code into the browser bundle (measured: one `formatAge` call brought
-  // graph.ts and viewmodel.ts along, 411 → 822 bytes) — the difference between the two is why
-  // this block uses typescript-eslint's copy of the rule (`allowTypeImports`) and the core block
-  // above ESLint's own. Two forms the rule does not see — a dynamic `import()` and a `require()`
-  // call — are caught by the bundle test (test/unit/build.test.ts), which reads what esbuild
-  // actually wrote; esbuild itself refuses to resolve `vscode` or a built-in under
-  // `platform: 'browser'`, so a value import of those fails the build as well.
+  // graph.ts and viewmodel.ts along, 411 → 822 bytes); `allowTypeImports: true` on the pattern is
+  // what tells the two apart. ESLint's own rule and typescript-eslint's copy both have that option
+  // in the versions pinned here; this block uses the copy because the recommended TypeScript rules
+  // come from the same plugin, and the core block above keeps ESLint's own from M1. Two forms the
+  // rule does not see — a dynamic `import()` and a `require()` call — are refused elsewhere: the
+  // dynamic import by the bundle test alone (test/unit/build.test.ts, which reads what esbuild
+  // actually wrote), a `require()` by `@typescript-eslint/no-require-imports` in the recommended
+  // set and by the compiler (tsconfig.webview.json declares no `require`) before any bundle exists;
+  // esbuild itself refuses to resolve `vscode` or a built-in under `platform: 'browser'`, so a
+  // value import of those fails the build as well. The `files` globs name the three TypeScript
+  // extensions, since a `.mts` or `.cts` under src/webview is in the webview tsc program and the
+  // bundle too.
   {
-    files: ['src/webview/**/*.ts'],
+    files: ['src/webview/**/*.{ts,mts,cts}'],
     rules: {
       '@typescript-eslint/no-restricted-imports': [
         'error',

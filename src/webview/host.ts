@@ -15,7 +15,8 @@
  *
  * Layer: webview (plan §4.1: browser code — no `vscode`, no Node built-ins, from src/core types
  * only). Depends on: protocol.ts (types). Depended on by: smartlog/main.ts, the renderers (items
- * 23e, 23i), test/webview/host.test.ts. Plan: §7.1.3 "Protocol", §8 E79, §10.1 item 23c, §13.2 D69.
+ * 23e, 23i), test/webview/host.test.ts, test/webview/helpers/fakeVsCodeApi.ts (`VsCodeApi`, a type).
+ * Plan: §7.1.3 "Protocol", §8 E79, §10.1 item 23c, §13.2 D69.
  */
 
 // see primer §9 (`import type`: erased when compiled, so nothing of protocol.ts is bundled by it)

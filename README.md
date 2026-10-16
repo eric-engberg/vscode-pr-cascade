@@ -318,6 +318,6 @@ scripts/             developer tooling (never shipped)
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The icons the views draw with are Microsoft's
+MIT — see [LICENSE](LICENSE). The icons the views draw with (M6, from item 23e) are Microsoft's
 [codicons](https://github.com/microsoft/vscode-codicons) — CC BY 4.0 for the font, MIT for the
 stylesheet — see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

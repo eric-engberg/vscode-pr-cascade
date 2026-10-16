@@ -12,7 +12,8 @@
  *   npm run analyze   the bundles + one table of what each source file contributes (plan §11.3)
  * `--dist <dir>` moves every output: test/unit/build.test.ts runs this very script into a
  * temporary directory and reads it back, so the test and the build cannot drift apart; nothing
- * else passes it. The `.mjs` extension tells Node this file uses `import` rather than `require`.
+ * else passes it, and the flag refuses to run without a directory (a bare `--dist` would write
+ * to `./undefined/`). The `.mjs` extension tells Node this file uses `import` rather than `require`.
  * Plan: §4.1, §7.1.3 "Theme", §9.2, §10.1 item 23c, §13.2 D69.
  */
 import * as esbuild from 'esbuild';
@@ -23,6 +24,10 @@ const watchMode = process.argv.includes('--watch');
 const analyzeMode = process.argv.includes('--analyze');
 const distFlag = process.argv.indexOf('--dist');
 const dist = distFlag === -1 ? 'dist' : process.argv[distFlag + 1];
+// A throw at the top level of an ES module exits Node with 1 and writes nothing.
+if (distFlag !== -1 && (dist === undefined || dist.startsWith('--'))) {
+  throw new Error('--dist needs a directory');
+}
 
 /** The extension host: one Node bundle. */
 const hostOptions = {
@@ -79,8 +84,8 @@ const webviewOptions = {
  * The codicon stylesheet and font (plan §7.1.3 "Theme"), copied unchanged from the package into
  * dist/webview/ so the HTML shell can reference them under its CSP. `@vscode/codicons` is a
  * devDependency and is never imported, so nothing of it is bundled; its licence terms are in
- * THIRD-PARTY-NOTICES.md. Two named files, no glob: the package's dist/ holds 4 MB of catalogue
- * and SVG that nothing here needs.
+ * THIRD-PARTY-NOTICES.md. Two named files, no glob: the package's dist/ holds 2.2 MB of catalogue
+ * and SVG (a 1.4 MB HTML catalogue, a 444 KB sprite) that nothing here needs.
  */
 async function copyCodicons() {
   // In watch mode the copy runs before the first build has made the directory.

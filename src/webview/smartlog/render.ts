@@ -25,6 +25,7 @@ import type { ModelMessage } from '../protocol';
  * and its rows, top first and the trunk row last — the model's order throughout.
  */
 export function render(root: HTMLElement, message: ModelMessage): void {
+  // see primer §25 (`flatMap`), §16 (spread into `[ ]` — `...(c ? [x] : [])` adds one line or none) and §48 (the conditional)
   const lines = [
     ...message.notices.map((notice) => `${notice.severity}: ${notice.text}`),
     ...message.repos.flatMap((repo) => [

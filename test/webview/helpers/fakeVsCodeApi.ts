@@ -9,7 +9,9 @@
  * `window` carrying `data`.
  *
  * Layer: test, webview (plan §9.1 layer 1b). Depends on: src/webview/host.ts (the `VsCodeApi` type).
+ * Depended on by: test/webview/host.test.ts, and every renderer test from 23e on.
  */
+// see primer §1 (import / export) and §9 (`import type`)
 import { vi } from 'vitest';
 import type { VsCodeApi } from '../../../src/webview/host';
 
@@ -42,6 +44,7 @@ export function installFakeVsCodeApi(): FakeVsCodeApi {
 }
 
 /** What the host's `webview.postMessage(message)` becomes on the page: a `message` event on `window`. */
+// see primer §85 (the sending side of the listener: `new MessageEvent(type, { data })` and `dispatchEvent`, which runs every listener before it returns)
 export function postFromHost(message: unknown): void {
   window.dispatchEvent(new MessageEvent('message', { data: message }));
 }
