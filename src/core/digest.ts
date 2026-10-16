@@ -1,6 +1,8 @@
 /**
  * core/digest.ts — the one git command whose output says whether anything `gs log` could
- * answer has changed (plan §7.14.2's pre-filter), and the one fact read off that output. The
+ * answer has changed (plan §7.14.2's pre-filter), and the two facts read off that output: whether
+ * git-spice has initialised the repository (`isInitialised`) and which branches have a
+ * remote-tracking ref (`remoteBranches`, M6 item 23b). The
  * tree refreshes after every `git status` the built-in Git extension runs — a stage click, an
  * autofetch tick — and `gs log short --all --json` costs 0.6 s a call (measured 2026-10-08), so
  * the backend asks it only when this text differs from the last time: every ref under
@@ -74,7 +76,7 @@ const REMOTE_PREFIX = 'refs/remotes/';
  * output. Read off text already in hand, so the view model costs no spawn; a `ReadonlySet`, as
  * `isInitialised` is a plain read.
  */
-// see primer §21 (Set), §23 (`startsWith`, `slice`, `indexOf`) and §25 (arrays: `split`)
+// see primer §21 (Set), §22 (for ... of, and `continue`), §23 (`startsWith`, `slice`, `indexOf`) and §25 (arrays: `split`)
 export function remoteBranches(digest: string): ReadonlySet<string> {
   const names = new Set<string>();
   for (const line of digest.split('\n')) {

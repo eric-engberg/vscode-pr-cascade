@@ -15,9 +15,10 @@
  *
  * Layer: core (no VS Code imports; plan §4.1). Depends on: core/backend.ts (the contract and
  * the answers), core/command.ts (how programs are run), core/digest.ts (`readRefDigest`,
- * `isInitialised`), core/forge.ts (detectForge, and `Forge` as a type), core/ghstatus.ts (step
- * 5's three questions, item 23a), core/gsLog.ts (`parseGsLog`), core/model.ts (GitRunner,
- * RepoState, StackLayer, Enrichment), core/readinessFix.ts (`TrunkBranch`, a type),
+ * `isInitialised`; `remoteBranches` since M6 item 23b), core/forge.ts (detectForge, and `Forge`
+ * as a type), core/ghstatus.ts (step 5's three questions, item 23a), core/gsLog.ts (`parseGsLog`;
+ * `GsLogEntry` and `MalformedLine` as types), core/model.ts (GitRunner, RepoState, StackLayer,
+ * Enrichment), core/readinessFix.ts (`TrunkBranch`, a type),
  * core/shell.ts (`shellCommandLine`, for the sentence that names a git command), core/version.ts
  * (the floor compare — its own module since item 23a, shared with the gh reader). Depended on by:
  * src/extension.ts (item 19b, which builds one per window and calls `forget` before the setup
@@ -283,7 +284,8 @@ export class GitSpiceBackend implements StackBackend {
 
   /**
    * Plan §7.8's local tier — StackBackend.enrich (core/backend.ts) says what it promises. In
-   * order: nothing to ask → the same object back; the digest (one git command, ~10 ms; a
+   * order: nothing to ask (no trunk, or no layers — the second only until item 23d, whose views
+   * need the other stacks' lines when HEAD is on trunk; D68) → the same object back; the digest (one git command, ~10 ms; a
    * failing git rejects, E17); no `refs/spice/data` line in it → not enriched with **no program
    * run** (plan §7.6: on an uninitialised repository `gs log` would try to initialise it and,
    * under `--no-prompt`, die at the trunk prompt — exit 1, nothing written, verified 0.31.2;

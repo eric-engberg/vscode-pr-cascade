@@ -12,7 +12,7 @@
  * the text it receives, which is data) and is run as the registered command with its string
  * arguments, nothing else the view sends is evaluated; for every command that acts in a
  * repository the first argument is the repository root (`StackViewModel.repo`) and the second the
- * branch or ref (`ViewRow.name`); the host keeps the last `repos` it posted so a `webview/context`
+ * branch or ref (a layer or trunk row's `name`); the host keeps the last `repos` it posted so a `webview/context`
  * command can look its row up by `repo` and `layer`; a hidden view gets the current model when it
  * becomes visible; one model object goes to both views (E81). A `webview/context` menu is not a
  * message: VS Code hands the row's `data-vscode-context` to the command itself (core/viewmodel.ts
@@ -100,9 +100,9 @@ export interface MoveOntoMessage {
   readonly target: string;
 }
 
-/** Everything the host sends; item 23g adds the lower panel's messages here. */
-// see primer §59 (tagged unions: told apart by `type`)
+/** Everything the host sends — a union of one member today; item 23g adds the lower panel's messages. */
 export type HostMessage = ModelMessage;
 
 /** Everything a view sends; item 23g adds the focused row here. */
+// see primer §59 (tagged unions: told apart by `type`)
 export type ViewMessage = CommandMessage | MoveOntoMessage;

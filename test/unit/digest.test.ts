@@ -110,6 +110,7 @@ describe('remoteBranches — the branch names under refs/remotes, any remote (it
     const withNewline = 'refs/remotes/origin/main 0000000000000000000000000000000000000000\n';
 
     // act and assert
+    // see primer §23 (`slice` with a negative end: everything but the last character — here the trailing newline)
     expect(remoteBranches(withNewline.slice(0, -1))).toStrictEqual(remoteBranches(withNewline));
   });
 });

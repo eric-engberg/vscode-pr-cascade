@@ -40,6 +40,7 @@ import { RealGitRunner } from '../../src/core/git';
 import { readGraphInput } from '../../src/core/graph';
 import type { GsLogEntry } from '../../src/core/gsLog';
 import type { RepoState } from '../../src/core/model';
+import type { LayerViewRow } from '../../src/core/viewmodel';
 import { trunkBranchFor } from '../../src/core/readinessFix';
 import { buildStackViewModel } from '../../src/core/viewmodel';
 import { buildStack } from '../helpers/fixture';
@@ -92,7 +93,6 @@ function trackingOf(state: RepoState): (GsLogEntry | null | undefined)[] {
   return state.layers.map((layer) => layer.tracking);
 }
 
-/** The origin's branch heads, as sorted ref names: what a push changed. */
 /** What git says `ref` points at, as the 40-character SHA. */
 // see primer §23 (`trim`)
 function shaOf(ref: string): string {
@@ -108,6 +108,7 @@ function dateOf(ref: string): number {
 /** A day in seconds: the view-model rows ask the model two days after the fixture's commits, so every age reads `2d`. */
 const DAY = 86_400;
 
+/** The origin's branch heads, as sorted ref names: what a push changed. */
 function originHeads(): string[] {
   return fixture
     .git(['ls-remote', '--heads', 'origin'])
@@ -220,6 +221,7 @@ describe.skipIf(GIT_SPICE === null)(`GitSpiceBackend against real git-spice ${GI
     expect(model.messages).toStrictEqual([]);
     expect(model.lanes).toBe(1);
     expect(model.rows.map((row) => row.kind)).toStrictEqual(['layer', 'layer', 'layer', 'trunk']);
+    // see primer §22 (for ... of) and §76 (`expect(value, message)`: the row's name labels a failure)
     for (const row of model.rows) {
       if (row.kind === 'layer') {
         expect(row.indicators, row.name).toStrictEqual([{ kind: 'untracked' }, { kind: 'neverPushed' }]);
@@ -283,7 +285,6 @@ describe.skipIf(GIT_SPICE === null)(`GitSpiceBackend against real git-spice ${GI
     const forms = [GS_LOG_ARGS, [...GS_LOG_ARGS, '--cr-status'], ['log', 'long', '--all', '--json']];
 
     // act + assert, one form at a time
-    // see primer §22 (for ... of) and §76 (expect(value, message): the second argument becomes the failure's message)
     for (const args of forms) {
       const before = snapshotGitDir(fixture);
       expect(before.size).toBeGreaterThan(10);
@@ -353,9 +354,10 @@ describe.skipIf(GIT_SPICE === null)(`GitSpiceBackend against real git-spice ${GI
 
   it('the view model after the push: every layer tracked and pushed, so no indicator at all; the bases as git-spice names them; the filled top; no elided row', async () => {
     // arrange: a layer row as the model draws one here — hollow, clean, tracked
+    // see primer §5 (an arrow whose body is an object literal, in parentheses)
     const sha7 = (ref: string): string => shaOf(ref).slice(0, 7);
-    const layerRow = (name: string, parent: string, parentRef: string, trackedOn: string, node: 'hollow' | 'filled') => ({
-      kind: 'layer' as const,
+    const layerRow = (name: string, parent: string, parentRef: string, trackedOn: string, node: 'hollow' | 'filled'): LayerViewRow => ({
+      kind: 'layer',
       name,
       sha: shaOf(name),
       parent,
@@ -367,7 +369,7 @@ describe.skipIf(GIT_SPICE === null)(`GitSpiceBackend against real git-spice ${GI
       age: '2d',
       dim: false,
       tooltip: [`${name} @ ${sha7(name)}`, `base: ${parent} @ ${sha7(parentRef)}`, `git-spice: tracked on ${trackedOn}`],
-      context: { webviewSection: 'layer' as const, repo: fixture.dir, layer: name, isCurrent: node === 'filled', isTracked: true, isUntracked: false, isTrunkLine: false, hasPR: false, isDraft: false },
+      context: { webviewSection: 'layer', repo: fixture.dir, layer: name, isCurrent: node === 'filled', isTracked: true, isUntracked: false, isTrunkLine: false, hasPR: false, isDraft: false },
     });
 
     // act: over the `enriched` the push test left

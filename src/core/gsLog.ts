@@ -51,7 +51,9 @@ export interface GsLogChange {
   /**
    * Present only with `--cr-status` (a network call, plan §7.8). Documented as `open`,
    * `closed` or `merged`, but kept as text here: a value a later git-spice adds must not make
-   * the whole line malformed (E57's degrade rule); M7 narrows it where it is read (primer §45).
+   * the whole line malformed (E57's degrade rule); the view model narrows it where it is read
+   * (core/viewmodel.ts `prStateOf`, item 23b — primer §45); M7's `--cr-status` only makes the
+   * value arrive.
    */
   // see primer §11 (optional `?` fields)
   status?: string;

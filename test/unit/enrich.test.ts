@@ -596,6 +596,7 @@ describe('GitSpiceBackend.enrich', () => {
 
         // assert: the banner and the log once more, the top now tracked
         expect(commands.calls.length, change.name).toBe(4);
+        // see primer §16 (spread: a Map's pairs into `[ ]`, one pair added) and §19 (`new Map` of pairs)
         expect(result.enrichment, change.name).toStrictEqual({ ...ENRICHED, byName: new Map([...BY_NAME, ['retry-metrics', TOP_TRACKING]]) });
         expect(result.layers[2].tracking, change.name).toStrictEqual({ name: 'retry-metrics', down: { name: 'add-retries', needsRestack: false } });
       }

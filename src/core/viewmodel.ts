@@ -11,12 +11,14 @@
  * `Enrichment`, `PrExtras`, `ReviewDecision`). Depended on by: src/webview/protocol.ts (types only —
  * the message that carries a model), src/extension.ts from item 23d (which reads the graph texts,
  * the change lists, the clock and the settings and calls buildStackViewModel once per repository
- * and refresh), the renderers of items 23e and 23i (types only), test/unit/viewmodel.test.ts.
- * Nothing in src/ imports this file until 23d. The rows a host shows when no RepoState exists — no
+ * and refresh), the renderers of items 23e and 23i (types only), test/unit/viewmodel.test.ts,
+ * test/git/gitspice.git.test.ts (the two view-model rows over real git-spice). Nothing in src/
+ * imports this file at run time until 23d — protocol.ts's `import type` is erased when compiled
+ * (primer §9), so the bundle carries nothing of it. The rows a host shows when no RepoState exists — no
  * repository in the workspace, the Git extension unusable (E82), git itself failing for one
  * repository (E17) — are the host's (src/webview/protocol.ts `HostNotice`), not this file's. The
  * tree's `trackingLines`, `shortSha`, `commitCountLabel` and four message texts have a second copy
- * here until item 23j deletes the tree; vscode/tree.ts says so too.
+ * here until item 23j deletes the tree.
  * Plan: §4.2, §7.1.1 (the tail), §7.1.2, §7.1.3, §7.2.1, §7.8, §8 E3/E4/E5/E12/E15/E56/E57/E79/
  * E80/E81, §9.4 `unit/viewmodel`, §10.1 item 23b (M6), §13.2 D68.
  */
@@ -55,10 +57,12 @@ export interface ViewModelInput {
   readonly now: number;
   /**
    * §7.2.1's toggle. When set and HEAD is on a stack (`state.layers` non-empty), only HEAD's stack
-   * is laid out — in git-spice's sense (GraphOptions.onlyStackOf). On trunk, detached or paused
-   * there is no stack of HEAD's to show alone, and every stack is drawn as if the toggle were off:
-   * an empty rail under a lit toggle would read as a fault. Ric's question 3 on #43 may make "this"
-   * the focused row instead; the field then becomes a branch name and this is the one line that moves.
+   * is laid out — in git-spice's sense (GraphOptions.onlyStackOf). On trunk, or with HEAD detached
+   * (every rebase pause point but `git am` detaches it; a paused `am` on a layer keeps HEAD's stack
+   * and so keeps the filter), there is no stack of HEAD's to show alone, and every stack is drawn as
+   * if the toggle were off: an empty rail under a lit toggle would read as a fault. Ric's question 3
+   * on #43 may make "this" the focused row instead; the field then becomes a branch name and this is
+   * the one line that moves.
    */
   readonly showOnlyThisStack: boolean;
   /** The trunk row's two counts, 23d's one extra spawn; `null` until 23d exists, or when nothing was measured. */
@@ -204,6 +208,7 @@ export interface TrunkViewRow {
   readonly kind: 'trunk';
   readonly name: string;
   readonly sha: string;
+  /** The literal 0: trunk's line is lane 0 by definition (primer §10 — a literal type may be a number). */
   readonly lane: 0;
   /** `filled` when HEAD is on a branch trunk already contains (TrunkRow.node), else `hollow`. */
   readonly node: 'hollow' | 'filled';
@@ -266,7 +271,7 @@ export interface LayerContext {
   readonly isTrunkLine: boolean;
   /** git-spice knows a change request for it (§7.2.1's `stackBranchWithPR`). */
   readonly hasPR: boolean;
-  /** gh says the pull request is a draft (M7; `stackBranchWithDraftPR`); never true without `hasPR`. */
+  /** The PR circle's state is `draft` (gh's `isDraft` over an open or unknown status, M7; `stackBranchWithDraftPR`): never true without `hasPR`, never for a merged or closed pull request. */
   readonly isDraft: boolean;
 }
 
@@ -360,6 +365,8 @@ interface RowFacts {
   readonly workingTreeFiles: number;
   readonly behindTrunk: BehindTrunk | null;
   readonly enrichment: Enrichment | undefined;
+  /** The digest's remote-tracking names when enriched, else empty — never consulted then, since every row is unknown. */
+  readonly remoteBranches: ReadonlySet<string>;
   readonly extras: ReadonlyMap<string, PrExtras>;
   readonly shaByName: ReadonlyMap<string, string>;
 }
@@ -370,7 +377,8 @@ interface RowFacts {
  * changed. Throws only for a caller's mistake — graph texts missing beside a trunk, or texts
  * `layoutGraph` itself refuses (a bad trunk-tip line); every state a repository can be in is a model.
  */
-// see primer §19 (Map), §22 (for ... of) and §25 (arrays: push, some, a typed empty array)
+// see primer §19 (Map), §22 (for ... of), §25 (arrays: push, some, a typed empty array), §54 (destructuring:
+// one field out of the input), §5 (arrow functions) and §16 (object literals: shorthand keys)
 export function buildStackViewModel(input: ViewModelInput): StackViewModel {
   const { state } = input;
 
@@ -401,9 +409,10 @@ export function buildStackViewModel(input: ViewModelInput): StackViewModel {
   // 4. The §7.2.1 filter: HEAD's stack, when the toggle is on and HEAD is on one — `state.layers`
   // non-empty is computeStack's own "HEAD is on a stack" (E5's test), and HEAD's branch is then a
   // member of the graph too, both reading the same fact (a commit of the branch trunk lacks). On
-  // trunk, detached, paused, or on a branch with no commits of its own there is no stack of
-  // HEAD's to show alone, so every stack is drawn as if the toggle were off: an empty rail under
-  // a lit toggle would read as a fault.
+  // trunk, with HEAD detached (every rebase pause point but `git am`), or on a branch with no
+  // commits of its own there is no stack of HEAD's to show alone, so every stack is drawn as if the
+  // toggle were off: an empty rail under a lit toggle would read as a fault. A `git am` paused on a
+  // layer keeps HEAD on it, so the filter stands beside the rebase row.
   const onlyStackOf = input.showOnlyThisStack && state.head !== null && state.layers.length > 0 ? state.head : undefined;
 
   // 5. The layout. `onlyStackOf` is passed as `undefined` when unset, which layoutGraph reads as
@@ -426,6 +435,7 @@ export function buildStackViewModel(input: ViewModelInput): StackViewModel {
     workingTreeFiles: input.workingTreeFiles,
     behindTrunk: input.behindTrunk,
     enrichment: state.enrichment,
+    remoteBranches: state.enrichment?.kind === 'enriched' ? state.enrichment.remoteBranches : new Set<string>(),
     extras: input.extras,
     shaByName,
   };
@@ -436,7 +446,10 @@ export function buildStackViewModel(input: ViewModelInput): StackViewModel {
   // 8. "Not on a stack" (E5) when the layout has no layer row: the repository has no stack at all.
   // The tree's test was HEAD's stack (`state.layers`); §7.1.1 moves it to the repository, so with
   // HEAD on trunk beside other stacks nothing is said and the stacks are drawn. Under the filter
-  // (step 4) a layer row always exists, so the filter never produces the message.
+  // (step 4) a layer row exists whenever the state and the texts describe the same moment — the one
+  // refresh 23d reads them in — so the filter itself never produces the message; a pair gone stale
+  // between the two reads (HEAD's branch merged, or switched) is drawn as the texts say and
+  // corrected by the next refresh.
   if (!layout.rows.some((row) => row.kind === 'layer')) {
     messages.push({ kind: 'notOnStack', text: NOT_ON_STACK_TEXT, severity: 'information' });
   }
@@ -485,11 +498,16 @@ function layerViewRow(row: LayerRow, facts: RowFacts): LayerViewRow {
     throw new Error(`buildStackViewModel: ${row.name}'s parent ${row.parent} is not a row`);
   }
   const tracking = trackingOf(facts.enrichment, row.name);
-  const extra = tracking?.change !== undefined ? facts.extras.get(row.name) : undefined;
-  const indicators = indicatorsFor(row, tracking, extra, facts.enrichment);
-  const prState = tracking?.change !== undefined ? prStateOf(tracking.change.status, extra?.isDraft ?? false) : null;
+  // The change request this row draws: a tracked layer's `change`, never git-spice's own trunk line's
+  // (nothing in the tail is true of that line, a stray `change` on it included). Everything PR-shaped
+  // below — gh's answer, the circle's state, the title line, `hasPR`, `isDraft` — reads this one value.
+  const change = tracking !== undefined && tracking !== null && tracking.down !== undefined ? tracking.change : undefined;
+  const extra = change !== undefined ? facts.extras.get(row.name) : undefined;
+  const indicators = indicatorsFor(row, tracking, extra, facts.remoteBranches);
+  const prState = change !== undefined ? prStateOf(change.status, extra?.isDraft ?? false) : null;
+  // see primer §16 (spread: git-spice's lines appended to the tooltip) and §17 (`typeof`: a title gh gave)
   const tooltip = [`${row.name} @ ${shortSha(row.sha)}`, `base: ${row.parent} @ ${shortSha(parentSha)}`, ...trackingLines(tracking)];
-  if (extra?.title !== undefined && extra.title !== null) {
+  if (typeof extra?.title === 'string') {
     tooltip.push(extra.title);
   }
   const base: LayerViewRow = {
@@ -513,10 +531,11 @@ function layerViewRow(row: LayerRow, facts: RowFacts): LayerViewRow {
       isTracked: tracking !== undefined && tracking !== null,
       isUntracked: tracking === null,
       isTrunkLine: tracking !== undefined && tracking !== null && tracking.down === undefined,
-      hasPR: tracking?.change !== undefined,
-      isDraft: extra?.isDraft ?? false,
+      hasPR: change !== undefined,
+      isDraft: prState === 'draft',
     },
   };
+  // see primer §16 (spread: a copy of `base` with `joinsLane` added)
   return row.joinsLane === undefined ? base : { ...base, joinsLane: row.joinsLane };
 }
 
@@ -550,10 +569,10 @@ function trackingOf(enrichment: Enrichment | undefined, name: string): Tracking 
  * `not-enriched` cause, so one unknown row with a cloud would be the inconsistency. Nothing either
  * for git-spice's own trunk line (an entry with no `down`): a local `main` ahead of its remote is
  * tracked, yet nothing in this tail is true of it. `extra` is gh's answer, already gated on a
- * change request by the caller.
+ * change request by the caller; `remoteBranches` the digest's names (RowFacts).
  */
 // see primer §70 (`?.` through two optional fields), §30 (`??`) and §25 (arrays: push)
-function indicatorsFor(row: LayerRow, tracking: Tracking, extra: PrExtras | undefined, enrichment: Enrichment | undefined): Indicator[] {
+function indicatorsFor(row: LayerRow, tracking: Tracking, extra: PrExtras | undefined, remoteBranches: ReadonlySet<string>): Indicator[] {
   const indicators: Indicator[] = [];
   if (tracking === undefined) {
     return indicators;
@@ -583,7 +602,7 @@ function indicatorsFor(row: LayerRow, tracking: Tracking, extra: PrExtras | unde
     }
   }
   // ⛅ is a git fact, read off the digest: no remote-tracking branch of this name on any remote.
-  if (enrichment !== undefined && enrichment.kind === 'enriched' && !enrichment.remoteBranches.has(row.name)) {
+  if (!remoteBranches.has(row.name)) {
     indicators.push({ kind: 'neverPushed' });
   }
   if (tracking !== null && tracking.change !== undefined) {
@@ -595,8 +614,9 @@ function indicatorsFor(row: LayerRow, tracking: Tracking, extra: PrExtras | unde
       reviewDecision: extra?.reviewDecision ?? null,
       title: extra?.title ?? null,
     });
-    if (extra?.checks !== undefined && extra.checks !== null && extra.checks.failing > 0) {
-      indicators.push({ kind: 'checks', failing: extra.checks.failing, total: extra.checks.total });
+    const checks = extra?.checks ?? null;
+    if (checks !== null && checks.failing > 0) {
+      indicators.push({ kind: 'checks', failing: checks.failing, total: checks.total });
     }
   }
   return indicators;

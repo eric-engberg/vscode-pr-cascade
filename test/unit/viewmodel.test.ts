@@ -22,7 +22,7 @@ import type { GraphInput, GraphRow } from '../../src/core/graph';
 import type { GsLogEntry } from '../../src/core/gsLog';
 import type { Enrichment, PrExtras, RepoState, StackLayer } from '../../src/core/model';
 import { buildStackViewModel, DETACHED_HEAD_TEXT, formatAge, NO_TRUNK_TEXT, NOT_ON_STACK_TEXT, REBASE_IN_PROGRESS_TEXT } from '../../src/core/viewmodel';
-import type { BehindTrunk, Indicator, LayerViewRow, StackViewModel, ViewModelInput, ViewRow } from '../../src/core/viewmodel';
+import type { BehindTrunk, Indicator, LayerContext, LayerViewRow, StackViewModel, ViewModelInput, ViewRow } from '../../src/core/viewmodel';
 
 // The repository every test asks about, and its trunk.
 // see primer §4 (const)
@@ -66,7 +66,8 @@ const SHA_6 = '6666666666666666666666666666666666666666';
 const TRUNK_TIP = `${SHA_T} ${AGO_26H}\n`;
 
 /** A refs text as `for-each-ref` prints it, a date per line this time — the ages are the point. */
-// see primer §54 (destructuring a triple in a parameter) and §78 (a tuple type)
+// see primer §54 (destructuring a triple in a parameter), §78 (a tuple type), §16 (a rest parameter), §5 (arrow
+// functions) and §25 (arrays: `map`, `join`)
 function refs(...entries: [string, string, number][]): string {
   return entries.map(([name, sha, date]) => `${name} ${sha} ${date}\n`).join('');
 }
@@ -165,7 +166,8 @@ interface Shape {
 }
 
 /** The input for a shape, every unnamed field at its default. */
-// see primer §30 (`??`) and §16 (object literals: shorthand keys)
+// see primer §30 (`??`), §48 (the conditional expression: `null` is a value here, so `??` would not do) and §16 (object
+// literals: shorthand keys)
 function input(shape: Shape = {}): ViewModelInput {
   const entries = shape.entries ?? APPENDIX_A_ENTRIES;
   const layers = shape.layers ?? [
@@ -239,8 +241,8 @@ function geometry(row: ViewRow | GraphRow): Geometry {
 
 /** A layer row's context with every key false but the ones given. */
 // see primer §43 (`Record`), §49 (`Partial`: every field optional) and §16 (spread: the given keys last, so they win)
-function layerContext(name: string, on: Partial<Record<'isCurrent' | 'isTracked' | 'isUntracked' | 'isTrunkLine' | 'hasPR' | 'isDraft', boolean>> = {}) {
-  return { webviewSection: 'layer' as const, repo: ROOT, layer: name, isCurrent: false, isTracked: false, isUntracked: false, isTrunkLine: false, hasPR: false, isDraft: false, ...on };
+function layerContext(name: string, on: Partial<Record<'isCurrent' | 'isTracked' | 'isUntracked' | 'isTrunkLine' | 'hasPR' | 'isDraft', boolean>> = {}): LayerContext {
+  return { webviewSection: 'layer', repo: ROOT, layer: name, isCurrent: false, isTracked: false, isUntracked: false, isTrunkLine: false, hasPR: false, isDraft: false, ...on };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -282,9 +284,9 @@ const PANE_B_DAG = dag(
   [SHA_F, SHA_T], [SHA_6, SHA_OLD],
 );
 
-// git-spice's answer as parseGsLog types it. `push` only on the five branches git-spice submitted
-// (chore is the plain-pushed one: a pull request git-spice adopted, pushed with plain git, so no
-// `push`); the 1610 stack is tracked and never submitted; part4 has no line (untracked).
+// git-spice's answer as parseGsLog types it. `push` only on the four branches git-spice submitted
+// (part1–part3 and fix; chore is the plain-pushed one: a pull request git-spice adopted, pushed with
+// plain git, so no `push`); the 1610 stack is tracked and never submitted; part4 has no line (untracked).
 const P1_ENTRY: GsLogEntry = { name: P1, down: { name: 'main', needsRestack: false }, change: { id: '#480', url: pullUrl(480), status: 'merged' }, push: { ahead: 0, behind: 0, needsPush: false } };
 const P2_ENTRY: GsLogEntry = {
   name: P2,
@@ -521,7 +523,10 @@ describe('buildStackViewModel', () => {
   describe('each indicator from its source field', () => {
     describe('needsRestack — down.needsRestack', () => {
       it('is present when git-spice says the branch below moved', () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, down: { name: 'add-retries', needsRestack: true } }] }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ kind: 'needsRestack' }]);
       });
 
@@ -532,39 +537,57 @@ describe('buildStackViewModel', () => {
 
     describe('unresolved — change.comments.unresolved', () => {
       it('counts the unresolved comments, before the PR circle', () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: { ...CHANGE, comments: { resolved: 1, unresolved: 2, total: 3 } } }] }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ kind: 'unresolved', count: 2 }, PR_7]);
       });
 
       it('is absent when every comment is resolved', () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: { ...CHANGE, comments: { resolved: 5, unresolved: 0, total: 5 } } }] }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([PR_7]);
       });
 
       it('is absent when --cr-status did not run (no comments at all)', () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: CHANGE }] }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([PR_7]);
       });
     });
 
     describe("baseDrift — the PR's base against the base git-spice stacks on", () => {
       it("names the PR's base and git-spice's when they differ", () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: CHANGE }], extras: new Map([['retry-metrics', { ...PLAIN_EXTRAS, baseRef: 'api-refactor' }]]) }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ kind: 'baseDrift', prBase: 'api-refactor', localParent: 'add-retries' }, PR_7]);
       });
 
       it('is absent when they agree', () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: CHANGE }], extras: new Map([['retry-metrics', PLAIN_EXTRAS]]) }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([PR_7]);
       });
 
       it('is absent for a bottom layer whose PR targets main while the rail says origin/main — both sides are local branch names, so the trunk ref is never compared', () => {
+        // act
         const model = buildStackViewModel(
           input({
             entries: [TRUNK_LINE, { ...BOTTOM, change: { id: '#5', url: pullUrl(5), status: 'open' } }, MIDDLE, TOP],
             extras: new Map([['api-refactor', { ...PLAIN_EXTRAS, baseRef: 'main' }]]),
           }),
         );
+
+        // assert
         expect(indicatorsOf(model, 'api-refactor')).toStrictEqual([{ kind: 'pr', id: '#5', url: pullUrl(5), state: 'open', reviewDecision: null, title: null }]);
       });
 
@@ -589,12 +612,18 @@ describe('buildStackViewModel', () => {
 
     describe('needsPush — push.ahead', () => {
       it('carries the ahead count when the local branch is ahead of the remote one', () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, push: { ahead: 1, behind: 0, needsPush: true } }] }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ kind: 'needsPush', ahead: 1 }]);
       });
 
       it('is absent for a submitted branch in sync', () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, push: { ahead: 0, behind: 0, needsPush: false } }] }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([]);
       });
 
@@ -603,15 +632,30 @@ describe('buildStackViewModel', () => {
       });
 
       it("is absent when only the remote is ahead: git-spice's needsPush means the tips differ (M4a), and a branch strictly behind draws nothing here (E76 is M9's)", () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, push: { ahead: 0, behind: 1, needsPush: true } }] }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([]);
         expect(rowOf(model, 'retry-metrics').tooltip[2]).toBe('git-spice: tracked on add-retries');
+      });
+
+      it('diverged (M4b): the arrow carries ahead and ignores behind, in the tail and in the tooltip', () => {
+        // act
+        const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, push: { ahead: 1, behind: 1, needsPush: true } }] }));
+
+        // assert
+        expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ kind: 'needsPush', ahead: 1 }]);
+        expect(rowOf(model, 'retry-metrics').tooltip[2]).toBe('git-spice: tracked on add-retries · needs push');
       });
     });
 
     describe('neverPushed — no remote-tracking branch of that name in the digest', () => {
       it('is present when no remote has the branch', () => {
+        // act
         const model = buildStackViewModel(input({ remoteBranches: without(ALL_REMOTE, 'retry-metrics') }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ kind: 'neverPushed' }]);
       });
 
@@ -620,12 +664,16 @@ describe('buildStackViewModel', () => {
       });
 
       it('reads the digest and never the push field: a push object beside a missing ref (a state 0.31.2 does not print — the ref goes and push with it, M5) still gives the cloud, after the arrow', () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, push: { ahead: 2, behind: 0, needsPush: true } }], remoteBranches: without(ALL_REMOTE, 'retry-metrics') }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ kind: 'needsPush', ahead: 2 }, { kind: 'neverPushed' }]);
       });
     });
 
     describe("pr — change.id, change.url and change.status, gh's isDraft, reviewDecision and title", () => {
+      // see primer §78 (`it.each` over object rows: `$status`, `$state`)
       it.each([
         { status: 'open', state: 'open' },
         { status: 'closed', state: 'closed' },
@@ -634,45 +682,70 @@ describe('buildStackViewModel', () => {
         { status: 'something-new', state: 'unknown' },
       ])('reads status $status as state $state — the id as git-spice spells it, the url as given, any text the local tier does not know as unknown', ({ status, state }) => {
         // arrange: `status` only when the row gives one
+        // see primer §80 (`GsLogEntry['change']`: the type of one field, read off a type)
         const change: GsLogEntry['change'] = status === undefined ? { id: '#7', url: pullUrl(7) } : { id: '#7', url: pullUrl(7), status };
+
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change }] }));
 
-        // assert
+        // assert: the circle, and what else a change brings whatever its status — the key, the id line, and dim only for merged
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ kind: 'pr', id: '#7', url: pullUrl(7), state, reviewDecision: null, title: null }]);
+        expect(rowOf(model, 'retry-metrics').context.hasPR).toBe(true);
+        expect(rowOf(model, 'retry-metrics').tooltip[3]).toBe(`#7 ${pullUrl(7)}`);
+        expect(rowOf(model, 'retry-metrics').dim).toBe(state === 'merged');
       });
 
       it('keeps a GitLab id as text', () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: { id: '!12', url: 'https://gitlab.com/g/p/-/merge_requests/12', status: 'open' } }] }));
         const [pr] = indicatorsOf(model, 'retry-metrics');
+
+        // assert
         expect(pr.kind === 'pr' ? pr.id : null).toBe('!12');
       });
 
       it('is draft when gh says so and git-spice says open', () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: CHANGE }], extras: new Map([['retry-metrics', { ...PLAIN_EXTRAS, isDraft: true }]]) }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ ...PR_7, state: 'draft' }]);
         expect(rowOf(model, 'retry-metrics').context.isDraft).toBe(true);
       });
 
       it('is draft when gh says so and the local tier has no status', () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: { id: '#7', url: pullUrl(7) } }], extras: new Map([['retry-metrics', { ...PLAIN_EXTRAS, isDraft: true }]]) }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ ...PR_7, state: 'draft' }]);
       });
 
-      it("stays merged whatever gh's isDraft says", () => {
-        const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: { ...CHANGE, status: 'merged' } }], extras: new Map([['retry-metrics', { ...PLAIN_EXTRAS, isDraft: true }]]) }));
-        expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ ...PR_7, state: 'merged' }]);
+      it.each([{ status: 'merged' }, { status: 'closed' }])("stays $status whatever gh's isDraft says, and the context's isDraft agrees with the circle", ({ status }) => {
+        // act
+        const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: { ...CHANGE, status } }], extras: new Map([['retry-metrics', { ...PLAIN_EXTRAS, isDraft: true }]]) }));
+
+        // assert
+        expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ ...PR_7, state: status }]);
+        expect(rowOf(model, 'retry-metrics').context.isDraft).toBe(false);
       });
 
       it("carries gh's review decision in this codebase's spelling, and null when gh has none", () => {
+        // act
         const decided = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: CHANGE }], extras: new Map([['retry-metrics', { ...PLAIN_EXTRAS, reviewDecision: 'changes-requested' }]]) }));
         const plain = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: CHANGE }], extras: new Map([['retry-metrics', PLAIN_EXTRAS]]) }));
+
+        // assert
         expect(indicatorsOf(decided, 'retry-metrics')).toStrictEqual([{ ...PR_7, reviewDecision: 'changes-requested' }]);
         expect(indicatorsOf(plain, 'retry-metrics')).toStrictEqual([PR_7]);
       });
 
       it("is absent without a change, and then gh's extras are ignored — no draft, no checks, no drift, no title", () => {
+        // act
         const model = buildStackViewModel(input({ extras: new Map([['retry-metrics', { isDraft: true, reviewDecision: 'approved', checks: { failing: 1, total: 1 }, baseRef: 'main', title: 'Stale' }]]) }));
         const row = rowOf(model, 'retry-metrics');
+
+        // assert
         expect(row.indicators).toStrictEqual([]);
         expect(row.context).toStrictEqual(layerContext('retry-metrics', { isCurrent: true, isTracked: true }));
         expect(row.tooltip.length).toBe(3);
@@ -681,25 +754,37 @@ describe('buildStackViewModel', () => {
 
     describe("checks — gh's statusCheckRollup, failing of total", () => {
       it('is present after the PR circle when a check fails', () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: CHANGE }], extras: new Map([['retry-metrics', { ...PLAIN_EXTRAS, checks: { failing: 2, total: 7 } }]]) }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([PR_7, { kind: 'checks', failing: 2, total: 7 }]);
       });
 
       it('is absent when every check passes', () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: CHANGE }], extras: new Map([['retry-metrics', { ...PLAIN_EXTRAS, checks: { failing: 0, total: 7 } }]]) }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([PR_7]);
       });
 
       it('is absent when gh has no checks for the PR', () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: CHANGE }], extras: new Map([['retry-metrics', PLAIN_EXTRAS]]) }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([PR_7]);
       });
     });
 
     describe('untracked — absent from a complete gs log --all answer', () => {
       it('is the one indicator of a branch git-spice does not track, and the row is dim', () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE] }));
         const row = rowOf(model, 'retry-metrics');
+
+        // assert
         expect(row.indicators).toStrictEqual([{ kind: 'untracked' }]);
         expect(row.dim).toBe(true);
         expect(row.context.isTracked).toBe(false);
@@ -707,7 +792,10 @@ describe('buildStackViewModel', () => {
       });
 
       it('comes before the cloud when the branch was never pushed either', () => {
+        // act
         const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE], remoteBranches: without(ALL_REMOTE, 'retry-metrics') }));
+
+        // assert
         expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ kind: 'untracked' }, { kind: 'neverPushed' }]);
       });
     });
@@ -743,7 +831,10 @@ describe('buildStackViewModel', () => {
     });
 
     it('an untracked layer can carry only the cloud beside its own mark, in that order', () => {
+      // act
       const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE], remoteBranches: without(ALL_REMOTE, 'retry-metrics') }));
+
+      // assert
       expect(indicatorsOf(model, 'retry-metrics')).toStrictEqual([{ kind: 'untracked' }, { kind: 'neverPushed' }]);
     });
   });
@@ -765,6 +856,7 @@ describe('buildStackViewModel', () => {
       ]);
       expect(model.lanes).toBe(1);
       expect(rowOf(model, P3)).toStrictEqual({ ...PANE_B_PART3, lane: 0 });
+      // see primer §51 (`in`: whether the row has the key at all)
       expect('joinsLane' in rowOf(model, P2)).toBe(false);
       expect(model.messages).toStrictEqual([]);
     });
@@ -785,8 +877,11 @@ describe('buildStackViewModel', () => {
     });
 
     it('untracked: absent from a complete answer', () => {
+      // act
       const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE] }));
       const row = rowOf(model, 'retry-metrics');
+
+      // assert
       expect(row.indicators).toStrictEqual([{ kind: 'untracked' }]);
       expect(row.dim).toBe(true);
       expect(row.tooltip[2]).toBe('git-spice: not tracked');
@@ -812,13 +907,16 @@ describe('buildStackViewModel', () => {
     });
 
     it("git-spice's own trunk line (a local main ahead of origin/main, F3/M7): a tracked row with nothing to say — \"git-spice: trunk\", no indicator, not dim, isTrunkLine", () => {
-      // arrange: 23a's L16 — main one commit ahead of the ref the stack is measured against
+      // arrange: 23a's L16 — main one commit ahead of the ref the stack is measured against; its
+      // remote-tracking name is left out of the digest, so "no indicator" can only come from the
+      // trunk-line rule and never from the cloud happening to be absent
       const model = buildStackViewModel(
         input({
           refs: refs(['add-retries', SHA_B, DATE], ['api-refactor', SHA_A, DATE], ['main', SHA_1, DATE], ['retry-metrics', SHA_C, DATE]),
           dag: dag([SHA_1, SHA_T]) + APPENDIX_A_DAG,
           head: 'main',
           layers: [layer('main', SHA_1, TRUNK, SHA_T, 1, TRUNK_LINE, true)],
+          remoteBranches: without(ALL_REMOTE, 'main'),
         }),
       );
 
@@ -839,6 +937,27 @@ describe('buildStackViewModel', () => {
         tooltip: ['main @ 1111111', 'base: origin/main @ 0000000', 'git-spice: trunk'],
         context: layerContext('main', { isCurrent: true, isTracked: true, isTrunkLine: true }),
       });
+    });
+
+    it("a stray change on git-spice's trunk line draws nothing PR-shaped: no circle, no hasPR, no title line, not dim", () => {
+      // arrange: the trunk line as 0.31.2 never prints it, with a change — nothing in the tail is true of that line
+      const model = buildStackViewModel(
+        input({
+          refs: refs(['add-retries', SHA_B, DATE], ['api-refactor', SHA_A, DATE], ['main', SHA_1, DATE], ['retry-metrics', SHA_C, DATE]),
+          dag: dag([SHA_1, SHA_T]) + APPENDIX_A_DAG,
+          head: 'main',
+          layers: [layer('main', SHA_1, TRUNK, SHA_T, 1, TRUNK_LINE, true)],
+          entries: [{ ...TRUNK_LINE, change: { ...CHANGE, status: 'merged' } }, BOTTOM, MIDDLE, TOP],
+          extras: new Map([['main', { ...PLAIN_EXTRAS, isDraft: true, title: 'Stray' }]]),
+        }),
+      );
+
+      // assert
+      const row = rowOf(model, 'main');
+      expect(row.indicators).toStrictEqual([]);
+      expect(row.dim).toBe(false);
+      expect(row.tooltip).toStrictEqual(['main @ 1111111', 'base: origin/main @ 0000000', 'git-spice: trunk']);
+      expect(row.context).toStrictEqual(layerContext('main', { isCurrent: true, isTracked: true, isTrunkLine: true }));
     });
 
     it('byName is the one source: a state whose layers carry no tracking key (fresh from computeStack) gives the same model as one whose layers do', () => {
@@ -868,18 +987,22 @@ describe('buildStackViewModel', () => {
 
   describe('dim names and the tooltip', () => {
     it('dims a merged layer and an untracked one, and no other', () => {
-      // arrange: the bottom merged, the middle open, the top unlisted
+      // arrange: the bottom merged, the middle closed (not dim — the branch may still be worked on), the top unlisted
       const model = buildStackViewModel(
-        input({ entries: [TRUNK_LINE, { ...BOTTOM, change: { id: '#1', url: pullUrl(1), status: 'merged' } }, { ...MIDDLE, change: { id: '#2', url: pullUrl(2), status: 'open' } }] }),
+        input({ entries: [TRUNK_LINE, { ...BOTTOM, change: { id: '#1', url: pullUrl(1), status: 'merged' } }, { ...MIDDLE, change: { id: '#2', url: pullUrl(2), status: 'closed' } }] }),
       );
 
       // assert: top first
-      const dims = model.rows.filter((row) => row.kind === 'layer').map((row) => (row.kind === 'layer' ? row.dim : null));
+      // see primer §25 (`flatMap`: one element kept per layer row, none for the rest)
+      const dims = model.rows.flatMap((row) => (row.kind === 'layer' ? [row.dim] : []));
       expect(dims).toEqual([true, false, true]);
     });
 
     it("gives a layer with a PR the tree's four tooltip lines word for word: the commit, the base with the parent row's commit, git-spice's line with the to-dos, the id and the link", () => {
+      // act
       const model = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, down: { name: 'add-retries', needsRestack: true }, change: CHANGE, push: { ahead: 1, behind: 0, needsPush: true } }] }));
+
+      // assert
       expect(rowOf(model, 'retry-metrics').tooltip).toStrictEqual([
         'retry-metrics @ ccccccc',
         'base: add-retries @ bbbbbbb',
@@ -889,8 +1012,11 @@ describe('buildStackViewModel', () => {
     });
 
     it("adds the pull request's title as a fifth line when gh knows it (§7.1.1), and nothing when it does not", () => {
+      // act
       const titled = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: CHANGE }], extras: new Map([['retry-metrics', { ...PLAIN_EXTRAS, title: 'Add retry metrics' }]]) }));
       const plain = buildStackViewModel(input({ entries: [TRUNK_LINE, BOTTOM, MIDDLE, { ...TOP, change: CHANGE }], extras: new Map([['retry-metrics', PLAIN_EXTRAS]]) }));
+
+      // assert
       expect(rowOf(titled, 'retry-metrics').tooltip).toStrictEqual(['retry-metrics @ ccccccc', 'base: add-retries @ bbbbbbb', 'git-spice: tracked on add-retries', `#7 ${pullUrl(7)}`, 'Add retry metrics']);
       expect(rowOf(titled, 'retry-metrics').indicators[0]).toStrictEqual({ ...PR_7, title: 'Add retry metrics' });
       expect(rowOf(plain, 'retry-metrics').tooltip.length).toBe(4);
@@ -1063,6 +1189,29 @@ describe('buildStackViewModel', () => {
       expect(on.messages).toStrictEqual([]);
     });
 
+    it("a paused `git am` on a layer (the one pause point that keeps HEAD on its branch) keeps the filter: HEAD's stack alone beside the rebase row", () => {
+      // act: 23a's L2 — other-work beside the stack — with a rebase paused and HEAD still on the top layer
+      const model = buildStackViewModel(
+        input({
+          refs: refs(['add-retries', SHA_B, DATE], ['api-refactor', SHA_A, DATE], ['main', SHA_T, DATE], ['other-work', SHA_D, DATE], ['retry-metrics', SHA_C, DATE]),
+          dag: dag([SHA_D, SHA_T]) + APPENDIX_A_DAG,
+          rebaseInProgress: true,
+          showOnlyThisStack: true,
+          workingTreeFiles: 1,
+        }),
+      );
+
+      // assert
+      expect(model.messages.map((message) => message.kind)).toEqual(['rebaseInProgress']);
+      expect(model.rows.map(geometry)).toEqual([
+        { kind: 'workingTree', lane: 0, node: 'dashed' },
+        { kind: 'layer', name: 'retry-metrics', lane: 0, node: 'filled' },
+        { kind: 'layer', name: 'add-retries', lane: 0, node: 'hollow' },
+        { kind: 'layer', name: 'api-refactor', lane: 0, node: 'hollow' },
+        { kind: 'trunk', name: TRUNK, lane: 0, node: 'hollow' },
+      ]);
+    });
+
     it('a detached HEAD names no stack: the toggle draws every stack, with the detached row', () => {
       // act
       const model = buildStackViewModel(input({ head: null, showOnlyThisStack: true }));
@@ -1087,6 +1236,7 @@ describe('buildStackViewModel', () => {
       const model = buildStackViewModel(input({ enrichment: 'none', layers: bare }));
 
       // assert
+      // see primer §22 (for ... of)
       for (const name of ['retry-metrics', 'add-retries', 'api-refactor']) {
         const row = rowOf(model, name);
         expect(row.indicators, name).toStrictEqual([]);
@@ -1111,22 +1261,26 @@ describe('buildStackViewModel', () => {
   });
 
   describe("behindTrunk — the trunk row's input", () => {
+    const commitLine = 'origin/main @ 0000000';
+    const originLine = "HEAD's stack is 5 commits behind origin/main";
+    const localLine = 'the local trunk branch is 3 commits behind origin/main';
     // see primer §78 (`it.each` over object rows)
     it.each([
-      { title: 'five and three behind', behindTrunk: { origin: 5, local: 3 }, expected: [{ kind: 'behindTrunk', origin: 5, local: 3 }] },
-      { title: 'origin behind, the local trunk level', behindTrunk: { origin: 5, local: 0 }, expected: [{ kind: 'behindTrunk', origin: 5, local: 0 }] },
-      { title: 'only the local trunk behind', behindTrunk: { origin: 0, local: 3 }, expected: [{ kind: 'behindTrunk', origin: 0, local: 3 }] },
-      { title: 'both level — present only when either count is above zero', behindTrunk: { origin: 0, local: 0 }, expected: [] },
-      { title: 'not spawned yet (null until 23d)', behindTrunk: null, expected: [] },
-    ])('$title', ({ behindTrunk, expected }) => {
+      { title: 'five and three behind', behindTrunk: { origin: 5, local: 3 }, expected: [{ kind: 'behindTrunk', origin: 5, local: 3 }], tooltip: [commitLine, originLine, localLine] },
+      { title: 'origin behind, the local trunk level', behindTrunk: { origin: 5, local: 0 }, expected: [{ kind: 'behindTrunk', origin: 5, local: 0 }], tooltip: [commitLine, originLine] },
+      { title: 'only the local trunk behind', behindTrunk: { origin: 0, local: 3 }, expected: [{ kind: 'behindTrunk', origin: 0, local: 3 }], tooltip: [commitLine, localLine] },
+      { title: 'both level — present only when either count is above zero', behindTrunk: { origin: 0, local: 0 }, expected: [], tooltip: [commitLine] },
+      { title: 'not spawned yet (null until 23d)', behindTrunk: null, expected: [], tooltip: [commitLine] },
+    ])('$title', ({ behindTrunk, expected, tooltip }) => {
       // act
       const model = buildStackViewModel(input({ behindTrunk }));
 
-      // assert
+      // assert: the one indicator, and one tooltip line per count above zero
       const trunk = model.rows[model.rows.length - 1];
       expect(trunk.kind).toBe('trunk');
       if (trunk.kind === 'trunk') {
         expect(trunk.indicators).toStrictEqual(expected);
+        expect(trunk.tooltip).toStrictEqual(tooltip);
       }
     });
 
@@ -1186,6 +1340,8 @@ describe('buildStackViewModel', () => {
           shaOf.set(row.name, row.sha);
         }
       }
+      // see primer §22 (`entries()`: index–element pairs, the position pairing the model's row with the graph's) and §54
+      // (destructuring the pair)
       for (const [index, row] of model.rows.entries()) {
         const graphRow = layout.rows[index];
         if (row.kind === 'layer' && graphRow.kind === 'layer') {
@@ -1239,13 +1395,17 @@ describe('formatAge — from a fixed clock', () => {
     { title: 'this second', committedAt: NOW, expected: 'now' },
     { title: '59 s', committedAt: NOW - 59, expected: 'now' },
     { title: '60 s', committedAt: NOW - 60, expected: '1m' },
+    { title: '90 s — floored, not rounded', committedAt: NOW - 90, expected: '1m' },
     { title: '59 min', committedAt: NOW - 59 * MINUTE, expected: '59m' },
+    { title: '59 min 59 s — rounding would print 60m', committedAt: NOW - HOUR + 1, expected: '59m' },
     { title: '60 min', committedAt: NOW - HOUR, expected: '1h' },
     { title: '26 h (the trunk row)', committedAt: NOW - 26 * HOUR, expected: '26h' },
     { title: '47 h', committedAt: NOW - 47 * HOUR, expected: '47h' },
     { title: '47 h 59 min 59 s', committedAt: NOW - 48 * HOUR + 1, expected: '47h' },
     { title: '48 h', committedAt: NOW - 48 * HOUR, expected: '2d' },
+    { title: '60 h — two and a half days floor to 2', committedAt: NOW - 60 * HOUR, expected: '2d' },
     { title: '6 d', committedAt: NOW - 6 * DAY, expected: '6d' },
+    { title: '6 d 23 h', committedAt: NOW - 6 * DAY - 23 * HOUR, expected: '6d' },
     { title: '7 d', committedAt: NOW - 7 * DAY, expected: '1w' },
     { title: '13 d', committedAt: NOW - 13 * DAY, expected: '1w' },
     { title: '14 d', committedAt: NOW - 14 * DAY, expected: '2w' },

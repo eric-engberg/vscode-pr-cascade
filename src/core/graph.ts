@@ -16,9 +16,11 @@
  * pins the one shape where the two differ.
  *
  * Layer: core (no VS Code imports; plan §4.1). Depends on: core/model.ts (`GitRunner`). Depended
- * on by: core/viewmodel.ts (item 23b) and src/extension.ts (item 23d), which call readGraphInput
- * then layoutGraph once per repository and refresh — nothing in src/ imports this file until
- * then; test/unit/graph.test.ts, test/git/graph.git.test.ts. Plan: §4.2, §7.1.1, §7.2.1 (Show
+ * on by: core/viewmodel.ts (item 23b: `layoutGraph` and the row types), src/extension.ts (item 23d,
+ * which will call readGraphInput then layoutGraph once per repository and refresh);
+ * test/unit/graph.test.ts, test/git/graph.git.test.ts, test/unit/viewmodel.test.ts (`layoutGraph`
+ * and the row types, for the geometry rows), test/git/gitspice.git.test.ts (`readGraphInput` for
+ * the two view-model rows). Plan: §4.2, §7.1.1, §7.2.1 (Show
  * Only This Stack), §8 E78, §9.4 `unit/graph` and `git/graph.git`, §10.1 item 23a (M6), §13.2 D67.
  */
 
