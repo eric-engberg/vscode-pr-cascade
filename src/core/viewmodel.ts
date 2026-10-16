@@ -26,7 +26,7 @@
 // see primer §1 (import / export) and §9 (`import type`)
 import { layoutGraph } from './graph';
 import type { GraphInput, GraphRow, LayerRow, TrunkRow, WorkingTreeRow } from './graph';
-import type { GsLogEntry } from './gsLog';
+import type { GsLogChange, GsLogDown, GsLogEntry } from './gsLog';
 import type { Enrichment, PrExtras, RepoState, ReviewDecision } from './model';
 
 /**
@@ -501,7 +501,7 @@ function layerViewRow(row: LayerRow, facts: RowFacts): LayerViewRow {
   // The change request this row draws: a tracked layer's `change`, never git-spice's own trunk line's
   // (nothing in the tail is true of that line, a stray `change` on it included). Everything PR-shaped
   // below — gh's answer, the circle's state, the title line, `hasPR`, `isDraft` — reads this one value.
-  const change = tracking !== undefined && tracking !== null && tracking.down !== undefined ? tracking.change : undefined;
+  const change = tracking?.down !== undefined ? tracking.change : undefined;
   const extra = change !== undefined ? facts.extras.get(row.name) : undefined;
   const indicators = indicatorsFor(row, tracking, extra, facts.remoteBranches);
   const prState = change !== undefined ? prStateOf(change.status, extra?.isDraft ?? false) : null;
@@ -573,51 +573,70 @@ function trackingOf(enrichment: Enrichment | undefined, name: string): Tracking 
  */
 // see primer §70 (`?.` through two optional fields), §30 (`??`) and §25 (arrays: push)
 function indicatorsFor(row: LayerRow, tracking: Tracking, extra: PrExtras | undefined, remoteBranches: ReadonlySet<string>): Indicator[] {
-  const indicators: Indicator[] = [];
   if (tracking === undefined) {
-    return indicators;
+    return [];
   }
+  let indicators: Indicator[];
   if (tracking === null) {
-    indicators.push({ kind: 'untracked' });
+    indicators = [{ kind: 'untracked' }];
   } else if (tracking.down === undefined) {
-    return indicators;
+    return [];
   } else {
-    if (tracking.down.needsRestack) {
-      indicators.push({ kind: 'needsRestack' });
-    }
-    const unresolved = tracking.change?.comments?.unresolved ?? 0;
-    if (unresolved > 0) {
-      indicators.push({ kind: 'unresolved', count: unresolved });
-    }
-    // The forge's base against git-spice's, both local branch names: the rail's `parent` would
-    // differ for two names on one commit (E6) and after a plain-git rebase git-spice was not told
-    // about, where ⇈ already speaks.
-    if (extra !== undefined && extra.baseRef !== tracking.down.name) {
-      indicators.push({ kind: 'baseDrift', prBase: extra.baseRef, localParent: tracking.down.name });
-    }
-    // `push.ahead`, not `push.needsPush`: that flag is "the two tips differ" and is true for a
-    // branch strictly behind its remote too (measured, M4a), which has no glyph in this tail.
-    if (tracking.push !== undefined && tracking.push.ahead > 0) {
-      indicators.push({ kind: 'needsPush', ahead: tracking.push.ahead });
-    }
+    indicators = gitSpiceIndicators(tracking, tracking.down, extra);
   }
   // ⛅ is a git fact, read off the digest: no remote-tracking branch of this name on any remote.
   if (!remoteBranches.has(row.name)) {
     indicators.push({ kind: 'neverPushed' });
   }
-  if (tracking !== null && tracking.change !== undefined) {
-    indicators.push({
+  if (tracking?.change !== undefined) {
+    indicators.push(...changeIndicators(tracking.change, extra));
+  }
+  return indicators;
+}
+
+/**
+ * The four indicators a tracked layer's own line can carry, in the bullet's order: ⇈ · 💬 · ⇄ · ↑n.
+ * `down` is the entry's, passed separately as a `GsLogDown` so the compiler knows it is there (the
+ * caller has tested it; a tracked layer always has one — only git-spice's trunk line lacks it).
+ */
+function gitSpiceIndicators(entry: GsLogEntry, down: GsLogDown, extra: PrExtras | undefined): Indicator[] {
+  const indicators: Indicator[] = [];
+  if (down.needsRestack) {
+    indicators.push({ kind: 'needsRestack' });
+  }
+  const unresolved = entry.change?.comments?.unresolved ?? 0;
+  if (unresolved > 0) {
+    indicators.push({ kind: 'unresolved', count: unresolved });
+  }
+  // The forge's base against git-spice's, both local branch names: the rail's `parent` would
+  // differ for two names on one commit (E6) and after a plain-git rebase git-spice was not told
+  // about, where ⇈ already speaks.
+  if (extra !== undefined && extra.baseRef !== down.name) {
+    indicators.push({ kind: 'baseDrift', prBase: extra.baseRef, localParent: down.name });
+  }
+  // `push.ahead`, not `push.needsPush`: that flag is "the two tips differ" and is true for a
+  // branch strictly behind its remote too (measured, M4a), which has no glyph in this tail.
+  if (entry.push !== undefined && entry.push.ahead > 0) {
+    indicators.push({ kind: 'needsPush', ahead: entry.push.ahead });
+  }
+  return indicators;
+}
+
+/** The PR circle, and ✕ after it when gh counts a failing check: the two indicators a change request brings. */
+function changeIndicators(change: GsLogChange, extra: PrExtras | undefined): Indicator[] {
+  const indicators: Indicator[] = [
+    {
       kind: 'pr',
-      id: tracking.change.id,
-      url: tracking.change.url,
-      state: prStateOf(tracking.change.status, extra?.isDraft ?? false),
+      id: change.id,
+      url: change.url,
+      state: prStateOf(change.status, extra?.isDraft ?? false),
       reviewDecision: extra?.reviewDecision ?? null,
       title: extra?.title ?? null,
-    });
-    const checks = extra?.checks ?? null;
-    if (checks !== null && checks.failing > 0) {
-      indicators.push({ kind: 'checks', failing: checks.failing, total: checks.total });
-    }
+    },
+  ];
+  const checks = extra?.checks ?? null;
+  if (checks !== null && checks.failing > 0) {
+    indicators.push({ kind: 'checks', failing: checks.failing, total: checks.total });
   }
   return indicators;
 }

@@ -2296,7 +2296,7 @@ item 12 split 2026-09-26 into 12a/12b so every later item number stays true)
      four message rows word for word from tree.ts; `digest.ts` gains `remoteBranches`; `gsLog.ts` keeps `change.comments`;
      `src/webview/protocol.ts` types only, `CommandId` a template literal type, `HostNotice` for the rows without a
      repository; `unit/viewmodel` 111, `unit/enrich` 14 literals +2, `unit/digest` +5, `unit/gsLog` +2, `git/gitspice.git`
-     2 literals +2; primer §82, §83; 8 commits, each green, the seventh a review's fixes).
+     2 literals +2; primer §82, §83; 9 commits, each green, the seventh a review's fixes, the ninth SonarCloud's).
 23c. webview build: second esbuild target (`platform: "browser"`, one IIFE per view) → `dist/webview/`;
      `@vscode/codicons` copied in; the `test/webview` Vitest project; the ESLint rule for `src/webview/**`.
      **Library decision:** `happy-dom` vs `jsdom` for renderer tests (dev-only; pick by the §11.3 table).
@@ -3117,7 +3117,10 @@ E44; plus the tag-shadowing case (no E-number in §8 — consider adding one as 
   filter (one test); eight tests in all (103 → 111: diverged `ahead 1, behind 1` draws `↑1`; a closed PR is not dim; the
   behindTrunk table asserts its tooltip lines; `hasPR`, the id line and dim on every `status` row; `formatAge` at 90 s,
   59 min 59 s, 60 h and 6 d 23 h); `as const` dropped from the two test files for return-type annotations; the headers'
-  "depended on by" lists, the primer pointers at first use, and act/assert markers in 25 tests — and the eighth the docs.
+  "depended on by" lists, the primer pointers at first use, and act/assert markers in 25 tests — the eighth the docs, and the
+  ninth SonarCloud's S3776 on `indicatorsFor` (cognitive complexity 20 over the 15 allowed, as 23a's `measureMembers` was):
+  `gitSpiceIndicators` (⇈ · 💬 · ⇄ · ↑n, taking the entry and its `GsLogDown`) and `changeIndicators` (the circle and ✕,
+  taking the `GsLogChange`) split out, two `?.` chains for S6582, no test changed.
 - **M6 item 23a, 2026-10-15**, branch `m6/23a-core-graph` stacked on M5's 23b (D67): `src/core/graph.ts` (new — `REFS_ARGS`,
   `dagArgs`, `trunkTipArgs`, `readGraphInput`, `parseRefs`, `parseDag`, `parseTrunkTip`, `layoutGraph`, the four-row `GraphRow`
   union, `GraphLayout`), `unit/graph` (new, 110), `git/graph.git` (new, 20); unit 734 → 844, git 188 + 2 skipped → 208 + 2 skipped;
