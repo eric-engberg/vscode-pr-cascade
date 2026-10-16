@@ -1,7 +1,7 @@
 # ci.yml — GitHub Actions: run the full test suite, and package the extension, on every pull
 # request and on main.
 #
-# Layer: tooling. Mirrors what a developer runs locally: `npm test` (typecheck, lint, unit,
+# Layer: tooling. Mirrors what a developer runs locally: `npm test` (typecheck, lint, unit, webview,
 # git tests — the git tests run a real git-spice, installed below), `npm run package` (so a
 # manifest or README problem vsce would refuse shows up here, not at tag time — release.yml is
 # the one that ships the .vsix) and then the extension-host tests, on both Linux and macOS.
