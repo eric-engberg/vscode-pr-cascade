@@ -129,6 +129,10 @@ describe('extension activation', () => {
 parentheses, the body in the braces. Test runners are built on them — `describe` takes a
 label and "a function to run", and the arrow function is that function. When the body is a
 single expression the braces may be dropped: `(entry) => entry.name` returns `entry.name`.
+One expression needs a wrapper: an object literal (§16), because a `{` straight after `=>`
+would start a block body, not an object. `(name, …) => ({ kind: 'layer', name, … })` — the
+literal in parentheses — returns the object; `layerRow` in `test/git/gitspice.git.test.ts`
+(M6 item 23b) is the first such arrow in the codebase.
 
 There is one real difference from `function name() {}`: an arrow function has no `this` of
 its own — it keeps the `this` of the code it is written in — while a `function` gets a
@@ -296,6 +300,14 @@ declarations. It compiles to an empty file — there is nothing in it that runs 
 import anyone writes against it is `import type { StackBackend, Readiness } from './backend'`.
 That is a normal thing for a TypeScript codebase to have: a contract in a file of its own, with
 the implementations elsewhere, and `npm run typecheck` as its only test.
+
+`src/webview/protocol.ts` (M6 item 23b) is the first file outside `src/core` and `src/vscode` to import from
+core — `import type { StackViewModel } from '../core/viewmodel'` — and there the `type` keyword is
+load-bearing, not a statement of intent. The webview code is bundled for a browser (item 23c), where nothing
+of Node's exists; a plain `import { … }` from a core file would pull that file, and everything it imports,
+into the browser bundle. `import type` is erased before bundling, so the view shares the shape and none of
+the code — the same reason §60 gives for the vendored `.d.ts`, applied to our own files. Item 23c adds the
+lint rule that says so in the compiler's place.
 
 An interface that `extends` another may also *narrow* a member it inherits to a more particular
 type, as long as every value of the new type still fits the old: `FakeReadinessHost` in
@@ -641,6 +653,10 @@ collects every argument after the first into one array, `items`. And inside `[ ]
 spread need not be an array — anything that can be walked with `for … of` will do (§22): a
 `Set`, or a `Map`'s `keys()` (§19). `[...this.flights.keys()]` (`src/vscode/login.ts`) is the
 keys of a Map as a fresh array; `[...this.listeners]` in the test fake is a Set copied into one.
+A `Map` spread the same way gives its `[key, value]` pairs: `new Map([...BY_NAME, ['retry-metrics',
+TOP_TRACKING]])` (`test/unit/enrich.test.ts`, M6 item 23b) is a copy of one Map with a pair added —
+the pairs out into `[ ]`, one more pair after them, and §19's `new Map` of pairs to close it. The
+original is untouched, as every spread leaves its source.
 
 ## 17. Narrowing with typeof
 
@@ -919,6 +935,9 @@ plain way to ask "are these all different?": `chooseRepository` in `src/vscode/l
 item 19b) asks it of the folder names it is about to offer in a quick pick, and offers the full
 paths instead when two names are the same.
 
+`new Set(other)` is a copy — a new `Set` with the other's members, so `copy.delete(name)` leaves the original
+alone (`without` in `test/unit/viewmodel.test.ts`, M6 item 23b); `new Set()` with nothing is empty.
+
 ## 22. for ... of, and continue
 
 *First seen in `src/core/discovery.ts` (deleted in M4 item 12a; the example stays). Live uses
@@ -952,9 +971,15 @@ asked one at a time, in order.
 
 Two look-alikes to keep apart: the older counted form
 `for (let index = 0; index < list.length; index++)` appears only when the index itself is
-needed (§29 — the fixture builder needs it to pick each layer's file name), and
+data (§29 — the fixture builder needs it to pick each layer's file name), and
 `for (const key in object)` — `in`, not `of` — walks an object's key names; this codebase
 does not use it.
+
+**`entries()`** (first used in `test/unit/viewmodel.test.ts`, M6 item 23b). When the position is
+wanted but is not itself data, `list.entries()` hands out `[index, element]` pairs in order, and
+`for (const [index, row] of model.rows.entries())` names both with §54's array destructuring:
+the counted loop's index without the counter. The test walks the model's rows and the graph's
+side by side, and the index is only what pairs them.
 
 ## 23. String methods: trim, endsWith, slice
 
@@ -1250,6 +1275,18 @@ something else in code). First met, in reading order, in `test/unit/command.test
 (`timeoutMs: 15_000`, M5 item 18); then `PROBE_TIMEOUT_MS` in `src/core/backends/gitspice.ts`,
 `DEFAULT_POLL`'s `3_000` and `300_000` in `src/core/poll.ts` (item 19a), and — earlier by date,
 later in reading order — the `5_000` deadlines of the M4 extension-host tests.
+
+`Math.floor(x)` (`formatAge` in `src/core/viewmodel.ts`, M6 item 23b) is the largest whole number not above
+`x`: `Math.floor(26.9)` is `26`, and `Math.floor(seconds / 3600)` is the whole hours in a count of seconds —
+what the shell's `$(( seconds / 3600 ))` gives, because `/` here is a real division (`7 / 2` is `3.5`, never
+`3`) and something has to drop the fraction. `Math` is a plain object of such functions, always in scope,
+nothing to import: `Math.round` (to the nearest whole number), `Math.ceil` (up), `Math.max` and `Math.min`
+(the larger or smaller of its arguments), `Math.abs`. `floor` and not `round` for an age because `26h` must
+mean "at least 26 hours", as `git log`'s `2 days ago` does; a difference that is negative — a commit dated in
+the future, a wrong clock — would floor to a negative count, so `formatAge` answers `now` for anything under
+a minute before it divides. Not `Intl.RelativeTimeFormat`, the standard library's own relative-time
+formatter: it spells `26 hours ago` in the user's language, where the rail wants `26h` in a column three
+characters wide, and its words are not the mockup's.
 
 ## 28. The Sync variants of Node's functions
 
@@ -2366,7 +2403,7 @@ expression" here means the whole `condition ? a : b`. It is unrelated to *condit
 (`T extends U ? X : Y`), a type-level construct the style rules (plan §11.1) keep out of this
 codebase.
 
-## 49. `Pick<T, K>`: some of another type's fields — and `Extract` / `Exclude` for a union's members
+## 49. `Pick<T, K>`: some of another type's fields — `Partial<T>` for all of them, optional — and `Extract` / `Exclude` for a union's members
 
 *First seen in `src/core/uri.ts` (`StackDiffQuery`).*
 
@@ -2425,6 +2462,14 @@ over `Readiness` — the two members step 5 can answer — with a member of the 
 (`passed`) joined to it by `|`, as `locateGitSpice`'s `located` is joined to `NotLocated`; and
 `GhMissing` in `src/core/readinessFix.ts` (M5 item 23b) picks the one member its three gh install
 offers share, so `ghMissingOffer` takes the member whole instead of its fields one by one.
+
+**`Partial<T>`** (first used in `test/unit/viewmodel.test.ts` (`layerContext`), M6 item 23b) makes
+every field of `T` optional. `Partial<Record<'isCurrent' | … | 'isDraft', boolean>>` is §43's
+`Record` of the six boolean context keys with every one of them optional, so a caller passes only
+the keys it wants on — `layerContext('main', { isCurrent: true, isTrunkLine: true })` — and the
+`...on` spread (§16) puts them last, over the all-false defaults. The relationship it states is
+"any subset of these keys"; an interface of six optional fields would say the same in six lines
+and then drift from the context type it mirrors.
 
 ## 50. `JSON.stringify` and `JSON.parse`
 
@@ -2491,6 +2536,14 @@ compiles, so a line with no `name` would become the Map key `undefined` without 
 acceptable here only because it is a test helper whose every caller compares the result exactly,
 so a wrong shape fails the test it was read for; production code takes §51's checks instead, as
 `core/gsLog.ts` does for the same lines.
+
+`structuredClone(value)` (`test/unit/viewmodel.test.ts`, M6 item 23b) is a deep copy that keeps a `Map` a
+`Map` and a `Set` a `Set`, where `JSON.parse(JSON.stringify(value))` — the copy `test/unit/enrich.test.ts`
+takes to prove its input unchanged — turns either into `{}`, JSON having no such values. It is a global
+(Node 17 and every browser), declared in `@types/node`, so nothing is imported. The test copies its input
+before the call and compares the two with `toStrictEqual` after it; Vitest compares a `Map` by its entries
+and a `Set` by its members, so a `ReadonlyMap` built with `new Map([...])` in an expected literal matches
+the one `withTracking` filled — which is also how `unit/enrich`'s `enriched` literals carry `byName`.
 
 ## 51. Checking the shape of a parsed value: `typeof x === 'object'`, `null`, and `in`
 
@@ -4031,3 +4084,70 @@ paused call per level of nesting — a stack sitting on a layer of a stack sitti
 worklist (§38's queue, taken from the other end) because a branch can be a thousand commits long
 where a stack is a few layers high. §39's `filesUnder` in `test/helpers/gitspice.ts` is the same
 shape over directories; this is the first in `src/`.
+
+## 82. `switch` over a tagged union, and the return the compiler counts
+
+*First seen in `src/core/viewmodel.ts` (`viewRowFor`, M6 item 23b).*
+
+```ts
+function viewRowFor(row: GraphRow, facts: RowFacts): ViewRow {
+  switch (row.kind) {
+    case 'layer':
+      return layerRow(row, facts);
+    case 'trunk':
+      return trunkRow(row, facts);
+    case 'workingTree':
+      return workingTreeRow(row, facts);
+    case 'elided':
+      return elidedRow(row);
+  }
+}
+```
+
+`switch (x) { case a: … }` is the shell's `case $x in a) … ;; esac`: one value, compared with `===` against
+each `case` label, the first match's statements run. Two things differ. There is no `;;`: a `case` whose
+statements do not end in `return` (or `break`) *falls through* into the next label's statements, which is
+why every case here returns and this codebase writes a `switch` only in that shape. And the compiler reads
+the labels: inside `case 'layer':` the row *is* a `LayerRow` (§59's narrowing, one label at a time), so
+`row.forks` is there without a check, and `row.parent` under `case 'trunk':` is a compile error.
+
+The completeness §34 wanted is in the return type. The function promises a `ViewRow`, every case returns
+one, and there is no `return` after the `switch` — which compiles only because the compiler can see that the
+four labels cover every member of `GraphRow['kind']` (§80). Add a fifth row kind to `graph.ts` — item 23i's
+`trunkCommit` — and this function stops compiling with TS2366 ("Function lacks ending return statement and
+return type does not include 'undefined'") until it has a case for it. §34's `instanceof` chain could not
+say that; §59's `offerFor` reached the same check with a run of `if`s and a last line that takes the one
+member left. A `switch` is the shape when every member gets a line of its own and the test is one
+exact-string field; the `if` run when members are handled a few at a time. There is deliberately no
+`default:` — it would answer for the fifth kind in silence, the fall-through §34 warned about.
+
+## 83. A template literal type: `` `prCascade.${string}` ``
+
+*First seen in `src/webview/protocol.ts` (`CommandId`, M6 item 23b).*
+
+```ts
+export type CommandId = `prCascade.${string}`;
+
+export interface CommandMessage {
+  readonly type: 'command';
+  readonly seq: number;
+  readonly command: CommandId;
+  readonly args: readonly string[];
+}
+```
+
+§12's template *string* is a value: backticks with `${…}` holes, filled when the line runs. The same spelling
+in a type position is a **template literal type**, filled at compile time: `` `prCascade.${string}` `` is
+every string that starts with `prCascade.` and goes on with anything — `'prCascade.openDiff'` fits,
+`'openDiff'` and `'workbench.action.reloadWindow'` do not. It sits between §10's exact-string union (a closed
+list, spelled out) and plain `string` (anything): the view may post any command of ours, the ones later
+items register included, and nothing else, so a renderer that mistypes the prefix fails `npm run typecheck`.
+The hole may hold a union too — `` `${'smartlog' | 'graph'}.focus` `` is exactly the two focus commands —
+and the compiler checks a plain string against the pattern only when it is a literal; a `string` variable
+needs a check (`startsWith`) and a narrowing before it fits.
+
+What it does not do is the half the plan's E79 asks of the host. A message a webview *receives* is data —
+`JSON.parse`'s `unknown` (§50) — and a type says nothing about it until a check has proved its shape, as §51
+proved `gs log`'s lines. So the host (item 23d) still tests `command.startsWith('prCascade.')` on the text
+that arrives. The type is the view's promise about what it sends; the check is the host's distrust of what
+it gets. Both are needed, and neither is the other.
