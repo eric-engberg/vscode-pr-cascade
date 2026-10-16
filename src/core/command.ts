@@ -42,9 +42,12 @@ export interface CommandRequest {
    * hygiene (item 23a). Absent means "the environment as it is". A value typed as an
    * `interface` — core/forge.ts's `GhEnv` — is not accepted here as it is (an interface has no
    * index signature, primer §43); core/ghstatus.ts spreads it into a literal,
-   * `{ ...GH_ENV, ...ghEnv(host) }`, which it does anyway to add the hygiene variables.
+   * `{ ...GH_ENV, ...ghEnv(host) }`, which it does anyway to add the hygiene variables. A value
+   * of `undefined` removes the variable from the program's environment: Node leaves out an
+   * env entry whose value is undefined, so `{ ...process.env, ...request.env }` deletes what
+   * the caller had (item 23a: gh's `CI` and `GITHUB_ACTIONS`).
    */
-  readonly env?: Record<string, string>;
+  readonly env?: Record<string, string | undefined>;
   /**
    * Kill the program after this many milliseconds and report `timedOut`. Absent means no
    * limit. The readiness probe sets one on every spawn: a tool stuck behind a keychain prompt

@@ -56,6 +56,8 @@ const GH_ENV_LITERAL = {
   GH_NO_EXTENSION_UPDATE_NOTIFIER: '1',
   NO_COLOR: '1',
   GH_TELEMETRY: 'false',
+  CI: undefined,
+  GITHUB_ACTIONS: undefined,
   GH_HOST: 'github.com',
 };
 
@@ -137,6 +139,23 @@ describe('ghReadiness', () => {
         expect(call.env).toStrictEqual(GH_ENV_LITERAL);
         expect(call.cwd).toBe(ROOT);
         expect(call.timeoutMs).toBe(15_000);
+      }
+    });
+
+    it('clears CI and GITHUB_ACTIONS from every gh spawn, so a probe meant to be read-only never installs anything', async () => {
+      // arrange
+      const runner = runnerFor();
+
+      // act
+      await ready(runner);
+
+      // assert: the two keys are present and undefined — the runner removes a variable set so
+      // (under `CI=true` gh treats itself as automation and `gh stack --version` downloads the
+      // extension instead of printing the hint; measured in this item's first CI run)
+      for (const call of runner.calls) {
+        expect(Object.keys(call.env ?? {})).toEqual(expect.arrayContaining(['CI', 'GITHUB_ACTIONS']));
+        expect(call.env?.CI).toBeUndefined();
+        expect(call.env?.GITHUB_ACTIONS).toBeUndefined();
       }
     });
   });

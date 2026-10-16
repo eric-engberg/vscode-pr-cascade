@@ -515,7 +515,8 @@ export interface GhEnv {
  * looks a token up under, so two spellings of one host are one host to it — though not the
  * `--hostname` flag's case, which core/ghstatus.ts lower-cases itself beside this (measured
  * 2.102.0, plan §13.4). Only this key — the non-interactive hygiene (`GH_PROMPT_DISABLED`,
- * `GH_NO_UPDATE_NOTIFIER`, `GH_NO_EXTENSION_UPDATE_NOTIFIER`, `NO_COLOR`, `GH_TELEMETRY`) is
+ * `GH_NO_UPDATE_NOTIFIER`, `GH_NO_EXTENSION_UPDATE_NOTIFIER`, `NO_COLOR`, `GH_TELEMETRY`, and
+ * `CI` and `GITHUB_ACTIONS` removed) is
  * the same for every call and lives in core/ghstatus.ts's `GH_ENV` (item 23a), the way
  * `LC_ALL=C` and `GIT_OPTIONAL_LOCKS=0` belong to RealGitRunner — and the §7.5 login terminal
  * must keep prompting, so a per-host function must not switch prompts off. A fresh object on

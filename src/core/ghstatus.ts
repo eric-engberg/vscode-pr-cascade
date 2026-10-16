@@ -52,15 +52,23 @@ export const GH_TIMEOUT_MS = 15_000;
  * both are network calls and stderr lines); no colour; and no telemetry — these spawns are the
  * extension's, up to a hundred in one login wait, not the user's commands, and without this gh
  * writes a device id under the user's state directory on every call (measured 2.102.0, plan
- * §13.4). No LC_ALL: gh has no locale variable and spawns nothing of ours.
+ * §13.4). No LC_ALL: gh has no locale variable and spawns nothing of ours. And no automation
+ * flags: under `CI=true` — set on every Actions job, and inherited by a VS Code started from one
+ * — gh treats itself as automation and *installs* an official extension it is asked about
+ * (`gh stack --version` downloaded gh-stack and exited 0 on this item's first CI run; measured
+ * 2.102.0, plan §13.4), so the probe takes `CI` and `GITHUB_ACTIONS` out of the environment it
+ * hands gh — `undefined` here means "remove" (core/command.ts) — and a step meant to be
+ * read-only stays read-only (Ric, 2026-10-16; D65).
  */
-// see primer §43 (`Record<string, string>`: any keys, all strings)
-export const GH_ENV: Record<string, string> = {
+// see primer §43 (`Record<string, string | undefined>`: any keys; a value may be undefined)
+export const GH_ENV: Record<string, string | undefined> = {
   GH_PROMPT_DISABLED: '1',
   GH_NO_UPDATE_NOTIFIER: '1',
   GH_NO_EXTENSION_UPDATE_NOTIFIER: '1',
   NO_COLOR: '1',
   GH_TELEMETRY: 'false',
+  CI: undefined,
+  GITHUB_ACTIONS: undefined,
 };
 
 /**

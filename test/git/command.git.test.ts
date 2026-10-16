@@ -88,6 +88,23 @@ describe('RealCommandRunner', () => {
       expect(result.stdout).toBe('yes true');
     });
 
+    it('removes a variable the request sets to undefined, so the program never sees the caller\'s value', async () => {
+      // arrange: the caller's environment has it — a `CI=true` inherited from an Actions job, say
+      vi.stubEnv('PRC_PROBE', 'inherited');
+
+      // act: Node prints what the child sees; `undefined` in the request means "take it away"
+      const result = await commands.run({
+        executable: process.execPath,
+        args: ['-e', 'process.stdout.write(String(process.env.PRC_PROBE))'],
+        cwd: scratchDir,
+        env: { PRC_PROBE: undefined },
+      });
+
+      // assert
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe('undefined');
+    });
+
     it('closes the program\'s stdin at once, so a program that reads it does not wait', async () => {
       // act: Node exits as soon as its stdin ends — which happens immediately, or never
       const result = await commands.run({
