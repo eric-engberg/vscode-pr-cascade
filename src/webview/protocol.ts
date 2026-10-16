@@ -3,7 +3,8 @@
  * "Protocol", E79): the model one way, a command or a drop the other. Types only — no code runs
  * from here, so the browser bundles carry nothing of the host's and the host nothing of the
  * views'; `import type` from core is what §4.1 allows this folder, and the lint rule that refuses
- * anything else in `src/webview/` arrives with 23c's build (plan §10.1).
+ * anything else in `src/webview/` is eslint.config.mjs's second layering block (item 23c, D69), with
+ * tsconfig.webview.json as the compiler's half.
  *
  * The rules around the messages are the host's (item 23d), written here so both sides read them
  * in one place: every model the host posts carries a rising `seq`, and a message from a view whose
