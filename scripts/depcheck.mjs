@@ -149,11 +149,17 @@ const allowedLicenses = ['MIT', 'ISC', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2
 // THIRD-PARTY-NOTICES.md, and for nothing else. No registry field says whether a package is such
 // an asset, so that case is a third answer here, not a PASS — the PR body says which it is.
 const assetLicenses = ['CC-BY-4.0'];
-const licenseLine = allowedLicenses.includes(view.license)
-  ? 'PASS  license MIT/ISC/BSD/Apache-2.0'
-  : assetLicenses.includes(view.license)
-    ? `ASSET ONLY  license ${view.license}: admitted for a file that ships unchanged (icons, a font) with its attribution in THIRD-PARTY-NOTICES.md (plan §11.3, D69); FAIL for code`
-    : 'FAIL  license MIT/ISC/BSD/Apache-2.0 (CC-BY-4.0 for a shipped asset only)';
+/** The licence row's three answers, worded in full. */
+function licenseVerdict(license) {
+  if (allowedLicenses.includes(license)) {
+    return 'PASS  license MIT/ISC/BSD/Apache-2.0';
+  }
+  if (assetLicenses.includes(license)) {
+    return `ASSET ONLY  license ${license}: admitted for a file that ships unchanged (icons, a font) with its attribution in THIRD-PARTY-NOTICES.md (plan §11.3, D69); FAIL for code`;
+  }
+  return 'FAIL  license MIT/ISC/BSD/Apache-2.0 (CC-BY-4.0 for a shipped asset only)';
+}
+const licenseLine = licenseVerdict(view.license);
 const checks = [
   ['downloads/week ≥ 500,000', downloads !== null && downloads >= 500_000],
   ['last release ≤ 12 months', lastRelease !== '' && daysSince(lastRelease) <= 365],
