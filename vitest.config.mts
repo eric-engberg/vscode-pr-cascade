@@ -37,7 +37,9 @@ export default defineConfig({
           // default, not a measurement) and its ResizeObserver never calls back, so a test that
           // needs a width stubs `clientWidth` and fires `resize` (item 23e's E80 tests); and it has no
           // DragEvent (the global is an alias of Event), so a drag test dispatches plain events
-          // and the renderer keeps the dragged row itself (item 23h).
+          // and the renderer keeps the dragged row itself (item 23h); and no `window.origin` —
+          // `location.origin` is `http://localhost:3000`, and a dispatched MessageEvent's `origin`
+          // is '' unless its init names one (the fake API's `postFromHost` does).
           environment: 'happy-dom',
         },
       },

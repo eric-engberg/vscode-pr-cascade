@@ -6,7 +6,10 @@
  * and nothing else: `onModel` hands it every model the host posts; `postCommand` sends one
  * `CommandMessage` stamped with the `seq` of the last model received (E79's view half — the host
  * drops a command that names an older model than its latest: a click on a row that no longer
- * exists). `lastSeq` moves before the handler runs, so a renderer that draws inside the handler
+ * exists). A `message` event counts only from the page's own origin: VS Code's bootstrap relays
+ * the host's message with `contentWindow.postMessage(message, window.origin)` into a content
+ * frame that shares that origin by construction, so a message from any other origin is not the
+ * host's. `lastSeq` moves before the handler runs, so a renderer that draws inside the handler
  * acts on the model it shows; one that defers drawing (a `requestAnimationFrame`) accepts a
  * one-frame window in which a click on the old picture carries the new `seq`. Called once per
  * page, by the view's main.ts: VS Code throws on a second `acquireVsCodeApi()` (its webview
@@ -46,9 +49,9 @@ declare function acquireVsCodeApi(): VsCodeApi;
 export interface HostConnection {
   /**
    * Call `handler` with every model the host posts, in order. Anything else that arrives as a
-   * `message` event — a `HostMessage` member a later item adds, a malformed post — is ignored in
-   * silence: the host is ours, and a `console.warn` would reach only a Developer Tools pane
-   * nobody has open.
+   * `message` event — a post from another origin, a `HostMessage` member a later item adds, a
+   * malformed post — is ignored in silence: the host is ours, and a `console.warn` would reach
+   * only a Developer Tools pane nobody has open.
    */
   onModel(handler: (message: ModelMessage) => void): void;
   /**
@@ -68,10 +71,11 @@ export function connect(): HostConnection {
   // see primer §16 (method shorthand in an object literal) and §64 (two methods sharing a `let` through the closure)
   return {
     onModel(handler) {
-      // `event.data` is whatever the host posted, copied into the page: `unknown` until checked.
-      // see primer §85 (the browser's globals and the DOM lib: `window`, `MessageEvent<T>`)
+      // `event.origin` is the sender's origin; the host's posts carry the page's own (the header says
+      // why), and `event.data` is whatever was posted, copied into the page: `unknown` until checked.
+      // see primer §85 (the browser's globals and the DOM lib: `window`, `location`, `MessageEvent<T>`)
       window.addEventListener('message', (event: MessageEvent<unknown>) => {
-        if (isModelMessage(event.data)) {
+        if (event.origin === window.location.origin && isModelMessage(event.data)) {
           lastSeq = event.data.seq;
           handler(event.data);
         }

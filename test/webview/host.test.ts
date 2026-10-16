@@ -1,8 +1,9 @@
 /**
  * test/webview/host.test.ts — the view side of the protocol as a specification: the page's API is
  * acquired once; every model reaches the handler and nothing else does; a command is stamped with
- * the last model's `seq`, 0 before any (E79's view half). happy-dom supplies `window` and
- * `MessageEvent`; the fake API comes from helpers/fakeVsCodeApi.ts.
+ * the last model's `seq`, 0 before any (E79's view half); a message from another origin is not
+ * the host's. happy-dom supplies `window` and `MessageEvent`; the fake API comes from
+ * helpers/fakeVsCodeApi.ts.
  *
  * Layer: test, webview (plan §9.1 layer 1b; Vitest under happy-dom, no VS Code). Depends on:
  * src/webview/host.ts, src/webview/protocol.ts (types), helpers/fakeVsCodeApi.ts. Plan: §7.1.3
@@ -106,5 +107,20 @@ describe('connect', () => {
 
     // assert
     expect(api.posted).toStrictEqual([{ type: 'command', seq: 4, command: 'prCascade.refresh', args: [] }]);
+  });
+
+  it("ignores a model posted from another origin: only the page's own carries the host's messages", () => {
+    // arrange
+    const seen: ModelMessage[] = [];
+    const host = connect();
+    host.onModel((message) => seen.push(message));
+
+    // act: a well-formed model, but not from where VS Code's bootstrap posts
+    postFromHost(model(5), 'https://other.example');
+    host.postCommand('prCascade.refresh', []);
+
+    // assert: not delivered, not counted
+    expect(seen).toEqual([]);
+    expect(api.posted).toStrictEqual([{ type: 'command', seq: 0, command: 'prCascade.refresh', args: [] }]);
   });
 });

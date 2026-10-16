@@ -782,10 +782,10 @@ the repository root; its §13 is the running log of decisions and deviations mad
     webview page and we never define (primer §84 — a `declare` for something the page provides, module-scoped so no
     other file can call it), is called once by `connect()`, which hands back the two things a view does with the
     host. `onModel(handler)` is a `message` listener on `window` (primer §85: the browser's globals, which the root
-    `tsconfig.json` does not know and `tsconfig.webview.json` — item 91 — does) that passes on a `ModelMessage` and
-    ignores anything else in silence — the host is ours, VS Code's bootstrap relays nothing but what it posts, so the
-    check is a type predicate over three fields (primer §86: the tag, a numeric `seq`, a `repos` array) and nothing
-    more. `postCommand(command, args)` posts item 62's `CommandMessage` with the `seq` of the last model it saw —
+    `tsconfig.json` does not know and `tsconfig.webview.json` — item 91 — does) that passes on a `ModelMessage` from the page's own
+    origin and ignores anything else in silence — the host is ours, and VS Code's bootstrap relays nothing but what it
+    posts, with the content frame's own origin, so the check is the origin and a type predicate over three fields
+    (primer §86: the tag, a numeric `seq`, a `repos` array) and nothing more. `postCommand(command, args)` posts item 62's `CommandMessage` with the `seq` of the last model it saw —
     protocol.ts's "the model the view was showing when the user acted", 0 before any — so the host (23d) can drop a
     click on a row that no longer exists (E79). Read the header for the one-frame caveat (the `seq` moves before the
     handler runs), for why `VsCodeApi` names `postMessage` alone (`getState` and `setState` exist and nothing reads
@@ -809,7 +809,8 @@ the repository root; its §13 is the running log of decisions and deviations mad
     second call, as VS Code's does. Read: `connect()` calls the fake once; two models dispatched on `window` reach the
     handler in order; a message of another type, no data, a string, `null`, a `model` without a `seq` or `repos`, and
     one whose `repos` is not an array do not — one probe per clause of the check; `postCommand` posts `{ type: 'command', seq, command, args }` with the last model's `seq`, 0 before any,
-    and a message it did not recognise moves the `seq` not at all.
+    a message it did not recognise moves the `seq` not at all, and a model from another origin is neither delivered
+    nor counted.
 68. **`test/webview/render.test.ts`** — one line per row in the model's order (a hollow layer, the working-tree row,
     a filled layer with two indicator kinds, the elided row, trunk), each line a `<div>`; the notices before a
     repository's message rows before its rows, and once before several repositories, each with a root line; a

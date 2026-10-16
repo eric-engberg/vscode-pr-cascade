@@ -6,7 +6,9 @@
  * throws, as VS Code's does (pre/index.html: "An instance of the VS Code API has already been
  * acquired" — a fact for 23d's extension-host run to confirm, modelled here, not tested).
  * `postFromHost` is what `webview.postMessage(message)` becomes on the page: a `message` event on
- * `window` carrying `data`.
+ * `window` carrying `data`, from the page's own origin — VS Code's bootstrap relays the host's
+ * message with `contentWindow.postMessage(message, window.origin)`, and the content frame shares
+ * that origin by construction; a test that posts from elsewhere names the other origin.
  *
  * Layer: test, webview (plan §9.1 layer 1b). Depends on: src/webview/host.ts (the `VsCodeApi` type).
  * Depended on by: test/webview/host.test.ts, and every renderer test from 23e on.
@@ -43,8 +45,12 @@ export function installFakeVsCodeApi(): FakeVsCodeApi {
   return api;
 }
 
-/** What the host's `webview.postMessage(message)` becomes on the page: a `message` event on `window`. */
+/**
+ * What the host's `webview.postMessage(message)` becomes on the page: a `message` event on `window`,
+ * from the page's own origin (happy-dom has no `window.origin`; `location.origin` is the same string
+ * in a browser). `origin` names another sender — a frame that is not the host's bootstrap.
+ */
 // see primer §85 (the sending side of the listener: `new MessageEvent(type, { data })` and `dispatchEvent`, which runs every listener before it returns)
-export function postFromHost(message: unknown): void {
-  window.dispatchEvent(new MessageEvent('message', { data: message }));
+export function postFromHost(message: unknown, origin: string = window.location.origin): void {
+  window.dispatchEvent(new MessageEvent('message', { data: message, origin }));
 }
