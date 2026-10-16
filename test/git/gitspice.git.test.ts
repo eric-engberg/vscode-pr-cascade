@@ -176,8 +176,16 @@ describe.skipIf(GIT_SPICE === null)(`GitSpiceBackend against real git-spice ${GI
     // act
     enriched = await backend.enrich(await loadState(git, fixture));
 
-    // assert: a complete answer that lists only trunk — every layer is "not tracked" (E56)
-    expect(enriched.enrichment).toStrictEqual({ kind: 'enriched', ranGsLog: true, malformed: [] });
+    // assert: a complete answer that lists only trunk — every layer is "not tracked" (E56); the digest's
+    // remote-tracking names are origin's HEAD and main (item 23b)
+    expect(enriched.enrichment).toStrictEqual({
+      kind: 'enriched',
+      ranGsLog: true,
+      malformed: [],
+      byName: new Map([['main', { name: 'main' }]]),
+      complete: true,
+      remoteBranches: new Set(['HEAD', 'main']),
+    });
     expect(trackingOf(enriched)).toStrictEqual([null, null, null]);
   });
 
@@ -243,8 +251,20 @@ describe.skipIf(GIT_SPICE === null)(`GitSpiceBackend against real git-spice ${GI
     // act
     enriched = await backend.enrich(await loadState(git, fixture));
 
-    // assert
-    expect(enriched.enrichment).toStrictEqual({ kind: 'enriched', ranGsLog: false, malformed: [] });
+    // assert: the whole tracked answer remembered by name, nothing pushed yet
+    expect(enriched.enrichment).toStrictEqual({
+      kind: 'enriched',
+      ranGsLog: false,
+      malformed: [],
+      byName: new Map([
+        ['main', { name: 'main' }],
+        ['api-refactor', { name: 'api-refactor', down: { name: 'main', needsRestack: false } }],
+        ['add-retries', { name: 'add-retries', down: { name: 'api-refactor', needsRestack: false } }],
+        ['retry-metrics', { name: 'retry-metrics', down: { name: 'add-retries', needsRestack: false } }],
+      ]),
+      complete: true,
+      remoteBranches: new Set(['HEAD', 'main']),
+    });
   });
 
   it('push: the origin gains every layer, upstreams are set, pushed is the three names in git-spice\'s order, notes empty; pushing again says the same three; gs log then shows push {0, 0, false}', async () => {

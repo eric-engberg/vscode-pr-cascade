@@ -13,9 +13,10 @@
  * core/gsLog.ts drops (verified 0.31.2, D59).
  *
  * Layer: core (no VS Code imports; plan §4.1). Depends on: core/model.ts (`GitRunner`). Depended
- * on by: core/backends/gitspice.ts (`enrich`, item 20a), test/unit/digest.test.ts,
- * test/git/digest.git.test.ts, test/unit/enrich.test.ts (`DIGEST_ARGS`). Plan: §3, §7.6,
- * §7.14.2, §9.4 `unit/digest`, §10.1 item 20a, §13.2 D59 (a module §4.2 did not list).
+ * on by: core/backends/gitspice.ts (`enrich`, item 20a; `remoteBranches` since M6 item 23b),
+ * test/unit/digest.test.ts, test/git/digest.git.test.ts, test/unit/enrich.test.ts (`DIGEST_ARGS`).
+ * Plan: §3, §7.6, §7.14.2, §9.4 `unit/digest`, §10.1 items 20a and 23b (M6), §13.2 D59 (a module
+ * §4.2 did not list), D68.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -57,4 +58,33 @@ export function readRefDigest(git: GitRunner, root: string): Promise<string> {
 // see primer §20 (`test`: a yes-or-no match)
 export function isInitialised(digest: string): boolean {
   return SPICE_DATA_LINE.test(digest);
+}
+
+/** Every remote-tracking ref lives under this prefix: `origin/main` is `refs/remotes/origin/main`. */
+const REMOTE_PREFIX = 'refs/remotes/';
+
+/**
+ * The remote-tracking branches the digest lists, by bare branch name — `main`, `feat/x`, and
+ * `HEAD` among them, harmless (no branch can be called `HEAD`): every `refs/remotes/<remote>/`
+ * line with the prefix and the remote taken off and the object name dropped, one name whatever
+ * the number of remotes holding it. The fact behind the rail's ⛅ (item 23b): a branch with no
+ * such ref has never been pushed, which `gs log`'s `push` cannot say — git-spice prints it only
+ * for branches it submitted itself (a plain `git push -u` leaves no `push` and does leave the ref;
+ * measured 0.31.2, plan §13.4). Any remote, because the one git-spice pushes to is not in its
+ * output. Read off text already in hand, so the view model costs no spawn; a `ReadonlySet`, as
+ * `isInitialised` is a plain read.
+ */
+// see primer §21 (Set), §23 (`startsWith`, `slice`, `indexOf`) and §25 (arrays: `split`)
+export function remoteBranches(digest: string): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const line of digest.split('\n')) {
+    if (!line.startsWith(REMOTE_PREFIX)) {
+      continue;
+    }
+    // `refs/remotes/origin/feat/x <sha>` → `origin/feat/x` → `feat/x`: the ref name ends at the
+    // first space, the remote's name at the first slash after the prefix.
+    const ref = line.slice(REMOTE_PREFIX.length, line.indexOf(' '));
+    names.add(ref.slice(ref.indexOf('/') + 1));
+  }
+  return names;
 }

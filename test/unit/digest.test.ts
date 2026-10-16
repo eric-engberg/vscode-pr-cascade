@@ -10,7 +10,7 @@
 
 // see primer §1 (import / export)
 import { describe, expect, it } from 'vitest';
-import { DIGEST_ARGS, isInitialised, readRefDigest } from '../../src/core/digest';
+import { DIGEST_ARGS, isInitialised, readRefDigest, remoteBranches } from '../../src/core/digest';
 import { FakeGitRunner } from '../helpers/fakeGit';
 
 // The repository every test asks about, and the fake's key for the digest command (its
@@ -74,5 +74,42 @@ describe('isInitialised', () => {
     expect(isInitialised('refs/spice/database dddddddddddddddddddddddddddddddddddddddd\n')).toBe(false);
     expect(isInitialised('refs/spice/data/x dddddddddddddddddddddddddddddddddddddddd\n')).toBe(false);
     expect(isInitialised('xrefs/spice/data dddddddddddddddddddddddddddddddddddddddd\n')).toBe(false);
+  });
+});
+
+describe('remoteBranches — the branch names under refs/remotes, any remote (item 23b)', () => {
+  it('is empty for an empty digest', () => {
+    expect(remoteBranches('')).toStrictEqual(new Set());
+  });
+
+  it("takes only the refs/remotes lines, as bare branch names, origin's HEAD among them", () => {
+    // act: the fixture's digest — heads, origin's HEAD and main, git-spice's data ref
+    const names = remoteBranches(REFS);
+
+    // assert: nothing from refs/heads, nothing from refs/spice, the remote's name dropped
+    expect(names).toStrictEqual(new Set(['HEAD', 'main']));
+  });
+
+  it('keeps a branch name with a slash whole and collapses the same name on two remotes to one', () => {
+    // arrange
+    const digest =
+      'refs/remotes/origin/feat/x aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' +
+      'refs/remotes/upstream/feat/x aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' +
+      'refs/remotes/upstream/main 0000000000000000000000000000000000000000\n';
+
+    // act and assert
+    expect(remoteBranches(digest)).toStrictEqual(new Set(['feat/x', 'main']));
+  });
+
+  it('does not count a refs/heads line of the same name — a local branch is not a pushed one', () => {
+    expect(remoteBranches('refs/heads/feat/y bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n')).toStrictEqual(new Set());
+  });
+
+  it('reads the same with or without the trailing newline', () => {
+    // arrange
+    const withNewline = 'refs/remotes/origin/main 0000000000000000000000000000000000000000\n';
+
+    // act and assert
+    expect(remoteBranches(withNewline.slice(0, -1))).toStrictEqual(remoteBranches(withNewline));
   });
 });

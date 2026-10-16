@@ -33,11 +33,11 @@
 // see primer §1 (import / export) and §9 (`import type`)
 import type { GhFound, PushResult, Readiness, StackBackend, TrackResult } from '../backend';
 import type { CommandResult, CommandRunner } from '../command';
-import { isInitialised, readRefDigest } from '../digest';
+import { isInitialised, readRefDigest, remoteBranches } from '../digest';
 import { detectForge } from '../forge';
 import type { Forge } from '../forge';
 import { ghReadiness } from '../ghstatus';
-import type { GsLogEntry } from '../gsLog';
+import type { GsLogEntry, MalformedLine } from '../gsLog';
 import { parseGsLog } from '../gsLog';
 import type { Enrichment, EnrichmentCause, GitRunner, RepoState, StackLayer } from '../model';
 import type { TrunkBranch } from '../readinessFix';
@@ -299,6 +299,9 @@ export class GitSpiceBackend implements StackBackend {
   // see primer §46 (a cache: a hit is `remembered.digest === digest`, set on success only)
   async enrich(state: RepoState): Promise<RepoState> {
     if (state.trunk === null || state.layers.length === 0) {
+      // Nothing to ask. The second half of this test goes in item 23d: the M6 views draw every
+      // stack and need the answer when HEAD is on trunk too, which is 23d's pipeline, Output line
+      // and ext fixtures to change (D68).
       return state;
     }
     const digest = await readRefDigest(this.git, state.root);
@@ -307,7 +310,7 @@ export class GitSpiceBackend implements StackBackend {
     }
     const remembered = this.logByRoot.get(state.root);
     if (remembered !== undefined && remembered.digest === digest) {
-      return withTracking(state, remembered, { kind: 'enriched', ranGsLog: false, malformed: [] });
+      return withTracking(state, remembered, digest, false, []);
     }
     const located = await locateGitSpice(this.commands, this.gsPath, state.root);
     if (located.kind !== 'located') {
@@ -326,7 +329,7 @@ export class GitSpiceBackend implements StackBackend {
     }
     const answer: RememberedLog = { digest, byName, complete: parsed.malformed.length === 0 };
     this.logByRoot.set(state.root, answer);
-    return withTracking(state, answer, { kind: 'enriched', ranGsLog: true, malformed: parsed.malformed });
+    return withTracking(state, answer, digest, true, parsed.malformed);
   }
 
   /**
@@ -684,11 +687,15 @@ function relayedGitLine(ftlLines: readonly string[]): string | null {
  * naming it; `null` when a complete answer does not list it (untracked, E56); and no key at all
  * when an *incomplete* answer does not list it — a malformed line names no branch (core/gsLog.ts),
  * so absence proves nothing (unknown), and `null` there would read "not tracked" and let Track
- * Stack run `gs branch track` on a branch git-spice already tracks, moving its base. New state
- * and layer objects: the input is never changed, and a test can compare it with what it was.
+ * Stack run `gs branch track` on a branch git-spice already tracks, moving its base. The
+ * `enrichment` built here also carries the answer whole — `byName`, `complete` and the digest's
+ * remote-tracking names — for core/viewmodel.ts (M6 item 23b), which draws every stack and cannot
+ * reach the other stacks' lines through HEAD's layers; the view model applies the three rules
+ * above to any branch by name. New state and layer objects: the input is never changed, and a
+ * test can compare it with what it was.
  */
 // see primer §25 (arrays: `map`) and §16 (object literals: spread copies a layer, then adds a field)
-function withTracking(state: RepoState, answer: RememberedLog, enrichment: Enrichment): RepoState {
+function withTracking(state: RepoState, answer: RememberedLog, digest: string, ranGsLog: boolean, malformed: readonly MalformedLine[]): RepoState {
   const layers = state.layers.map((layer) => {
     const entry = answer.byName.get(layer.name);
     if (entry !== undefined) {
@@ -699,6 +706,19 @@ function withTracking(state: RepoState, answer: RememberedLog, enrichment: Enric
     }
     return { ...layer };
   });
+  // The whole answer rides along for the views (M6 item 23b): the memo record's own map, by
+  // reference — nothing can `set` on a ReadonlyMap, and a record is replaced, never edited, when the
+  // digest moves — and the remote-tracking names read off this call's digest, memo hit or not: a push
+  // or a `fetch --prune` moves a `refs/remotes/` ref and so the digest, which is why a hit means the
+  // set is unchanged too, but reading it afresh is the invariant's statement, not a coincidence.
+  const enrichment: Enrichment = {
+    kind: 'enriched',
+    ranGsLog,
+    malformed,
+    byName: answer.byName,
+    complete: answer.complete,
+    remoteBranches: remoteBranches(digest),
+  };
   return { ...state, layers, enrichment };
 }
 

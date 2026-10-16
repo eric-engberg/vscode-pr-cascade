@@ -194,8 +194,12 @@ export interface StackBackend {
   readiness(root: string, remote: string): Promise<Readiness>;
   /**
    * Plan §7.8's local tier over `gs log short --all --json`: a NEW RepoState whose layers carry
-   * `tracking` and whose `enrichment` says how it went; the input is never changed. The state
-   * itself comes back when there is no trunk or no layer (nothing to ask). Runs git-spice only
+   * `tracking` and whose `enrichment` says how it went — and, since M6 item 23b, carries the
+   * whole answer for every stack: `byName` (every line by branch name, the trunk's among them),
+   * `complete` and the digest's `remoteBranches` (core/model.ts says what each is for); the
+   * input is never changed. The state itself comes back when there is no trunk or no layer
+   * (nothing to ask — the second case until item 23d, whose views need the other stacks' lines
+   * when HEAD is on trunk). Runs git-spice only
    * when the repository is initialised — never `gs log` on one that is not: it would try to
    * initialise it and, under `--no-prompt`, die at the trunk prompt (exit 1, verified 0.31.2;
    * plan §7.6) — and only when a ref under `refs/heads`, `refs/remotes` or `refs/spice` has
