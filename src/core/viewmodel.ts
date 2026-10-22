@@ -27,7 +27,7 @@
 
 // see primer §1 (import / export) and §9 (`import type`)
 import { layoutGraph } from './graph';
-import type { GraphInput, GraphRow, LayerRow, TrunkRow, WorkingTreeRow } from './graph';
+import type { BehindTrunk, GraphInput, GraphRow, LayerRow, TrunkRow, WorkingTreeRow } from './graph';
 import type { GsLogChange, GsLogDown, GsLogEntry } from './gsLog';
 import type { Enrichment, PrExtras, RepoState, ReviewDecision } from './model';
 
@@ -67,7 +67,7 @@ export interface ViewModelInput {
    * the one line that moves.
    */
   readonly showOnlyThisStack: boolean;
-  /** The trunk row's two counts, 23d's one extra spawn; `null` until 23d exists, or when nothing was measured. */
+  /** The trunk row's two counts — core/graph.ts's `readBehindTrunk`, two `rev-list --count`s (item 23d); `null` when nothing was measured. */
   readonly behindTrunk: BehindTrunk | null;
   /**
    * Plan §7.8's gh tier by branch name — M7's core/prstatus.ts fills it from `gh pr list --json`;
@@ -78,18 +78,6 @@ export interface ViewModelInput {
    * and `baseDrift` the moment it is filled (§10 M6).
    */
   readonly extras: ReadonlyMap<string, PrExtras>;
-}
-
-/**
- * How far behind the trunk ref two things are, as 23d measures them with one `rev-list --count`
- * each: `origin` is the commits on `trunk` that HEAD's history lacks (`rev-list --count <trunk>
- * ^HEAD` — trunk has moved on since HEAD's stack forked; the mockup's `↓5`), `local` the commits the
- * local trunk branch lacks (`rev-list --count <trunk> ^<branch>` — a `git pull` is due; `local ↓3`).
- * Either may be 0; 23d passes 0 for `local` when there is no local trunk branch.
- */
-export interface BehindTrunk {
-  readonly origin: number;
-  readonly local: number;
 }
 
 /**

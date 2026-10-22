@@ -1,9 +1,10 @@
 /**
- * test/git/graph.git.test.ts — readGraphInput and layoutGraph against real repositories from the
- * fixture builder: the three texts' shapes, the rail over the Appendix A stack and its variants,
- * and agreement with computeStack for HEAD's stack where the history is a single line above trunk
- * — with the one merge shape where it is not, pinned. The unit tests pin the rules against
- * hand-written texts; this file checks that real git prints what the rules assume, as
+ * test/git/graph.git.test.ts — readGraphInput, readBehindTrunk and layoutGraph against real
+ * repositories from the fixture builder: the three texts' shapes, the trunk row's two counts as
+ * the trunk moves and the local branch lags (item 23d), the rail over the Appendix A stack and its
+ * variants, and agreement with computeStack for HEAD's stack where the history is a single line
+ * above trunk — with the one merge shape where it is not, pinned. The unit tests pin the rules
+ * against hand-written texts; this file checks that real git prints what the rules assume, as
  * stack.git.test.ts does for computeStack.
  *
  * Two things about how it compares. The agreement is checked by projection — the rows whose names
@@ -15,8 +16,9 @@
  *
  * Layer: test, git integration (plan §9.1 layer 2; Vitest, real git in throwaway directories, no
  * git-spice, no VS Code). Depends on: src/core/graph.ts, src/core/stack.ts (the agreement rows),
- * src/core/git.ts, test/helpers/fixture.ts. Plan: §8 E78 (E3, E5, E6, E14, E15, E16 as the graph
- * meets them), §9.4 `git/graph.git`, §10.1 item 23a (M6), §13.2 D67.
+ * src/core/git.ts, test/helpers/fixture.ts. Plan: §7.1.1 (the trunk row's counts), §8 E78 (E3, E5,
+ * E6, E14, E15, E16 as the graph meets them), §9.4 `git/graph.git`, §10.1 items 23a and 23d (M6),
+ * §13.2 D67, D70.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -25,7 +27,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RealGitRunner } from '../../src/core/git';
-import { REFS_ARGS, dagArgs, layoutGraph, parseRefs, parseTrunkTip, readGraphInput, trunkTipArgs } from '../../src/core/graph';
+import { REFS_ARGS, dagArgs, layoutGraph, parseRefs, parseTrunkTip, readBehindTrunk, readGraphInput, trunkTipArgs } from '../../src/core/graph';
 import type { GraphInput, GraphLayout, GraphRow, NodeKind } from '../../src/core/graph';
 import type { RepoState } from '../../src/core/model';
 import { computeStack } from '../../src/core/stack';
@@ -193,6 +195,25 @@ describe('readGraphInput (real git)', () => {
     expect(input.trunkTip).toBe(fixture.git(trunkTipArgs(TRUNK)));
   });
 
+  it("counts 0 and 0 behind trunk on the fixture as built — HEAD on the top layer, local main at origin/main's tip (readBehindTrunk, item 23d)", async () => {
+    // act
+    const behind = await readBehindTrunk(git, fixture.dir, TRUNK, 'main');
+
+    // assert
+    expect(behind).toStrictEqual({ origin: 0, local: 0 });
+  });
+
+  it("answers 0 for a local trunk branch that does not exist — git's exit 128 `bad revision` is tryRun's null, not a failed load", async () => {
+    // arrange: the name is one trunkBranchFor would never hand over, so this pins the fallback alone
+    expect(() => fixture.git(['rev-parse', '--verify', '--quiet', 'refs/heads/no-such-branch'])).toThrow();
+
+    // act
+    const behind = await readBehindTrunk(git, fixture.dir, TRUNK, 'no-such-branch');
+
+    // assert
+    expect(behind).toStrictEqual({ origin: 0, local: 0 });
+  });
+
   it("lists every local branch in name order, one <name> <sha> <date> per line, merged or not, the date the commit's committer date", () => {
     // assert: the shape of every line
     const lines = input.refs.split('\n').filter((line) => line !== '');
@@ -337,6 +358,39 @@ describe('trunk moved on (commitOnTrunk)', () => {
   it("still agrees with computeStack: depth counts the branch's own commits, not the distance to the moved tip", () => {
     expect(chainOf(after.layout, after.state)).toEqual(chainOfState(after.state));
     expect(after.state.layers.map((layer) => layer.commitCount)).toEqual([1, 2, 3]);
+  });
+
+  // The three readBehindTrunk rows below change the fixture in turn (a reset, then a tag) and so
+  // come last in this block, in this order.
+  it("counts the pushed trunk commit HEAD's history lacks — origin 1 — and 0 for a local main that moved with the push (readBehindTrunk, item 23d)", async () => {
+    // act
+    const behind = await readBehindTrunk(git, fixture.dir, TRUNK, 'main');
+
+    // assert: commitOnTrunk commits on the local main and pushes, so only HEAD's stack is behind
+    expect(behind).toStrictEqual({ origin: 1, local: 0 });
+  });
+
+  it('counts a local main reset one commit behind origin/main as local 1 — a pull is due — with origin still 1', async () => {
+    // arrange: the local trunk branch moved back by one, the remote-tracking ref untouched
+    fixture.git(['update-ref', 'refs/heads/main', 'origin/main~1']);
+
+    // act
+    const behind = await readBehindTrunk(git, fixture.dir, TRUNK, 'main');
+
+    // assert
+    expect(behind).toStrictEqual({ origin: 1, local: 1 });
+  });
+
+  it('counts against refs/heads/main, never a tag named main: with such a tag at the tip the bare name would read 0, and git says so on stderr', async () => {
+    // arrange: a tag of the branch's name at the tip — git resolves a bare `main` to the tag first
+    fixture.git(['tag', 'main', 'origin/main']);
+    expect(fixture.git(['rev-list', '--count', TRUNK, '^main']).trim()).toBe('0');
+
+    // act
+    const behind = await readBehindTrunk(git, fixture.dir, TRUNK, 'main');
+
+    // assert: the local branch is still one behind
+    expect(behind).toStrictEqual({ origin: 1, local: 1 });
   });
 });
 

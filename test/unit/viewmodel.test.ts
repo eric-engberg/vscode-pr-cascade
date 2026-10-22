@@ -18,11 +18,11 @@
 // see primer §1 (import / export) and §9 (`import type`)
 import { describe, expect, it } from 'vitest';
 import { layoutGraph } from '../../src/core/graph';
-import type { GraphInput, GraphRow } from '../../src/core/graph';
+import type { BehindTrunk, GraphInput, GraphRow } from '../../src/core/graph';
 import type { GsLogEntry } from '../../src/core/gsLog';
 import type { Enrichment, PrExtras, RepoState, StackLayer } from '../../src/core/model';
 import { buildStackViewModel, DETACHED_HEAD_TEXT, formatAge, NO_TRUNK_TEXT, NOT_ON_STACK_TEXT, REBASE_IN_PROGRESS_TEXT } from '../../src/core/viewmodel';
-import type { BehindTrunk, Indicator, LayerContext, LayerViewRow, StackViewModel, ViewModelInput, ViewRow } from '../../src/core/viewmodel';
+import type { Indicator, LayerContext, LayerViewRow, StackViewModel, ViewModelInput, ViewRow } from '../../src/core/viewmodel';
 
 // The repository every test asks about, and its trunk.
 // see primer §4 (const)
