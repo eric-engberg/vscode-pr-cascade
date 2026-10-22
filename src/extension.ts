@@ -211,9 +211,9 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
   // (test/ext/commands.test.ts): a key's value cannot be read back. `setContext` is a built-in
   // command, the one way an extension writes such a key; its Thenable is nobody's to await
   // (primer §63).
-  // see primer §74 (a context key: `executeCommand('setContext', key, value)`, a menu's `when` and a command's `enablement`)
+  // see primer §74 (a context key: `executeCommand('setContext', key, value)`, a menu's `when` and a command's `enablement`) and §54 (destructuring: the states out of the load's result, vscode/tree.ts `LoadResult`)
   context.subscriptions.push(
-    provider.onDidLoadStates((states) => {
+    provider.onDidLoadStates(({ states }) => {
       statusBar.update(states);
       lastStates = states;
       void vscode.commands.executeCommand('setContext', HAS_UNTRACKED_KEY, states.some(hasUntracked));
@@ -353,7 +353,7 @@ interface ConnectedGit {
 async function connectedGit(gitExtension: GitExtensionAdapter): Promise<ConnectedGit> {
   const connection = await gitExtension.connection();
   if (connection.kind === 'unavailable') {
-    throw new GitUnavailableError(connection.message);
+    throw new GitUnavailableError(connection.reason, connection.message);
   }
   const settings = readSettings();
   const git = new RealGitRunner(gitExecutable(settings.gitPath, connection.api.git.path));

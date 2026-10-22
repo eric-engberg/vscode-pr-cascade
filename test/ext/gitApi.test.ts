@@ -26,8 +26,8 @@ import * as path from 'node:path';
 import { after, before, describe, it } from 'mocha';
 import * as vscode from 'vscode';
 import type { ExtensionApi } from '../../src/extension';
-import { GitExtensionAdapter, GitUnavailableError, gitExecutable, realGitExtensionHost, sortRepositoryRoots } from '../../src/vscode/gitApi';
-import type { GitApi, GitConnection, GitExtensionExports, GitExtensionHandle, GitExtensionHost, GitRepository } from '../../src/vscode/gitApi';
+import { GitExtensionAdapter, GitUnavailableError, gitExecutable, realGitExtensionHost, sortRepositoryRoots, workingTreeFileCount } from '../../src/vscode/gitApi';
+import type { GitApi, GitConnection, GitExtensionExports, GitExtensionHandle, GitExtensionHost, GitRepository, GitUnavailableReason } from '../../src/vscode/gitApi';
 import { StackTreeProvider } from '../../src/vscode/tree';
 import { buildStack } from '../helpers/fixture';
 import type { Fixture } from '../helpers/fixture';
@@ -159,7 +159,8 @@ function fakeRepository(root: string): FakeRepository {
   return {
     repository: {
       rootUri: vscode.Uri.file(root),
-      state: { onDidChange: statusRuns.event },
+      // The three change lists a repository's state carries (item 23d): empty, as before a first status.
+      state: { onDidChange: statusRuns.event, mergeChanges: [], indexChanges: [], workingTreeChanges: [] },
       status: () => Promise.resolve(),
     },
     statusRuns,
@@ -251,6 +252,14 @@ function unavailableMessage(connection: GitConnection): string {
     assert.fail('expected the Git extension to be unavailable, but the handshake connected');
   }
   return connection.message;
+}
+
+/** The state behind that row — what the smartlog's notice is keyed by (item 23d) — or a failure if it connected instead. */
+function unavailableReason(connection: GitConnection): GitUnavailableReason {
+  if (connection.kind !== 'unavailable') {
+    assert.fail('expected the Git extension to be unavailable, but the handshake connected');
+  }
+  return connection.reason;
 }
 
 // see primer §5 (arrow functions)
@@ -487,6 +496,35 @@ describe('the built-in Git extension as the source of repositories (plan §7.14)
     });
   });
 
+  // The working-tree row's number (core/viewmodel.ts `workingTreeFiles`), over hand-built change
+  // lists: the rule is "distinct paths across the three lists", and the lists need only a `uri`.
+  describe("workingTreeFileCount: the working-tree row's number from the change lists (plan §7.14.2; item 23d)", () => {
+    it('is 0 for three empty lists — a clean tree, or a repository before its first git status has run', () => {
+      // act + assert
+      assert.strictEqual(workingTreeFileCount({ mergeChanges: [], indexChanges: [], workingTreeChanges: [] }), 0);
+    });
+
+    it('counts each path once across the three lists: a file both staged and modified once, a rename once by its new name, an untracked file once, a conflict once — four paths, four', () => {
+      // arrange: the shapes the Git extension lists — a staged-and-modified file sits in two lists,
+      // a rename is one entry whose `uri` is the new name, an untracked file is in the working-tree
+      // list, a conflict in the merge list
+      const stagedAndModified = { uri: vscode.Uri.file('/w/src/a.ts') };
+      const renamed = { uri: vscode.Uri.file('/w/src/new-name.ts') };
+      const untracked = { uri: vscode.Uri.file('/w/notes.md') };
+      const conflict = { uri: vscode.Uri.file('/w/src/c.ts') };
+
+      // act
+      const count = workingTreeFileCount({
+        mergeChanges: [conflict],
+        indexChanges: [stagedAndModified, renamed],
+        workingTreeChanges: [stagedAndModified, untracked, conflict],
+      });
+
+      // assert
+      assert.strictEqual(count, 4);
+    });
+  });
+
   describe('sortRepositoryRoots: the order of repositories in the view (plan §6)', () => {
     it('orders roots by the workspace folder each belongs to — the folder equal to, above or below the root', () => {
       // arrange: three folders, and — in the order the result must have — a root that is
@@ -568,6 +606,7 @@ describe('the built-in Git extension as the source of repositories (plan §7.14)
 
         // assert
         assert.strictEqual(unavailableMessage(connection), 'PR Cascade needs the built-in Git extension — enable it in the Extensions view');
+        assert.strictEqual(unavailableReason(connection), 'gitExtensionDisabled');
       } finally {
         adapter.dispose();
       }
@@ -585,6 +624,7 @@ describe('the built-in Git extension as the source of repositories (plan §7.14)
 
         // assert
         assert.strictEqual(unavailableMessage(connection), 'The Git extension failed to start — reload the window');
+        assert.strictEqual(unavailableReason(connection), 'gitExtensionFailed');
       } finally {
         adapter.dispose();
       }
@@ -601,6 +641,7 @@ describe('the built-in Git extension as the source of repositories (plan §7.14)
 
         // assert
         assert.strictEqual(unavailableMessage(connection), 'Git is disabled in this workspace (git.enabled)');
+        assert.strictEqual(unavailableReason(connection), 'gitDisabled');
       } finally {
         adapter.dispose();
       }
@@ -617,6 +658,7 @@ describe('the built-in Git extension as the source of repositories (plan §7.14)
 
         // assert
         assert.strictEqual(unavailableMessage(connection), 'The Git extension found no git — set git.path, then reload the window');
+        assert.strictEqual(unavailableReason(connection), 'gitNotFound');
       } finally {
         adapter.dispose();
       }
@@ -976,7 +1018,7 @@ describe('the built-in Git extension as the source of repositories (plan §7.14)
     it('shows the E82 message as one warning row, not an error row', async () => {
       // arrange: a provider whose loader fails the way src/extension.ts does for E82
       const unavailable = new StackTreeProvider(
-        () => Promise.reject(new GitUnavailableError('Git is disabled in this workspace (git.enabled)')),
+        () => Promise.reject(new GitUnavailableError('gitDisabled', 'Git is disabled in this workspace (git.enabled)')),
         () => Promise.resolve([]),
         output,
       );

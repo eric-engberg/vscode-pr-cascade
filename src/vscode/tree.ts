@@ -4,21 +4,29 @@
  * git-spice knows about it beside the count (M5 item 20b), and under each layer one row per
  * file that layer changes against the layer below it.
  *
+ * Since item 23d a failed load is also classified here, once, into the notice the smartlog draws
+ * in place of the rows (`loadFailureNotice`), and `onDidLoadStates` carries it beside the states
+ * (`LoadResult`) — so the two views can never disagree on what went wrong. Both go with this file
+ * in 23j, when the tree is deleted and src/extension.ts owns the load.
+ *
  * Layer: vscode adapter (plan §4.1). Depends on: the `vscode` module, core/model.ts (types
- * only — a layer's `tracking` is read through `StackLayer`, so no gsLog import), vscode/gitApi.ts
- * (GitUnavailableError, the one failure drawn as a warning), Node's `node:path`. Depended on by:
- * src/extension.ts (creates the view over the provider, hands it the two loaders, and feeds the
- * status bar and the `prCascade.hasUntracked` and `prCascade.rebaseInProgress` context keys from
- * `onDidLoadStates`),
- * vscode/commands.ts (the FileNode a file row hands its command) and test/ext/tree.test.ts. Plan:
- * §6, §7.1, §7.2 (the click), §7.2.1 (the `contextValue` vocabulary), §7.8 (the local tier's
- * texts), §7.14.3, §8 E3/E4/E5/E7/E10/E12/E17/E44/E56/E57/E82, §12 item 3, §13.2 D60, D62.
+ * only — a layer's `tracking` is read through `StackLayer`, so no gsLog import), core/git.ts
+ * (GitError: the failed command's repository), vscode/gitApi.ts (GitUnavailableError, the one
+ * failure drawn as a warning, and its `reason`), src/webview/protocol.ts (`HostNotice`, a type),
+ * Node's `node:path`. Depended on by: src/extension.ts (creates the view over the provider, hands
+ * it the two loaders, and feeds the status bar, the smartlog view, and the `prCascade.hasUntracked`
+ * and `prCascade.rebaseInProgress` context keys from `onDidLoadStates`), vscode/commands.ts (the
+ * FileNode a file row hands its command) and test/ext/tree.test.ts. Plan: §6, §7.1, §7.2 (the
+ * click), §7.2.1 (the `contextValue` vocabulary), §7.8 (the local tier's texts), §7.14.3, §8
+ * E3/E4/E5/E7/E10/E12/E17/E44/E56/E57/E82, §10.1 item 23d, §12 item 3, §13.2 D60, D62, D70.
  */
 
 // see primer §1 (import / export), §2 (the vscode module) and §9 (`import type`)
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { GitError } from '../core/git';
 import type { ChangedFile, RepoState, StackLayer } from '../core/model';
+import type { HostNotice } from '../webview/protocol';
 import { GitUnavailableError } from './gitApi';
 
 /**
@@ -274,6 +282,41 @@ export class MessageNode {
 export type StackNode = RepoNode | LayerNode | FileNode | MessageNode;
 
 /**
+ * What one top-level load produced, as `onDidLoadStates` announces it: the states — `[]` when
+ * the load failed or found no repository — and, when it failed, the failure as the notice the
+ * smartlog draws in place of the rows (item 23d; src/webview/protocol.ts `HostNotice`),
+ * classified once by `loadFailureNotice` for both views. `null` when the load succeeded,
+ * however many repositories it found.
+ */
+// see primer §9 (interface) and §10 (`HostNotice | null`)
+export interface LoadResult {
+  readonly states: RepoState[];
+  readonly failure: HostNotice | null;
+}
+
+/**
+ * One failed load as the notice both views draw (plan §7.14.3, E17, E82). The Git extension
+ * unusable → the E82 row's own text under its state, a warning: not something that broke, but a
+ * state the user can change, and the text says how. Git could not run, or a command exited
+ * non-zero on a `run` → `repositoryError` with git's own words (core/git.ts phrases E17 as "git
+ * not found at <path>"), an error, in the repository the caller names or else the one git ran in
+ * (`GitError.cwd`). Anything else → its message, or one fixed sentence for a value that is not an
+ * Error at all. The tree draws the same notice as a MessageNode, so what the tree says and what the
+ * smartlog says can never differ (item 23d); in 23j this moves with the load into src/extension.ts.
+ */
+// see primer §18 (`unknown`: what a catch hands over), §34 (instanceof on a class), §30 (`??`) and §48 (the conditional expression)
+export function loadFailureNotice(error: unknown, repo: string | null): HostNotice {
+  if (error instanceof GitUnavailableError) {
+    return { kind: error.reason, repo: null, text: error.message, severity: 'warning' };
+  }
+  if (error instanceof GitError) {
+    return { kind: 'repositoryError', repo: repo ?? error.cwd, text: error.message, severity: 'error' };
+  }
+  const text = error instanceof Error ? error.message : 'PR Cascade could not read the repository';
+  return { kind: 'repositoryError', repo, text, severity: 'error' };
+}
+
+/**
  * The bridge between the core's RepoStates and VS Code's tree widget. VS Code never
  * holds the tree; it asks this object — "what is at the top level?", "what are this
  * row's children?", "how is this row drawn?" — and draws the answers. That is the
@@ -303,12 +346,13 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
 
   /**
    * What the last top-level load produced, for whoever draws it elsewhere — the status bar
-   * (src/extension.ts, M4 item 14). Fired from topLevelNodes with the states it just
-   * loaded, or `[]` when the load failed or found no repository, so the item and the rows
-   * always come from one load (plan §7.1.0 "the same refresh cycle"; D52).
+   * (src/extension.ts, M4 item 14) and, since item 23d, the smartlog view. Fired from
+   * topLevelNodes with the states it just loaded, or `[]` and the failure as a notice when
+   * the load failed or found no repository (`LoadResult`), so the item, the rows and the
+   * view always come from one load (plan §7.1.0 "the same refresh cycle"; D52).
    */
-  private readonly statesEmitter = new vscode.EventEmitter<RepoState[]>();
-  readonly onDidLoadStates: vscode.Event<RepoState[]>;
+  private readonly statesEmitter = new vscode.EventEmitter<LoadResult>();
+  readonly onDidLoadStates: vscode.Event<LoadResult>;
   /**
    * Counts the top-level loads started, and numbers each. Two can overlap — the run
    * src/extension.ts starts while the view is hidden, beside VS Code's own ask when it
@@ -399,14 +443,15 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
    * toast and an empty view. The built-in Git extension being unusable (E82: disabled,
    * failed to start, `git.enabled` off, no git found) is the one failure drawn as a
    * warning instead: not something that broke, but a state the user can change, and the
-   * row text (plan §7.14.3) says how. For an error row the next refresh tries again from
-   * scratch — a corrected `prCascade.gitPath` takes effect then. For the warning row it does
-   * not: a refresh only re-awaits the adapter's one memoised handshake (vscode/gitApi.ts,
-   * `connection()`), and the row goes when the adapter reconnects on its own — the Git
-   * extension enabled again, or `git.enabled` turned on — or, for "failed to start" and
-   * "no git", after a reload.
+   * row text (plan §7.14.3) says how. `loadFailureNotice` decides which; the row and the
+   * smartlog's notice are the one answer (item 23d). For an error row the next refresh tries
+   * again from scratch — a corrected `prCascade.gitPath` takes effect then. For the warning
+   * row it does not: a refresh only re-awaits the adapter's one memoised handshake
+   * (vscode/gitApi.ts, `connection()`), and the row goes when the adapter reconnects on its
+   * own — the Git extension enabled again, or `git.enabled` turned on — or, for "failed to
+   * start" and "no git", after a reload.
    */
-  // see primer §18 (try / catch and unknown) and §34 (instanceof on a class)
+  // see primer §18 (try / catch and unknown) and §48 (the conditional expression)
   private async topLevelNodes(): Promise<StackNode[]> {
     this.loads += 1;
     const load = this.loads;
@@ -414,25 +459,20 @@ export class StackTreeProvider implements vscode.TreeDataProvider<StackNode>, vs
     try {
       states = await this.loadStates();
     } catch (error) {
-      let message = 'PR Cascade could not read the repository';
-      let icon = 'error';
-      if (error instanceof GitUnavailableError) {
-        message = error.message;
-        icon = 'warning';
-      } else if (error instanceof Error) {
-        // GitError (core/git.ts) already phrases E17 as "git not found at <path>".
-        message = error.message;
-      }
-      this.output.appendLine(message);
+      const notice = loadFailureNotice(error, null);
+      this.output.appendLine(notice.text);
       // Nothing loaded: the status bar hides on `[]` (plan §7.14.3 "hidden in all five
-      // states") — unless a newer load has started meanwhile, which then speaks instead.
+      // states") and the smartlog draws the notice — unless a newer load has started
+      // meanwhile, which then speaks instead.
       if (load === this.loads) {
-        this.statesEmitter.fire([]);
+        this.statesEmitter.fire({ states: [], failure: notice });
       }
-      return [new MessageNode(message, icon)];
+      // The notice's severity names the row's codicon for the two it can be here (`warning`,
+      // `error`); `information` has no row of this kind, and its codicon is called `info`.
+      return [new MessageNode(notice.text, notice.severity === 'information' ? 'info' : notice.severity)];
     }
     if (load === this.loads) {
-      this.statesEmitter.fire(states);
+      this.statesEmitter.fire({ states, failure: null });
     }
     if (states.length === 0) {
       return [new MessageNode('No git repository in this workspace')];
