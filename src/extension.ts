@@ -436,8 +436,11 @@ async function loadRepoState(output: vscode.OutputChannel, connected: ConnectedG
  * tracks (its own trunk line counts — git-spice knows it), and whether `gs log` ran or the
  * §7.14.2 memo answered — the one place a user sees the pre-filter at work; one line per line
  * of the answer that could not be read, with the reminder that the layers such an answer does
- * not list are left unknown (E57); or why there is no information at all. Nothing when `enrich`
- * was not asked (no trunk, no layers). Core never logs; this is where its answer is written down.
+ * not list are left unknown (E57); or why there is no information at all. With HEAD on trunk
+ * there is no layer to count, and the line says how many lines `gs log` printed instead — the
+ * other stacks' lines, which the views draw (item 23d; git-spice's own trunk line is one of
+ * them). Nothing when `enrich` was not asked (no trunk). Core never logs; this is where its
+ * answer is written down.
  */
 // see primer §59 (narrowing on `kind`), §25 (arrays: `filter`, `length`) and §48 (the conditional expression)
 function logEnrichment(output: vscode.OutputChannel, state: RepoState): void {
@@ -449,9 +452,13 @@ function logEnrichment(output: vscode.OutputChannel, state: RepoState): void {
     output.appendLine(`${state.root}: no git-spice tracking info — ${enrichment.reason}`);
     return;
   }
-  const known = state.layers.filter((layer) => layer.tracking !== null && layer.tracking !== undefined).length;
   const memo = enrichment.ranGsLog ? '' : ' (unchanged — gs log not run)';
-  output.appendLine(`${state.root}: git-spice tracks ${known} of ${state.layers.length} layer(s)${memo}`);
+  if (state.layers.length === 0) {
+    output.appendLine(`${state.root}: not on a stack; gs log lists ${enrichment.byName.size} line(s)${memo}`);
+  } else {
+    const known = state.layers.filter((layer) => layer.tracking !== null && layer.tracking !== undefined).length;
+    output.appendLine(`${state.root}: git-spice tracks ${known} of ${state.layers.length} layer(s)${memo}`);
+  }
   for (const bad of enrichment.malformed) {
     output.appendLine(`${state.root}: gs log line ${bad.line} skipped: ${bad.problem}`);
   }
@@ -739,12 +746,13 @@ function untrackedRepositories(host: ReadinessHost): string[] {
  * may show `not tracked` for a branch already tracked, and re-tracking it would silently move
  * its base. Then, in order: a paused rebase is refused with the view's own sentence (E12 —
  * git-spice would not refuse, verified 0.31.2; the greyed-out menu entry is `enablement`, item 21b);
- * no layers → nothing to track (the one state with no `enrichment`, so its reason is never
- * read); not enriched → its sentence; every layer tracked → a sentence; else `track`, with the
- * trunk's local branch asked of git the way the setup flow asks it (`trunkBranchFor`, item
- * 19a), and one sentence from the result — core's own, as a warning, when it stopped short.
+ * no layers → nothing to track (whatever `enrich` found about the other stacks, item 23d, there
+ * is nothing here to track); not enriched → its sentence; every layer tracked → a sentence; else
+ * `track`, with the trunk's local branch asked of git the way the setup flow asks it
+ * (`trunkBranchFor`, item 19a), and one sentence from the result — core's own, as a warning, when
+ * it stopped short.
  */
-// see primer §70 (`?.` on `enrichment`, absent only on the no-layers path above) and §28 (`basename`)
+// see primer §70 (`?.` on `enrichment`: the type allows its absence — a state with no trunk, which a fresh load with layers never is) and §28 (`basename`)
 async function trackIn(output: vscode.OutputChannel, gitExtension: GitExtensionAdapter, root: string): Promise<TrackResult | undefined> {
   const host = readinessDeps.host;
   const folder = path.basename(root);
@@ -845,14 +853,14 @@ function stackedRepositories(host: ReadinessHost): string[] {
  * load (E83's reason: a `gs branch track`, a fetch or a rebase since then is seen by no watcher —
  * and `push`'s own refusals read the fresh load's `gs log` lines). Then, in order: a paused rebase
  * is refused with the view's own sentence (E12; `enablement` greys the entry too, but it does not
- * stop `executeCommand`); no layers → nothing to push (the one state with no `enrichment`); a
- * detached HEAD → `stack submit` acts on HEAD's branch, and git-spice would only say `in detached
- * HEAD state` (E3); not enriched → its sentence, the setup command named where it would help; then
- * the `null` layers tracked first (§7.7's preflight — an untracked layer between tracked ones
- * git-spice skips silently, an untracked HEAD it refuses; a `track` problem ends it, pushing
- * nothing); then `push`, and `reportPush` says how it went.
+ * stop `executeCommand`); no layers → nothing to push (whatever `enrich` found about the other
+ * stacks, item 23d); a detached HEAD → `stack submit` acts on HEAD's branch, and git-spice would
+ * only say `in detached HEAD state` (E3); not enriched → its sentence, the setup command named
+ * where it would help; then the `null` layers tracked first (§7.7's preflight — an untracked
+ * layer between tracked ones git-spice skips silently, an untracked HEAD it refuses; a `track`
+ * problem ends it, pushing nothing); then `push`, and `reportPush` says how it went.
  */
-// see primer §70 (`?.` on `enrichment`, absent only on the no-layers path above) and §28 (`basename`)
+// see primer §70 (`?.` on `enrichment`: the type allows its absence — a state with no trunk, which a fresh load with layers never is) and §28 (`basename`)
 async function pushIn(output: vscode.OutputChannel, gitExtension: GitExtensionAdapter, root: string): Promise<PushResult | undefined> {
   const host = readinessDeps.host;
   const folder = path.basename(root);

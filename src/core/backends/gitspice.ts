@@ -284,8 +284,9 @@ export class GitSpiceBackend implements StackBackend {
 
   /**
    * Plan §7.8's local tier — StackBackend.enrich (core/backend.ts) says what it promises. In
-   * order: nothing to ask (no trunk, or no layers — the second only until item 23d, whose views
-   * need the other stacks' lines when HEAD is on trunk; D68) → the same object back; the digest (one git command, ~10 ms; a
+   * order: nothing to ask (no trunk — nothing can be measured against; a trunk with no layers under
+   * HEAD *is* asked, since item 23d: the views draw every stack and need the other stacks' lines when
+   * HEAD is on trunk, D68) → the same object back; the digest (one git command, ~10 ms; a
    * failing git rejects, E17); no `refs/spice/data` line in it → not enriched with **no program
    * run** (plan §7.6: on an uninitialised repository `gs log` would try to initialise it and,
    * under `--no-prompt`, die at the trunk prompt — exit 1, nothing written, verified 0.31.2;
@@ -300,10 +301,10 @@ export class GitSpiceBackend implements StackBackend {
    */
   // see primer §46 (a cache: a hit is `remembered.digest === digest`, set on success only)
   async enrich(state: RepoState): Promise<RepoState> {
-    if (state.trunk === null || state.layers.length === 0) {
-      // Nothing to ask. The second half of this test goes in item 23d: the M6 views draw every
-      // stack and need the answer when HEAD is on trunk too, which is 23d's pipeline, Output line
-      // and ext fixtures to change (D68).
+    if (state.trunk === null) {
+      // Nothing to ask: without a trunk nothing was computed (E4). No layers is not that case — HEAD
+      // on trunk still has every other stack's lines to fetch for the views (item 23d; until then
+      // this test read `|| state.layers.length === 0`, D68).
       return state;
     }
     const digest = await readRefDigest(this.git, state.root);

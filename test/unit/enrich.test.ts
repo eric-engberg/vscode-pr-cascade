@@ -290,22 +290,30 @@ describe('GitSpiceBackend.enrich', () => {
     });
   });
 
-  describe('nothing to ask (E4, E5)', () => {
-    it('hands the same object back, runs nothing and adds no `enrichment` when there are no layers', async () => {
-      // arrange
+  describe('no layers — HEAD on trunk (E5)', () => {
+    it("runs the digest, the banner and `gs log` all the same, so the other stacks' lines reach the view model: the whole answer by name, and no layer to put a line on (item 23d, D68)", async () => {
+      // arrange: HEAD on trunk, as computeStack reports it — nothing under HEAD, every other stack
+      // still in the repository
       const { backend, git, commands } = fakes();
       const state: RepoState = { ...threeLayers(), head: 'main', layers: [] };
 
       // act
       const result = await backend.enrich(state);
 
-      // assert
-      expect(result).toBe(state);
-      expect('enrichment' in result).toBe(false);
-      expect(git.calls).toStrictEqual([]);
-      expect(commands.calls).toStrictEqual([]);
+      // assert: a new object carrying the answer; the three commands as for a stack (the second
+      // case above pins their argv in full)
+      expect(result).not.toBe(state);
+      expect(result.layers).toStrictEqual([]);
+      expect(result.enrichment).toStrictEqual(ENRICHED);
+      expect(git.calls).toStrictEqual([{ args: [...DIGEST_ARGS], cwd: ROOT }]);
+      expect(commands.calls.map((call) => call.args)).toStrictEqual([
+        ['--no-prompt', '--version'],
+        ['--no-prompt', 'log', 'short', '--all', '--json'],
+      ]);
     });
+  });
 
+  describe('nothing to ask (E4)', () => {
     it('hands the same object back and runs nothing when no trunk was found — whatever the layers say', async () => {
       // arrange: computeStack never pairs `trunk: null` with layers; the check is on the trunk alone
       const { backend, git, commands } = fakes();

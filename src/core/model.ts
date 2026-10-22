@@ -251,9 +251,9 @@ export interface RepoState {
   layers: StackLayer[];
   /**
    * Whether and how `enrich` ran for this repository (item 20a); absent when it was not asked
-   * — no trunk, or no layers until item 23d, whose views draw the other stacks and need their
-   * lines when HEAD is on trunk — and never assigned `undefined`, so a state `enrich` did not
-   * touch is the same shape computeStack built.
+   * — no trunk; a trunk with no layers is asked since item 23d, whose views draw the other
+   * stacks and need their lines when HEAD is on trunk — and never assigned `undefined`, so a
+   * state `enrich` did not touch is the same shape computeStack built.
    */
   enrichment?: Enrichment;
 }
