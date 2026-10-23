@@ -7,11 +7,17 @@
  * tsconfig.webview.json as the compiler's half.
  *
  * The rules around the messages are the host's (item 23d), written here so both sides read them
- * in one place: every model the host posts carries a rising `seq`, and a message from a view whose
- * `seq` is older than the last model's is dropped — a click on a row that no longer exists; a
- * `command` must start with `prCascade.` (the type says so for what a view sends; the host checks
- * the text it receives, which is data) and is run as the registered command with its string
- * arguments, nothing else the view sends is evaluated; for every command that acts in a
+ * in one place: every model the host builds carries a `seq` one above the last, and a message from
+ * a view whose `seq` is older than the last model's is dropped — a click on a row that no longer
+ * exists; a `seq` ahead of the last model's, or one that is not a non-negative integer, is rejected
+ * — a view only ever holds a `seq` the host posted (src/webview/host.ts; item 23d,
+ * src/vscode/views/route.ts); a `command` is `prCascade.` followed by letters, digits, `_`, `.` or
+ * `-` (the type says `prCascade.${string}` for what a view sends; the host checks the received
+ * text, which is data, more strictly, because it echoes the id into its Output line and a
+ * notification) and is run as the registered command with its string arguments, nothing else the
+ * view sends is evaluated; a command VS Code refuses or that throws is logged and shown as an error
+ * notification — parity with a tree row's click and the palette, where VS Code shows the rejection
+ * (E17; item 23d, src/vscode/views/base.ts `handleMessage`, D70); for every command that acts in a
  * repository the first argument is the repository root (`StackViewModel.repo`) and the second the
  * branch or ref (a layer or trunk row's `name`); the host keeps the last `repos` it posted so a `webview/context`
  * command can look its row up by `repo` and `layer`; a hidden view gets the current model when it
@@ -23,9 +29,11 @@
  * Layer: webview (plan §4.1: no `vscode`, no Node built-ins; types from core only). Depends on:
  * core/viewmodel.ts (`StackViewModel`, a type). Depended on by: src/webview/host.ts (item 23c, the three
  * message types) and src/webview/smartlog/render.ts (item 23c's plain-text rows, rewritten in place by
- * 23e), src/vscode/views/base.ts (item 23d), the graph renderer (item 23i), test/webview/host.test.ts,
+ * 23e), src/vscode/views/base.ts (`ModelMessage`), src/vscode/views/route.ts (`CommandId` — the host
+ * half of these rules as code), src/vscode/tree.ts (`HostNotice`, until 23j) and src/extension.ts
+ * (`HostNotice`, `ModelMessage`) — all item 23d — the graph renderer (item 23i), test/webview/host.test.ts,
  * test/webview/helpers/models.ts. Plan: §4.1, §4.2, §7.1.3, §7.2.1 (drag and drop), §7.14.3
- * (the host's notices), §8 E17/E77/E79/E81/E82, §10.1 item 23b (M6), §13.2 D68. Pending item 5
+ * (the host's notices), §8 E17/E77/E79/E81/E82, §10.1 items 23b and 23d (M6), §13.2 D68, D70. Pending item 5
  * (several repositories in one window) decides how `repos` and `activeRepo` are shown; this file
  * only carries them.
  */
@@ -55,7 +63,10 @@ export interface HostNotice {
  * Host → view, on every refresh and whenever the view becomes visible: one model per repository
  * in workspace order (one element for one repository; pending item 5's arrangement for several),
  * which repository is active — the one the host wants shown or expanded (the active editor's,
- * item 5) — or `null` when none is, and the notices for what has no model. `seq` rises by one per post.
+ * item 5) — or `null` when none is, and the notices for what has no model. `seq` rises by one per
+ * model the host builds — one load, one number, stamped in src/extension.ts's `onDidLoadStates`
+ * listener — not per post: the post on a show (and the first, at resolve) carries the current model
+ * with its `seq` unchanged, and E81's one object reaches both views with one `seq`.
  */
 // see primer §14 (readonly arrays)
 export interface ModelMessage {

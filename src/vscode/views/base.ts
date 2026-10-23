@@ -7,17 +7,6 @@
  * posts goes through `routeViewMessage` to the registered command (E79). It owns no load and spawns
  * nothing: src/extension.ts hands it the model, stamped with its `seq`, and three functions.
  *
- * Four facts of VS Code's webview views this file is written against, at 1.85.0 (the floor):
- * `resolveWebviewView` runs once per pane — hide and show only tear the page down and rebuild it
- * with the same html — and again only after the view was disposed (the user unchecked it), with a
- * new `WebviewView`; a `WebviewView` is visible from construction and no visibility event follows
- * the first show, so the first post is made here, in the resolve; a post into a page still loading
- * is queued and arrives, but its `Thenable<boolean>` never settles at 1.85.0 (`webviewElement.ts`,
- * the flush does not resolve the queued promises; newer VS Code does) — so nothing in src awaits
- * it, and `onDidPost` hands it to the tests, which await it with a deadline; `postMessage` resolves
- * `false` while the view is hidden, which is why nothing is posted then and the current model is
- * posted on the show instead.
- *
  * Layer: vscode adapter (plan §4.1). Depends on: the `vscode` module, src/webview/protocol.ts
  * (`ModelMessage`, a type), vscode/views/route.ts, vscode/views/shell.ts. Depended on by:
  * src/extension.ts (one instance per view, registered under its spec's id; the smartlog's is
@@ -60,8 +49,9 @@ export interface ViewHost {
 /**
  * One `postMessage` call, as `onDidPost` reports it: the model, and VS Code's answer — `true`
  * when the message reached the page, `false` while the view is hidden — which at 1.85.0 never
- * settles for a post queued behind a page still loading (the header says why), so nobody in src
- * awaits it: the tests do, with a deadline.
+ * settles for a post queued behind a page still loading (`webviewElement.ts` at 1.85.0: the flush
+ * does not resolve the queued promises; newer VS Code does), so nobody in src awaits it: the tests
+ * do, with a deadline.
  */
 export interface Delivery {
   readonly message: ModelMessage;
@@ -94,7 +84,7 @@ export class StackWebviewProvider implements vscode.WebviewViewProvider, vscode.
   /** Fires when `visible` changes: at resolve (no view → a view, visible from construction), on the view's own event, on dispose. */
   readonly onDidChangeVisibility: vscode.Event<void>;
 
-  /** How many times VS Code resolved a view here: 1 across hide and show, 2 after the user unchecked the view and showed it again. */
+  /** How many times VS Code resolved a view here: 1 across hide and show, 2 after the user unchecked the view and showed it again — a new `WebviewView`, and a new nonce, on that next resolve. */
   resolves = 0;
 
   /** The model built last, posted on resolve and on every show; `undefined` until the first load. */
@@ -221,7 +211,7 @@ export class StackWebviewProvider implements vscode.WebviewViewProvider, vscode.
 
   /**
    * One post, when there is a view showing and a model to post: `postMessage`'s answer is handed
-   * to `onDidPost` and never awaited here (the header says why). Nothing while hidden — VS Code
+   * to `onDidPost` and never awaited here (`Delivery` says why). Nothing while hidden — VS Code
    * would answer `false` and drop it — the show posts instead.
    */
   private deliver(): void {

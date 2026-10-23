@@ -27,11 +27,11 @@ import { layer, message, model, trunk } from '../webview/helpers/models';
 
 /**
  * What the page reports back, in the order the probe collects it: the API's shape and the second
- * acquire; the origin of the host's posts; which models arrived; the rows the real bundle drew;
- * the bootstrap's own styling under our policy; the codicon font; every policy violation the page
- * saw.
+ * acquire; the origin of the host's posts; which models arrived, and the rows the real bundle had
+ * drawn right after each; the rows at the end; the bootstrap's own styling under our policy; the
+ * codicon font; every policy violation the page saw.
  */
-// see primer §9 (interface) and §14 (readonly arrays)
+// see primer §9 (interface) and §14 (readonly arrays — an array of arrays for `drawn`)
 interface Facts {
   readonly type: 'facts';
   readonly secondAcquire: string;
@@ -39,6 +39,7 @@ interface Facts {
   readonly frozen: boolean;
   readonly originSame: boolean | null;
   readonly modelsSeen: readonly number[];
+  readonly drawn: readonly (readonly string[])[];
   readonly bodyLines: readonly string[];
   readonly fontFamily: string;
   readonly themeClass: string;
@@ -69,18 +70,24 @@ try {
 }
 globalThis.acquireVsCodeApi = () => api;
 const modelsSeen = [];
+const drawn = [];
 let originSame = null;
+const lines = () => Array.from(document.body.children)
+  .filter((element) => element.tagName === 'DIV')
+  .map((element) => element.textContent);
 window.addEventListener('message', (event) => {
   const data = event.data;
   if (data && data.type === 'model') {
     modelsSeen.push(data.seq);
     originSame = event.origin === globalThis.location.origin;
+    // a timeout, not a microtask: the bundle's listener, registered after this one, runs later in
+    // the same dispatch and draws synchronously (render.ts), and a 0 ms timer fires after the whole
+    // dispatch — so this reads what the bundle drew for this very model
+    setTimeout(() => drawn.push(lines()), 0);
   }
   if (data && data.type === 'facts?') {
     setTimeout(async () => {
-      const bodyLines = Array.from(document.body.children)
-        .filter((element) => element.tagName === 'DIV')
-        .map((element) => element.textContent);
+      const bodyLines = lines();
       const fontFamily = getComputedStyle(document.body).fontFamily;
       const themeClass = document.body.className;
       let codicon;
@@ -89,7 +96,7 @@ window.addEventListener('message', (event) => {
       } catch (error) {
         codicon = ['rejected: ' + error.message];
       }
-      api.postMessage({ type: 'facts', secondAcquire, members, frozen, originSame, modelsSeen, bodyLines, fontFamily, themeClass, codicon, violations });
+      api.postMessage({ type: 'facts', secondAcquire, members, frozen, originSame, modelsSeen, drawn, bodyLines, fontFamily, themeClass, codicon, violations });
     }, 0);
   }
 });
@@ -103,7 +110,9 @@ window.addEventListener('load', () => api.postMessage({ type: 'probe-ready' }));
 const FIRST = message([model([layer('retry-metrics', { node: 'filled' }), trunk])], { seq: 1 });
 const SECOND = message([model([layer('retry-metrics', { node: 'filled' }), layer('add-retries'), trunk])], { seq: 2 });
 
-/** What render.ts prints for SECOND's three rows: the node glyph, the name, no indicator, the age. */
+/** What render.ts prints for FIRST's two rows: the node glyph (filled for HEAD's layer, hollow for trunk), the name, no indicator, the age. */
+const FIRST_LINES = ['● retry-metrics 3m', '○ origin/main 26h'];
+/** The same for SECOND's three rows. */
 const SECOND_LINES = ['● retry-metrics 3m', '○ add-retries 3m', '○ origin/main 26h'];
 
 /**
@@ -169,7 +178,7 @@ describe('the webview page inside the real VS Code — facts the smartlog relies
     assert.strictEqual(html.split('<script').length - 1, 2, 'the probe and the bundle');
 
     // The page's two answers, armed before the html is set so neither can be missed.
-    // see primer §15 (new Promise: resolve kept for later) and §51 (the shape of a value the page sent)
+    // see primer §15 (new Promise: resolve kept for later), §51 (the shape of a value the page sent) and §50 (`as Facts`: an assertion that checks nothing past the `type` the `in` check saw — every field is asserted on below)
     let probeReady: () => void = () => undefined;
     let factsArrived: (facts: Facts) => void = () => undefined;
     const ready = new Promise<void>((resolve) => {
@@ -228,10 +237,16 @@ describe('the webview page inside the real VS Code — facts the smartlog relies
     assert.match(report.themeClass, /vscode-(light|dark|high-contrast)/);
   });
 
-  it('draws the model posted right after the html was set — queued while the page loaded, then delivered — and the second one, with the real bundle: one line per row of the last model, the first naming retry-metrics', () => {
-    // assert: both arrived, in order; the lines are the second model's rows and nothing else (its
-    // notices and messages are empty literals)
+  it('draws the model posted right after the html was set — queued while the page loaded, then delivered — and the second one, with the real bundle: one line per row after each, the first naming retry-metrics', () => {
+    // assert: both arrived, in order, and both were drawn — the queued one by a bundle whose
+    // listener was already attached when the bootstrap relayed it (the content frame's load, or
+    // its 200 ms timer, whichever comes first), then replaced by the second; the lines at the end
+    // are the second model's rows and nothing else (the literals' notices and messages are empty).
+    // `drawn[0]` equal to `[]` would mean the bootstrap flushed the queued post before smartlog.js
+    // had run — base.ts's resolve-time post lost on a slow bundle load, a product finding (the view
+    // would need a page-side ready handshake), not a flaky test.
     assert.deepStrictEqual(report.modelsSeen, [1, 2]);
+    assert.deepStrictEqual(report.drawn, [FIRST_LINES, SECOND_LINES]);
     assert.deepStrictEqual(report.bodyLines, SECOND_LINES);
   });
 

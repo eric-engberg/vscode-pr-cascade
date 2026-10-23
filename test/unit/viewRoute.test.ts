@@ -1,7 +1,8 @@
 /**
  * test/unit/viewRoute.test.ts — E79's host half as a specification: what the host does with each
  * message a view could post, clause by clause from src/webview/protocol.ts's header — run the
- * command at the current `seq`; drop one for an older model; refuse an id outside `prCascade.`, an
+ * command at the current `seq`; drop one for an older model; refuse an id that is not `prCascade.`
+ * plus letters, digits, `_`, `.` or `-` (link markup, a line break, the bare prefix), an
  * argument that is not a string, a `seq` no view could hold; ignore everything that is not a
  * `command` (a `moveOnto` until 23h). The `why` of every refusal is pinned too: it is the Output line.
  *
@@ -61,6 +62,24 @@ describe("routeViewMessage — the host half of E79 (protocol.ts's header, claus
       message: { ...COMMAND, command: 'workbench.action.closeAllEditors' },
       kind: 'rejected',
       why: 'rejected a command id that is not ours: "workbench.action.closeAllEditors"',
+    },
+    {
+      name: 'an id that starts with prCascade. but carries link markup is rejected — the id is echoed into a notification, where VS Code makes [label](command:…) clickable',
+      message: { ...COMMAND, command: 'prCascade.x [Fix it](command:workbench.action.closeWindow)' },
+      kind: 'rejected',
+      why: 'rejected a command id that is not ours: "prCascade.x [Fix it](command:workbench.action.closeWindow)"',
+    },
+    {
+      name: 'an id with a line break is rejected — it would forge an Output line',
+      message: { ...COMMAND, command: 'prCascade.x\nforged' },
+      kind: 'rejected',
+      why: 'rejected a command id that is not ours: "prCascade.x\\nforged"',
+    },
+    {
+      name: 'the bare prefix is rejected — prCascade. names no command',
+      message: { ...COMMAND, command: 'prCascade.' },
+      kind: 'rejected',
+      why: 'rejected a command id that is not ours: "prCascade."',
     },
     {
       name: 'a command id that is not a string is rejected, quoted as sent',

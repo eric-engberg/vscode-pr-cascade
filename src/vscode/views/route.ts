@@ -3,7 +3,8 @@
  * it names, or say why not — as a pure function of the message and the current model's `seq`, so
  * the rules src/webview/protocol.ts's header states are a unit test (`test/unit/viewRoute.test.ts`).
  * The checks, in order: is it one of our messages at all; is it a `command` (a `moveOnto` is 23h's
- * and is ignored until then); does the id start with `prCascade.`; are the arguments all strings;
+ * and is ignored until then); is the id `prCascade.` followed by letters, digits, `_`, `.` or `-`
+ * and nothing else; are the arguments all strings;
  * is the `seq` a number the host could have posted; is it the current model's — older is a click
  * on a row that is gone, newer is nothing a view can honestly hold. Nothing but those four fields is
  * read, and nothing the view sends is evaluated (plan §7.1.3: "the host evaluates nothing the view
@@ -32,6 +33,17 @@ export type Route =
   | { readonly kind: 'stale'; readonly why: string }
   | { readonly kind: 'rejected'; readonly why: string }
   | { readonly kind: 'ignored'; readonly why: string };
+
+/**
+ * Our command ids, stricter than protocol.ts's `CommandId` on purpose: `prCascade.` followed by
+ * letters, digits, `_`, `.` or `-`, and nothing else. The id is executed as received, echoed into
+ * the Output line and, when VS Code refuses it, into an error notification — where VS Code turns
+ * `[label](command:…)` into a link that runs any command on one click — so no space, bracket,
+ * parenthesis or line break may pass. Every id of ours fits (`package.json`'s five, VS Code's
+ * `prCascade.smartlog.focus`).
+ */
+// see primer §20 (a regular expression literal, anchored `^…$`; `.test`)
+const COMMAND_ID = /^prCascade\.[\w.-]+$/;
 
 /**
  * The decision for `message`, against `currentSeq` — the `seq` of the model the host built last
@@ -69,10 +81,10 @@ export function routeViewMessage(message: unknown, currentSeq: number): Route {
   return { kind: 'run', command, args: [...args] };
 }
 
-/** Is this one of our command ids — a string starting with `prCascade.`? The check protocol.ts's `CommandId` type makes at compile time, made again on the received text, which is data (E79). */
+/** Is this one of our command ids — `COMMAND_ID`'s shape? The check protocol.ts's `CommandId` type makes at compile time, made again and more strictly on the received text, which is data (E79). */
 // see primer §86 (a type predicate: `value is CommandId`) and §17 (narrowing with typeof)
 function isCommandId(value: unknown): value is CommandId {
-  return typeof value === 'string' && value.startsWith('prCascade.');
+  return typeof value === 'string' && COMMAND_ID.test(value);
 }
 
 /** Is this an array of strings — the only shape a command's arguments may take (protocol.ts)? */

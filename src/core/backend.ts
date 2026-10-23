@@ -197,10 +197,11 @@ export interface StackBackend {
    * `tracking` and whose `enrichment` says how it went — and, since M6 item 23b, carries the
    * whole answer for every stack: `byName` (every line by branch name, the trunk's among them),
    * `complete` and the digest's `remoteBranches` (core/model.ts says what each is for); the
-   * input is never changed. The state itself comes back when there is no trunk or no layer
-   * (nothing to ask — the second case until item 23d, whose views need the other stacks' lines
-   * when HEAD is on trunk). Runs git-spice only
-   * when the repository is initialised — never `gs log` on one that is not: it would try to
+   * input is never changed. The state itself comes back only when there is no trunk (E4: nothing
+   * to measure against, so nothing to ask); a trunk with no layer under HEAD (E5) is asked all the
+   * same since M6 item 23d — the views draw every stack and need the other stacks' lines when HEAD
+   * is on trunk (D68, D70). Runs git-spice only when the repository is initialised — never `gs log`
+   * on one that is not: it would try to
    * initialise it and, under `--no-prompt`, die at the trunk prompt (exit 1, verified 0.31.2;
    * plan §7.6) — and only when a ref under `refs/heads`, `refs/remotes` or `refs/spice` has
    * moved since the last answer for this root (§7.14.2's digest). A layer a complete answer

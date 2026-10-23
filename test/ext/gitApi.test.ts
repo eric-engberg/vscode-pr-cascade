@@ -507,7 +507,8 @@ describe('the built-in Git extension as the source of repositories (plan §7.14)
     it('counts each path once across the three lists: a file both staged and modified once, a rename once by its new name, an untracked file once, a conflict once — four paths, four', () => {
       // arrange: the shapes the Git extension lists — a staged-and-modified file sits in two lists,
       // a rename is one entry whose `uri` is the new name, an untracked file is in the working-tree
-      // list, a conflict in the merge list
+      // list, a conflict in the merge list only (`updateModelState` returns after the merge push),
+      // so the merge list is pinned: drop it from the count and this reads 3
       const stagedAndModified = { uri: vscode.Uri.file('/w/src/a.ts') };
       const renamed = { uri: vscode.Uri.file('/w/src/new-name.ts') };
       const untracked = { uri: vscode.Uri.file('/w/notes.md') };
@@ -517,7 +518,7 @@ describe('the built-in Git extension as the source of repositories (plan §7.14)
       const count = workingTreeFileCount({
         mergeChanges: [conflict],
         indexChanges: [stagedAndModified, renamed],
-        workingTreeChanges: [stagedAndModified, untracked, conflict],
+        workingTreeChanges: [stagedAndModified, untracked],
       });
 
       // assert

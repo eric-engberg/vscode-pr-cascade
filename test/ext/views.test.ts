@@ -2,7 +2,7 @@
  * test/ext/views.test.ts — the smartlog webview view (M6 item 23d) inside a real VS Code, two
  * ways. First `StackWebviewProvider` over stand-in views (the ext/gitApi pattern — the module
  * imported directly, VS Code's `EventEmitter` and `Uri` real, the view faked): the shell on
- * resolve with options before html and a fresh nonce; the three fires of its own visibility event;
+ * resolve with options before html and a fresh nonce; the three places its own visibility event fires;
  * the current model posted on resolve, each model while showing, nothing while hidden and the same
  * object again on show (E79); one model object to two views (E81); a view's message through the
  * wiring to the registered command, every refusal logged and run nothing, a refused command
@@ -11,13 +11,15 @@
  * it; the real shell in the real view; the fixture's rows top-first in the model; `seq` up by one
  * per refresh with the post delivered; nothing posted while hidden and the current model again on
  * show; a view's message to a command the test registers, the stale and foreign ones refused, an
- * unregistered id reported with VS Code's own words and one error notification.
+ * unregistered id reported with VS Code's own words and one error notification; a failed load drawn
+ * as its one notice (E17).
  *
  * Layer: test, extension host (plan §9.1 layer 3; Mocha inside VS Code, `npm run test:ext`).
  * Depends on: the running extension (what activate() returns in test mode — `smartlog`,
  * `provider`, `refresh`, `readinessDeps`), src/vscode/views/base.ts, src/vscode/views/shell.ts
- * and src/vscode/views/smartlog.ts imported directly, src/webview/protocol.ts (`ModelMessage`, a
- * type), test/helpers/fakeReadinessHost.ts, the fixture workspace. Depended on by: nothing. Plan:
+ * and src/vscode/views/smartlog.ts imported directly, src/vscode/contextKeys.ts (the key the
+ * manifest's `when` must spell), src/webview/protocol.ts (`ModelMessage`, a type),
+ * test/helpers/fakeReadinessHost.ts, the fixture workspace. Depended on by: nothing. Plan:
  * §7.1.1, §7.1.3 "Protocol" and "Security", §7.11, §8 E17/E79/E81/E82, §9.1 layer 3, §9.4
  * `ext/views`, §10.1 item 23d (M6), §13.2 D70.
  */
@@ -29,6 +31,7 @@ import { before, describe, it } from 'mocha';
 import * as vscode from 'vscode';
 import type { ViewRow } from '../../src/core/viewmodel';
 import type { ExtensionApi, ReadinessDeps } from '../../src/extension';
+import { HAS_UNTRACKED_KEY } from '../../src/vscode/contextKeys';
 import type { StackTreeProvider } from '../../src/vscode/tree';
 import { StackWebviewProvider } from '../../src/vscode/views/base';
 import type { Delivery, Handled, ViewHost } from '../../src/vscode/views/base';
@@ -116,7 +119,7 @@ interface ViewsManifest {
 }
 
 /** A model with `seq` and nothing in it: the provider reads `seq` and passes the rest on untouched. */
-// see primer §16 (object literals: spread — the overrides last)
+// see primer §49 (`Partial`: every field optional) and §16 (spread: the given keys last, so they win)
 function model(seq: number, over: Partial<ModelMessage> = {}): ModelMessage {
   return { type: 'model', seq, repos: [], activeRepo: null, notices: [], ...over };
 }
@@ -287,20 +290,23 @@ describe('the smartlog webview view (plan §7.1.1, §7.1.3, E79, E81)', () => {
       );
     });
 
-    it('uses a fresh nonce for every resolve — two views, two nonces', () => {
+    it('uses a fresh nonce for every resolve — one provider, a view disposed and a new one resolved, two nonces', () => {
       // arrange
       const first = fakeWebviewView();
       const second = fakeWebviewView();
+      const subject = provider();
 
-      // act
-      provider().resolveWebviewView(first.view);
-      provider().resolveWebviewView(second.view);
+      // act: the pane's first life, its end (the user unchecked the view), and a second life
+      subject.resolveWebviewView(first.view);
+      first.dispose();
+      subject.resolveWebviewView(second.view);
 
-      // assert
+      // assert: the html each view was given carries its own nonce — a nonce cached on the
+      // provider would make these equal
       assert.notStrictEqual(nonceOf(first.html), nonceOf(second.html));
     });
 
-    it('reports its visibility as changed three times: when a view is resolved (VS Code constructs it visible and sends no event for the first show), when the view says so, and when the view is disposed', () => {
+    it('reports its visibility as changed in three places: when a view is resolved (VS Code constructs it visible and sends no event for the first show), when the view says so, and when the view is disposed', () => {
       // arrange
       const fake = fakeWebviewView();
       const subject = provider();
@@ -349,6 +355,7 @@ describe('the smartlog webview view (plan §7.1.1, §7.1.3, E79, E81)', () => {
       subject.update(model(8));
 
       // assert: what the page got, and what onDidPost reported, agree
+      // see primer §50 (`as`: a type assertion — `posted` is `unknown`, and the compiler checks nothing; the test compares the value)
       assert.deepStrictEqual(
         fake.posted.map((posted) => (posted as ModelMessage).seq),
         [7, 8],
@@ -561,9 +568,20 @@ describe('the smartlog webview view (plan §7.1.1, §7.1.3, E79, E81)', () => {
       assert.deepStrictEqual(manifest.contributes.views.explorer, [
         { type: 'webview', id: SMARTLOG_VIEW.id, name: 'Stack', icon: '$(layers)', contextualTitle: 'PR Cascade', visibility: 'visible' },
       ]);
-      for (const command of ['prCascade.refresh', 'prCascade.pushStack', 'prCascade.trackStack']) {
+      // … and every title-bar entry's `when` word for word — exact, never `includes`: `view ==
+      // prCascade` is a prefix of `view == prCascade.smartlog`, so a substring check for the tree's
+      // half would pass on an entry that names the smartlog alone; the key from the module the
+      // listener writes through, as commands.test.ts spells it
+      // see primer §43 (`Record<K, V>`) and §22 (for ... of over `Object.entries`)
+      const bothViews = `view == prCascade || view == ${SMARTLOG_VIEW.id}`;
+      const whens: Record<string, string> = {
+        'prCascade.refresh': bothViews,
+        'prCascade.pushStack': bothViews,
+        'prCascade.trackStack': `(${bothViews}) && ${HAS_UNTRACKED_KEY}`,
+      };
+      for (const [command, when] of Object.entries(whens)) {
         const entry = manifest.contributes.menus['view/title'].find((candidate) => candidate.command === command);
-        assert.ok(entry?.when?.includes(`view == ${SMARTLOG_VIEW.id}`), `${command}'s view/title entry does not name the smartlog: ${entry?.when}`);
+        assert.strictEqual(entry?.when, when, `${command}'s view/title when`);
       }
     });
 
@@ -716,6 +734,43 @@ describe('the smartlog webview view (plan §7.1.1, §7.1.3, E79, E81)', () => {
       } finally {
         deps.host = realHost;
         registration.dispose();
+      }
+    });
+
+    it("draws a failed load as its one notice — no repository, no active repository, git's own words as a repositoryError in the repository git ran in — with seq up by one (E17)", async () => {
+      // arrange: the unrunnable git of ext/tree's E17 cases; settings are read afresh per load, and
+      // no listener of ours starts a load on a settings change, so the next load is refresh()'s own
+      const configuration = vscode.workspace.getConfiguration('prCascade');
+      await configuration.update('gitPath', '/nowhere/git', vscode.ConfigurationTarget.Workspace);
+      try {
+        const seqBefore = smartlog.current?.seq ?? 0;
+        const loaded = nextEvent(treeProvider.onDidLoadStates, 10_000);
+
+        // act
+        refresh();
+        await loaded;
+
+        // assert: the whole message — the tree's notice is the smartlog's, and nothing else is drawn
+        assert.deepStrictEqual(smartlog.current, {
+          type: 'model',
+          seq: seqBefore + 1,
+          repos: [],
+          activeRepo: null,
+          notices: [
+            {
+              kind: 'repositoryError',
+              repo: repositoryRoot(),
+              text: 'git not found at /nowhere/git (while running: git symbolic-ref --quiet --short refs/remotes/origin/HEAD)',
+              severity: 'error',
+            },
+          ],
+        });
+      } finally {
+        await configuration.update('gitPath', undefined, vscode.ConfigurationTarget.Workspace);
+        // A good model again for whoever runs next, the listener armed first.
+        const restored = nextEvent(treeProvider.onDidLoadStates, 10_000);
+        refresh();
+        await restored;
       }
     });
   });

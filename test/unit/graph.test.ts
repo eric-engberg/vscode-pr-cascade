@@ -2,7 +2,7 @@
  * test/unit/graph.test.ts — core/graph.ts as a specification: the three git commands spelled and
  * their texts handed back as they are, the three parsers, plan E78 — every stack in the
  * repository laid out in lanes — as a table of shapes against hand-written texts, and (item 23d)
- * the trunk row's two `rev-list --count`s: their argv, the two spawns saved, and git's "no" as 0.
+ * the trunk row's two `rev-list --count`s: their argv, the two spawns saved, git's "no" as 0, and E17 let through.
  *
  * Layer: test, unit (plan §9.1 layer 1; Vitest, no git, no VS Code). Depends on:
  * src/core/graph.ts, test/helpers/fakeGit.ts (for readGraphInput's three commands, E17 and
@@ -216,7 +216,7 @@ describe("readBehindTrunk — the trunk row's two counts (plan §7.1.1 `↓n · 
     expect(git.calls).toStrictEqual([{ args: ['rev-list', '--count', 'main', '^HEAD'], cwd: ROOT }]);
   });
 
-  it("answers 0 when git says no — an unborn HEAD's `bad revision '^HEAD'` is an answer (tryRun's null), not a failed load; a git that cannot run still rejects (E17, core/git.ts)", async () => {
+  it("answers 0 when git says no — an unborn HEAD's `bad revision '^HEAD'` is an answer (tryRun's null), not a failed load", async () => {
     // arrange: the fake's Error means "git ran and exited non-zero", which tryRun turns into null
     const git = new FakeGitRunner(
       new Map<string, string | Error>([
@@ -230,6 +230,19 @@ describe("readBehindTrunk — the trunk row's two counts (plan §7.1.1 `↓n · 
 
     // assert
     expect(behind).toStrictEqual({ origin: 0, local: 2 });
+  });
+
+  it('lets a rejection tryRun does not swallow through unchanged — a git that cannot run (E17) is a failed load, never a 0', async () => {
+    // arrange: nothing is canned, so the fake throws from tryRun — the way the real runner does
+    // when git is missing (test/git/git.git.test.ts): a throw, never a null
+    const git = new FakeGitRunner(new Map());
+
+    // act
+    const result = readBehindTrunk(git, ROOT, TRUNK, 'main');
+
+    // assert: no catch in countBehind; the first spawn is the one that fails
+    await expect(result).rejects.toThrow('no canned output');
+    expect(git.calls.length).toBe(1);
   });
 });
 

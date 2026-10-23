@@ -479,7 +479,7 @@ let lastSeq = 0;
  * found none — and the notices of the repositories whose picture could not be read. `activeRepo`
  * is `null` until 23e draws the repository headers (D70).
  */
-// see primer §30 (`??`: a load that built no pictures — a tree a test made with its own loader) and §16 (arrays: spread)
+// see primer §30 (`??`: the default the compiler asks for — `WeakMap.get` answers `ViewModels | undefined`, though `loadRepoStates` files the pictures under the array before returning it and the tree fires that very array, so a fired load always has its entry; this codebase does not write `!`) and §16 (arrays: spread)
 function modelMessage(seq: number, states: readonly RepoState[], failure: HostNotice | null): ModelMessage {
   if (failure !== null) {
     return { type: 'model', seq, repos: [], activeRepo: null, notices: [failure] };
@@ -605,7 +605,7 @@ function logEnrichment(output: vscode.OutputChannel, state: RepoState): void {
  * (`workingTreeFileCount` — 0 for a repository it closed between the roots and here, and before its
  * first status has run); the clock the caller read once. Five to seven read-only spawns, about
  * 100 ms, beside loadRepoState's. `showOnlyThisStack` is `false` until 23f brings §7.2.1's toggle;
- * `extras` is M7's gh tier, empty until core/prstatus.ts fills it (D70).
+ * `extras` is M7's gh tier, empty until core/prstatus.ts fills it (D68; §7.1.3 `ViewModelInput`).
  */
 // see primer §54 (destructuring), §10 (`GraphInput | null`), §48 (the conditional expression), §25 (arrays: `find`) and §16 (object literals: shorthand keys)
 async function loadRepoView(connected: ConnectedGit, state: RepoState, now: number): Promise<StackViewModel> {

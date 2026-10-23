@@ -74,7 +74,9 @@ export interface RepositoryChanges {
  * the three lists: a file both staged and modified sits in `indexChanges` and `workingTreeChanges`
  * and counts once; a rename is one entry whose `uri` is the new name (the Git extension's own
  * `Resource.resourceUri`, extensions/git/src/repository.ts at 1.85.0); a conflict is in the
- * merge list and the working-tree list and counts once; an untracked file is in
+ * merge list alone (`repository.ts` at 1.85.0: each conflict case of `updateModelState` returns to
+ * the merge group before the index and working-tree switches, and `api/api1.ts` hands the three
+ * groups out as the three lists), so the merge list is the one place it is counted; an untracked file is in
  * `workingTreeChanges` under `git.untrackedChanges: mixed`, the default, and in neither list
  * under `separate` or `hidden` — then it is not counted here, as the Source Control view does not
  * list it among the changes either. Before a repository's first `git status` has run the lists
