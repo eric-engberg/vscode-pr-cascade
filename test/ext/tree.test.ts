@@ -25,7 +25,7 @@ import { after, before, describe, it } from 'mocha';
 import * as vscode from 'vscode';
 import type { CommandResult } from '../../src/core/command';
 import type { ExtensionApi, ReadinessDeps } from '../../src/extension';
-import type { StackNode, StackTreeProvider } from '../../src/vscode/tree';
+import type { LoadResult, StackNode, StackTreeProvider } from '../../src/vscode/tree';
 import { exited, FakeCommandRunner, neverStarted } from '../helpers/fakeCommand';
 import { realGitApi } from './helpers/gitApi';
 
@@ -192,6 +192,25 @@ function nextTreeChange(deadlineMs: number): Promise<void> {
       clearTimeout(timer);
       subscription.dispose();
       resolve();
+    });
+  });
+}
+
+/**
+ * Resolves with the next `onDidLoadStates` payload — what a top-level load produced, the states
+ * and the failure (item 23d) — or rejects after `deadlineMs`. Set up before the load it waits for.
+ */
+// see primer §42 (waiting for an event with new Promise) and §58 (setTimeout and clearTimeout)
+function nextLoad(deadlineMs: number): Promise<LoadResult> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      subscription.dispose();
+      reject(new Error(`no onDidLoadStates within ${deadlineMs} ms`));
+    }, deadlineMs);
+    const subscription = provider.onDidLoadStates((result) => {
+      clearTimeout(timer);
+      subscription.dispose();
+      resolve(result);
     });
   });
 }
@@ -681,6 +700,32 @@ describe('the Stack view', () => {
         ]);
         assert.ok(items[0].iconPath instanceof vscode.ThemeIcon, 'expected a ThemeIcon');
         assert.strictEqual(items[0].iconPath.id, 'error');
+      } finally {
+        await configuration.update('gitPath', undefined, vscode.ConfigurationTarget.Workspace);
+      }
+    });
+
+    it("announces the failure on the states event too — the notice beside the empty list: git's own words, an error, the repository git ran in — so the smartlog draws what the tree draws (E17; item 23d)", async () => {
+      // arrange: the same unrunnable git as above, and the listener armed before the load
+      const configuration = vscode.workspace.getConfiguration('prCascade');
+      await configuration.update('gitPath', '/nowhere/git', vscode.ConfigurationTarget.Workspace);
+      try {
+        const loaded = nextLoad(5_000);
+
+        // act
+        await provider.getChildren();
+        const result = await loaded;
+
+        // assert: the whole payload — no states, and the one notice, classified for the view
+        assert.deepStrictEqual(result, {
+          states: [],
+          failure: {
+            kind: 'repositoryError',
+            repo: repositoryRoot(),
+            text: 'git not found at /nowhere/git (while running: git symbolic-ref --quiet --short refs/remotes/origin/HEAD)',
+            severity: 'error',
+          },
+        });
       } finally {
         await configuration.update('gitPath', undefined, vscode.ConfigurationTarget.Workspace);
       }

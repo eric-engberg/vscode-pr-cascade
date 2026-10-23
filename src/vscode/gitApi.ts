@@ -1,21 +1,24 @@
 /**
  * vscode/gitApi.ts — the extension's connection to VS Code's built-in Git extension: the
  * one place that asks it for its API, waits until it has found the repositories in the
- * window, and passes on the four things this extension takes from it (plan §7.14) — the
+ * window, and passes on the five things this extension takes from it (plan §7.14) — the
  * repository list, the "a repository opened / closed" events, each repository's "a git
- * status just completed" event (relayed as one signal, `onDidRunStatus`), and the git
- * executable it found. Everything else the extension knows about a repository still comes
- * from its own git commands (plan §5).
+ * status just completed" event (relayed as one signal, `onDidRunStatus`), the git
+ * executable it found and, since item 23d, each repository's three change lists (the
+ * working-tree row's number, `workingTreeFileCount`). Everything else the extension knows
+ * about a repository still comes from its own git commands (plan §5).
  *
  * Layer: vscode adapter (plan §4.1). Depends on: the `vscode` module, Node's `node:path`,
  * and vscode/git.d.ts — the Git extension's public types, copied verbatim from VS Code
  * 1.85 (the oldest VS Code this extension supports) so the compiler refuses anything a
  * newer Git extension added. Depended on by: src/extension.ts (one adapter per window,
- * handed the real host; roots and the git path read from it on every refresh, the status
- * signal debounced into the refresh), vscode/tree.ts (GitUnavailableError → a warning
- * row), test/ext/gitApi.test.ts, and the ext-test helper test/ext/helpers/gitApi.ts (so
- * test/ext/tree.test.ts's E20 and test/ext-parent/parentFolder.test.ts). Plan: §7.14, §6,
- * §7.3 `prCascade.gitPath`, §8 E20/E82, §10.1 items 12a and 12b.
+ * handed the real host; roots, the git path and the change lists read from it on every
+ * refresh, the status signal debounced into the refresh), vscode/tree.ts
+ * (GitUnavailableError → a warning row, and since item 23d its `reason` → the smartlog
+ * notice's kind), test/ext/gitApi.test.ts, and the ext-test helper test/ext/helpers/gitApi.ts
+ * (so test/ext/tree.test.ts's E20 and test/ext-parent/parentFolder.test.ts). Plan: §7.14, §6,
+ * §7.3 `prCascade.gitPath`, §7.14.2 (the change lists), §7.14.3, §8 E20/E82, §10.1 items 12a,
+ * 12b and 23d, §13.2 D70.
  */
 
 // see primer §1 (import / export), §2 (the vscode module) and §9 (`import type`); the
@@ -26,21 +29,68 @@
 // `const enum` — into a compile error instead of a bundle-time failure
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import type { API, GitExtension, Repository, RepositoryState } from './git';
+import type { API, Change, GitExtension, Repository, RepositoryState } from './git';
 
 /**
  * The part of a Git-extension `Repository` this extension reads: where it is (`rootUri`);
  * its "a git status just completed" event (`state.onDidChange`, plan §7.14.2 — it fires
  * after every completed run, changed or not, so it says "look again", never what changed);
- * and `status()`, which runs one now, without the Git extension's wait for window focus —
- * the tests' synchronisation point after a git command run outside VS Code (plan §9.1).
- * Nothing else of the fifty-odd members: the branch name, the change lists and the rest
- * stay this extension's own git's answers (plan §5, §7.14), and a stand-in for tests has
- * three things to provide.
+ * `status()`, which runs one now, without the Git extension's wait for window focus —
+ * the tests' synchronisation point after a git command run outside VS Code (plan §9.1);
+ * and, since item 23d, the three change lists of the last status (`state.mergeChanges`,
+ * `indexChanges`, `workingTreeChanges`) — read by `workingTreeFileCount` below for the
+ * working-tree row's number, never for a path's status. Nothing else of the fifty-odd
+ * members: the branch name and the rest stay this extension's own git's answers (plan §5,
+ * §7.14), and a stand-in for tests has six things to provide.
  */
 // see primer §49 (`Pick<T, K>`) and §9 (`extends` on an interface)
 export interface GitRepository extends Pick<Repository, 'rootUri' | 'status'> {
-  readonly state: Pick<RepositoryState, 'onDidChange'>;
+  readonly state: Pick<RepositoryState, 'onDidChange' | 'mergeChanges' | 'indexChanges' | 'workingTreeChanges'>;
+}
+
+/**
+ * The one field of a `Change` the count below reads. A stand-in is `{ uri }` and never names a
+ * `status`: its type is a `const enum`, which this file imports as a type only (the import
+ * comment above says why).
+ */
+// see primer §49 (`Pick<T, K>`)
+export type ChangePath = Pick<Change, 'uri'>;
+
+/**
+ * The three change lists a repository's `state` carries (plan §7.14.2), as the count reads them:
+ * a `RepositoryState` fits (its `Change[]` lists are these, with more on each entry), and so does
+ * a stand-in with three arrays of `{ uri }`.
+ */
+// see primer §9 (interface) and §14 (readonly arrays)
+export interface RepositoryChanges {
+  readonly mergeChanges: readonly ChangePath[];
+  readonly indexChanges: readonly ChangePath[];
+  readonly workingTreeChanges: readonly ChangePath[];
+}
+
+/**
+ * How many distinct paths the working tree changes — core/viewmodel.ts's `workingTreeFiles`, the
+ * working-tree row's `n files` (item 23d; `core/graph.ts` takes it as `dirty`). One `Set` over
+ * the three lists: a file both staged and modified sits in `indexChanges` and `workingTreeChanges`
+ * and counts once; a rename is one entry whose `uri` is the new name (the Git extension's own
+ * `Resource.resourceUri`, extensions/git/src/repository.ts at 1.85.0); a conflict is in the
+ * merge list alone (`repository.ts` at 1.85.0: each conflict case of `updateModelState` returns to
+ * the merge group before the index and working-tree switches, and `api/api1.ts` hands the three
+ * groups out as the three lists), so the merge list is the one place it is counted; an untracked file is in
+ * `workingTreeChanges` under `git.untrackedChanges: mixed`, the default, and in neither list
+ * under `separate` or `hidden` — then it is not counted here, as the Source Control view does not
+ * list it among the changes either. Before a repository's first `git status` has run the lists
+ * are empty and the answer is 0 (§7.14.2: `initialized` says nothing about that — accepted).
+ * `fsPath`, not `toString()`: one path, one string, no percent-encoding to reason about (E11's
+ * names).
+ */
+// see primer §21 (Set: one entry per distinct value, `size`), §22 (for ... of) and §16 (arrays: spread — the three lists walked as one)
+export function workingTreeFileCount(changes: RepositoryChanges): number {
+  const paths = new Set<string>();
+  for (const change of [...changes.mergeChanges, ...changes.indexChanges, ...changes.workingTreeChanges]) {
+    paths.add(change.uri.fsPath);
+  }
+  return paths.size;
 }
 
 /**
@@ -121,36 +171,57 @@ export const realGitExtensionHost: GitExtensionHost = {
 };
 
 /**
+ * Which of plan §7.14.3's four states the Git extension is in, when it cannot be used. Spelled
+ * as src/webview/protocol.ts spells `HostNotice.kind`, so the smartlog's notice is `{ kind:
+ * reason, … }` with no table in between (item 23d) — a union of its own rather than an import
+ * from the view protocol, because the adapter knows nothing of the views; the compiler checks
+ * that the two spellings agree where the notice is built (vscode/tree.ts, `loadFailureNotice`).
+ */
+// see primer §10 (union types: exact strings as members)
+export type GitUnavailableReason = 'gitExtensionDisabled' | 'gitExtensionFailed' | 'gitDisabled' | 'gitNotFound';
+
+/**
  * What the handshake ends in: the Git extension's API, ready to be read, or one sentence
- * saying why it is not — the row the view shows in place of the stack (E82). A union of
- * two object shapes told apart by their `kind` field (primer §59): code that holds a
- * GitConnection checks `kind` and the compiler then knows which other field exists.
+ * saying why it is not — the row the view shows in place of the stack (E82) — with the state
+ * it stands for. A union of two object shapes told apart by their `kind` field (primer §59):
+ * code that holds a GitConnection checks `kind` and the compiler then knows which other
+ * fields exist.
  */
 // see primer §59 (tagged unions: object shapes told apart by a `kind` field)
 export type GitConnection =
   | { readonly kind: 'ready'; readonly api: GitApi }
-  | { readonly kind: 'unavailable'; readonly message: string };
+  | { readonly kind: 'unavailable'; readonly reason: GitUnavailableReason; readonly message: string };
 
 /**
  * The error src/extension.ts throws from its loaders when the connection is unavailable,
  * so that the tree (vscode/tree.ts) can tell "the Git extension cannot be used" — a state
  * the user can change, drawn as a warning — from "a git command failed" (E17, an error).
- * The message is the E82 row text (plan §7.14.3).
+ * The message is the E82 row text (plan §7.14.3); `reason` the state behind it, which the
+ * smartlog's notice is keyed by (item 23d).
  */
-// see primer §13 (class, extends and constructor)
+// see primer §13 (class, extends and constructor) and §47 (a parameter property beside a plain parameter)
 export class GitUnavailableError extends Error {
-  constructor(message: string) {
+  constructor(
+    readonly reason: GitUnavailableReason,
+    message: string,
+  ) {
     super(message);
     this.name = 'GitUnavailableError';
   }
 }
 
-// The four E82 rows, word for word from plan §7.14.3. The tests assert these exact strings
-// without importing them — the text is the behaviour, so a wrong word must fail a test.
-const GIT_EXTENSION_DISABLED = 'PR Cascade needs the built-in Git extension — enable it in the Extensions view';
-const GIT_EXTENSION_FAILED = 'The Git extension failed to start — reload the window';
-const GIT_DISABLED_IN_SETTINGS = 'Git is disabled in this workspace (git.enabled)';
-const GIT_NOT_FOUND = 'The Git extension found no git — set git.path, then reload the window';
+/**
+ * The four E82 rows, word for word from plan §7.14.3, by state — the one place the texts live.
+ * The tests assert these exact strings without importing them: the text is the behaviour, so a
+ * wrong word must fail a test.
+ */
+// see primer §43 (`Record<K, V>`: one entry per member of the union, the compiler counting them)
+const UNAVAILABLE_TEXT: Readonly<Record<GitUnavailableReason, string>> = {
+  gitExtensionDisabled: 'PR Cascade needs the built-in Git extension — enable it in the Extensions view',
+  gitExtensionFailed: 'The Git extension failed to start — reload the window',
+  gitDisabled: 'Git is disabled in this workspace (git.enabled)',
+  gitNotFound: 'The Git extension found no git — set git.path, then reload the window',
+};
 
 /**
  * Which git the extension spawns (plan §7.3 `prCascade.gitPath`): the setting when the
@@ -466,7 +537,7 @@ export class GitExtensionAdapter implements vscode.Disposable {
     const handle = this.host.lookUp();
     if (handle === undefined) {
       // Row 1. Recovery is the extensions event the constructor subscribed to.
-      return this.unavailable(generation, GIT_EXTENSION_DISABLED);
+      return this.unavailable(generation, 'gitExtensionDisabled');
     }
 
     // see primer §4 (`let` with a type and no value yet: assigned inside the try, read after it)
@@ -479,7 +550,7 @@ export class GitExtensionAdapter implements vscode.Disposable {
       // Row 2: the Git extension rethrows anything but "git not found" out of its own
       // start-up, and VS Code then hands that rejection to whoever called activate().
       this.log(generation, `the Git extension failed to activate: ${describeError(error)}`);
-      return this.unavailable(generation, GIT_EXTENSION_FAILED);
+      return this.unavailable(generation, 'gitExtensionFailed');
     }
 
     if (extensionExports.enabled === false) {
@@ -499,9 +570,9 @@ export class GitExtensionAdapter implements vscode.Disposable {
         }),
       ]);
       if (this.host.isGitEnabledInSettings()) {
-        return this.unavailable(generation, GIT_NOT_FOUND);
+        return this.unavailable(generation, 'gitNotFound');
       }
-      return this.unavailable(generation, GIT_DISABLED_IN_SETTINGS);
+      return this.unavailable(generation, 'gitDisabled');
     }
 
     let api: GitApi;
@@ -511,7 +582,7 @@ export class GitExtensionAdapter implements vscode.Disposable {
       // `enabled` said yes and the API still would not come: after the one-tick retry
       // above there is nothing left to wait for, so this is row 2, not a retry loop.
       this.log(generation, `the Git extension refused to hand over its API: ${describeError(error)}`);
-      return this.unavailable(generation, GIT_EXTENSION_FAILED);
+      return this.unavailable(generation, 'gitExtensionFailed');
     }
 
     if (api.state !== 'initialized') {
@@ -537,10 +608,11 @@ export class GitExtensionAdapter implements vscode.Disposable {
     return { kind: 'ready', api };
   }
 
-  /** One E82 row: logged (unless this handshake is stale), and returned as the connection's outcome. */
-  private unavailable(generation: number, message: string): GitConnection {
+  /** One E82 row: its text looked up by state, logged (unless this handshake is stale), and returned as the connection's outcome with the state. */
+  private unavailable(generation: number, reason: GitUnavailableReason): GitConnection {
+    const message = UNAVAILABLE_TEXT[reason];
     this.log(generation, `Git extension unavailable: ${message}`);
-    return { kind: 'unavailable', message };
+    return { kind: 'unavailable', reason, message };
   }
 }
 

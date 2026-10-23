@@ -75,11 +75,19 @@ export function machineFacts(exists: (file: string) => boolean): MachineFacts {
   return { brewPath, brewGitSpice: beside('git-spice'), brewGh: beside('gh') };
 }
 
+/**
+ * The colour of a notification — VS Code's three message functions, picked by src/extension.ts.
+ * The flow's own sentences are `warning` or `information` (D57's rule); `error` is the smartlog's,
+ * for a command the view asked for that VS Code refused (item 23d, E17 parity).
+ */
+// see primer §10 (union types: exact strings as members)
+export type NotificationSeverity = 'warning' | 'information' | 'error';
+
 /** Everything the flow asks of VS Code, as one object: the real one in src/extension.ts, a test's from test/helpers/fakeReadinessHost.ts. */
 // see primer §73 (asking the user) and §72 (terminals)
 export interface ReadinessHost {
-  /** A notification — `showWarningMessage` or `showInformationMessage` with `buttons` — resolving to the label clicked, or `undefined` when it is closed. Awaited only when there are buttons. (`Thenable`: VS Code's promise-like type, primer §60.) */
-  prompt(severity: 'warning' | 'information', message: string, buttons: readonly string[]): Thenable<string | undefined>;
+  /** A notification — `showWarningMessage`, `showInformationMessage` or `showErrorMessage` with `buttons` — resolving to the label clicked, or `undefined` when it is closed. Awaited only when there are buttons. (`Thenable`: VS Code's promise-like type, primer §60.) */
+  prompt(severity: NotificationSeverity, message: string, buttons: readonly string[]): Thenable<string | undefined>;
   /** `showQuickPick` over `labels`: the one picked, or `undefined` for Escape. */
   pick(labels: readonly string[], placeHolder: string): Thenable<string | undefined>;
   /** `env.openExternal`: the page in the user's browser — `false` when it was not opened (VS Code asks first for a site it does not trust, and the user may say no). */

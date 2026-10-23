@@ -323,7 +323,8 @@ describe('Track Stack with git-spice (plan §7.2.1, E56, D60)', () => {
     const declared = manifest.contributes.commands.find((command) => command.command === 'prCascade.trackStack');
     assert.deepStrictEqual(declared, { command: 'prCascade.trackStack', title: 'Track Stack with git-spice', category: 'PR Cascade', enablement: `!${REBASE_IN_PROGRESS_KEY}` });
     const menuEntry = manifest.contributes.menus['view/title'].find((entry) => entry.command === 'prCascade.trackStack');
-    assert.deepStrictEqual(menuEntry, { command: 'prCascade.trackStack', when: `view == prCascade && ${HAS_UNTRACKED_KEY}`, group: '2_stack@8' });
+    // both views since item 23d — the tree's and the smartlog's title bars carry the same entries (plan §7.1.1)
+    assert.deepStrictEqual(menuEntry, { command: 'prCascade.trackStack', when: `(view == prCascade || view == prCascade.smartlog) && ${HAS_UNTRACKED_KEY}`, group: '2_stack@8' });
   });
 
   it('tracks every untracked layer bottom to top, on the trunk\'s local branch then each layer below, refreshes once and says how many (E56, E83)', async () => {
@@ -673,7 +674,7 @@ describe('Push Whole Stack (plan §7.2.1, E12, E76, E83, D62)', () => {
     const declared = manifest.contributes.commands.find((command) => command.command === 'prCascade.pushStack');
     assert.deepStrictEqual(declared, { command: 'prCascade.pushStack', title: 'Push Whole Stack', category: 'PR Cascade', enablement: `!${REBASE_IN_PROGRESS_KEY}` });
     const menuEntry = manifest.contributes.menus['view/title'].find((entry) => entry.command === 'prCascade.pushStack');
-    assert.deepStrictEqual(menuEntry, { command: 'prCascade.pushStack', when: 'view == prCascade', group: '2_stack@1' });
+    assert.deepStrictEqual(menuEntry, { command: 'prCascade.pushStack', when: 'view == prCascade || view == prCascade.smartlog', group: '2_stack@1' });
     const trackEntry = manifest.contributes.menus['view/title'].find((entry) => entry.command === 'prCascade.trackStack');
     assert.strictEqual(trackEntry?.group, '2_stack@8');
   });

@@ -13,7 +13,7 @@
 
 // see primer §1 (import / export) and §9 (`import type`)
 import type { Disposable, Event } from 'vscode';
-import type { MachineFacts, ReadinessHost } from '../../src/vscode/login';
+import type { MachineFacts, NotificationSeverity, ReadinessHost } from '../../src/vscode/login';
 import type { TerminalHost, TerminalLike } from '../../src/vscode/terminal';
 
 /** One `sendText`: which terminal (its name and directory), the text, and whether Enter was pressed. */
@@ -171,7 +171,7 @@ export class FakeTerminalHost implements TerminalHost {
 
 /** One notification shown: its colour, its sentence and its buttons. */
 export interface Asked {
-  readonly severity: 'warning' | 'information';
+  readonly severity: NotificationSeverity;
   readonly message: string;
   readonly buttons: readonly string[];
 }

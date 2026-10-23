@@ -44,6 +44,11 @@ reads. Each row is the branch name; the dimmer text beside it is the layer's dis
 trunk (`3 commits`), with `· current` on the branch you are on. A layer *above* the one you
 are on is not listed in v0.1: check out the top of the stack to see all of it.
 
+A second **Stack** view sits at the bottom of the Explorer — collapsed until you expand it once;
+VS Code remembers — listing every stack in the repository and the trunk they stand on, the
+branch you are on marked, as plain text while the picture is being built (the smartlog rail of
+milestone 6). Its title bar carries the same Refresh and `…` actions as the tree's.
+
 - **Expand a layer** to see the files it changes against the layer below it — only its own,
   never what the lower layers added — as `A  c` (added), `M  …` (modified), `D  f`
   (deleted), and `R  b2` with `b → b2` beside it for a rename. The icon is VS Code's own for
@@ -226,8 +231,9 @@ v0.1 is the viewer. The milestones after it, each one stack of PRs, are laid out
 5. git-spice backend: readiness and setup, tracking and push (the commands above — done), and
    gh's readiness and login on GitHub repositories (done); the native stack link itself is
    milestone 7.
-6. Two views of every stack in the repository: a compact smartlog rail in the Explorer and a
-   detailed graph in the extension's own container; the v0.1 tree goes once the rail matches it.
+6. Two views of every stack in the repository: a compact smartlog rail in the Explorer (in
+   progress — the view is up, as plain text) and a detailed graph in the extension's own
+   container; the v0.1 tree goes once the rail matches it.
 7. Create PRs for the whole stack, linked as a native GitHub stack.
 8. Editable PR descriptions.
 9. Restack, sync, insert-below, merge.
@@ -306,9 +312,11 @@ tag runs `.github/workflows/release.yml`, which checks the tag against `package.
 src/extension.ts     entry point — wires core to VS Code
 src/core/            pure logic + git runner; no VS Code imports (enforced by lint)
 src/vscode/          adapters: the built-in Git extension's API (gitApi: repositories, the status
-                     signal, the git executable), config (settings → plain values), the Stack tree
-                     view, the status bar item, the stackdiff: content provider, the commands,
-                     terminals, and the git-spice setup flow (login)
+                     signal, the git executable, the change lists), config (settings → plain
+                     values), the Stack tree view, the smartlog webview view (views/: the page's
+                     shell, the routing of a view's messages, the provider), the status bar item,
+                     the stackdiff: content provider, the commands, terminals, and the git-spice
+                     setup flow (login)
 src/webview/         browser code for the views (M6): the bridge to the host (host.ts) and the
                      smartlog renderer (plain text until 23e); no vscode, no Node, types only from
                      core — enforced by lint and its own tsconfig

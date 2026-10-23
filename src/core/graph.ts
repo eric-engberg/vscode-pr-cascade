@@ -15,13 +15,17 @@
  * what git says — one parent per layer, the deepest ancestor — and test/git/graph.git.test.ts
  * pins the one shape where the two differ.
  *
+ * Also here, since item 23d: `readBehindTrunk`, the trunk row's two `rev-list --count`s — the
+ * fourth and fifth read-only spawns of the views' pipeline, beside the three above.
+ *
  * Layer: core (no VS Code imports; plan §4.1). Depends on: core/model.ts (`GitRunner`). Depended
- * on by: core/viewmodel.ts (item 23b: `layoutGraph` and the row types), src/extension.ts (item 23d,
- * which will call readGraphInput then layoutGraph once per repository and refresh);
- * test/unit/graph.test.ts, test/git/graph.git.test.ts, test/unit/viewmodel.test.ts (`layoutGraph`
- * and the row types, for the geometry rows), test/git/gitspice.git.test.ts (`readGraphInput` for
- * the two view-model rows). Plan: §4.2, §7.1.1, §7.2.1 (Show
- * Only This Stack), §8 E78, §9.4 `unit/graph` and `git/graph.git`, §10.1 item 23a (M6), §13.2 D67.
+ * on by: core/viewmodel.ts (item 23b: `layoutGraph` and the row types; `BehindTrunk`),
+ * src/extension.ts (item 23d: readGraphInput and readBehindTrunk once per repository and refresh,
+ * then core/viewmodel.ts's buildStackViewModel over their answers); test/unit/graph.test.ts,
+ * test/git/graph.git.test.ts, test/unit/viewmodel.test.ts (`layoutGraph` and the row types, for
+ * the geometry rows; `BehindTrunk`), test/git/gitspice.git.test.ts (`readGraphInput` for the two
+ * view-model rows). Plan: §4.2, §7.1.1, §7.2.1 (Show Only This Stack), §8 E78, §9.4 `unit/graph`
+ * and `git/graph.git`, §10.1 items 23a and 23d (M6), §13.2 D67, D70.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
@@ -105,6 +109,56 @@ export async function readGraphInput(git: GitRunner, root: string, trunk: string
   const trunkTip = await git.run(trunkTipArgs(trunk), root);
   // see primer §16 (object literals: shorthand keys)
   return { refs, dag, trunkTip };
+}
+
+/**
+ * How far behind the trunk ref two things are — the trunk row's `↓n · local ↓m` (plan §7.1.1):
+ * `origin` is the commits on `trunk` that HEAD's history lacks (trunk has moved on since HEAD's
+ * stack forked; the mockup's `↓5`), `local` the commits the local trunk branch lacks (a `git pull`
+ * is due; `local ↓3`). Either may be 0. Read by readBehindTrunk once per repository and refresh
+ * (item 23d); core/viewmodel.ts turns the pair into the one `behindTrunk` indicator.
+ */
+// see primer §9 (interface) and §14 (readonly)
+export interface BehindTrunk {
+  readonly origin: number;
+  readonly local: number;
+}
+
+/**
+ * `git rev-list --count <trunk> ^<ref>`: how many commits are reachable from trunk and not from
+ * `ref` — what `ref`'s history lacks of trunk's. Exported so the tests spell the argv they expect.
+ */
+// see primer §12 (template strings)
+export function behindArgs(trunk: string, ref: string): string[] {
+  return ['rev-list', '--count', trunk, `^${ref}`];
+}
+
+/**
+ * The trunk row's two counts: `origin` against `HEAD`, `local` against `refs/heads/<localBranch>`.
+ * The full ref and not the bare name, because git resolves a short name under refs/tags before
+ * refs/heads: with a tag called `main` beside the branch, `^main` counts against the tag and warns
+ * on stderr at every refresh (measured; test/git/graph.git.test.ts pins both spellings).
+ * `localBranch` is readinessFix.ts's trunkBranchFor answer — `null` when `origin/main` has no
+ * `main` beside it — and the local count is 0 without a spawn then, and also when trunk *is* that
+ * branch (`prCascade.trunk` set to `main`: `main ^main` is 0 by definition). `tryRun`, `null → 0`:
+ * git saying no is an answer here — an unborn HEAD, or a branch deleted between two spawns, is
+ * `fatal: bad revision` (exit 128), and a trunk row with no count is right for it — while a git
+ * that cannot run (E17) still rejects, as tryRun promises. Two spawns at most, about 20 ms each
+ * (measured, D70), beside readGraphInput's three.
+ */
+// see primer §6 (async / await), §10 (`string | null`) and §48 (the conditional expression)
+export async function readBehindTrunk(git: GitRunner, root: string, trunk: string, localBranch: string | null): Promise<BehindTrunk> {
+  const origin = await countBehind(git, root, trunk, 'HEAD');
+  const local = localBranch === null || localBranch === trunk ? 0 : await countBehind(git, root, trunk, `refs/heads/${localBranch}`);
+  // see primer §16 (object literals: shorthand keys)
+  return { origin, local };
+}
+
+/** One count as a number: `rev-list --count` prints the number and a newline; git saying no (`null`) is 0. */
+// see primer §27 (Number: text to number) and §23 (`trim`)
+async function countBehind(git: GitRunner, root: string, trunk: string, ref: string): Promise<number> {
+  const output = await git.tryRun(behindArgs(trunk, ref), root);
+  return output === null ? 0 : Number(output.trim());
 }
 
 /** One `REFS_ARGS` line: a local branch, its commit, and that commit's committer date. */

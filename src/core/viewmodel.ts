@@ -10,24 +10,25 @@
  * (`layoutGraph` and its types), core/gsLog.ts (`GsLogEntry`, a type), core/model.ts (`RepoState`,
  * `Enrichment`, `PrExtras`, `ReviewDecision`). Depended on by: src/webview/protocol.ts (types only —
  * the message that carries a model), src/extension.ts from item 23d (which reads the graph texts,
- * the change lists, the clock and the settings and calls buildStackViewModel once per repository
- * and refresh), src/webview/smartlog/render.ts (item 23c's plain-text rows; types only) and the
+ * the change lists and the clock — `showOnlyThisStack` is `false` until 23f's toggle — and calls
+ * buildStackViewModel once per repository and refresh), src/webview/smartlog/render.ts (item 23c's plain-text rows; types only) and the
  * renderers of items 23e and 23i (types only), test/unit/viewmodel.test.ts, test/webview/helpers/models.ts
  * (the row literals the renderer tests draw; types only), test/git/gitspice.git.test.ts (the two
- * view-model rows over real git-spice). Nothing in src/
- * imports this file at run time until 23d — protocol.ts's `import type` is erased when compiled
- * (primer §9), so the bundle carries nothing of it. The rows a host shows when no RepoState exists — no
+ * view-model rows over real git-spice). Since item 23d src/extension.ts imports this file at run
+ * time (`buildStackViewModel`, in `loadRepoView`), so dist/extension.js carries it; protocol.ts's
+ * and render.ts's `import type` are erased when compiled (primer §9), so dist/webview/smartlog.js
+ * carries nothing of it. The rows a host shows when no RepoState exists — no
  * repository in the workspace, the Git extension unusable (E82), git itself failing for one
  * repository (E17) — are the host's (src/webview/protocol.ts `HostNotice`), not this file's. The
  * tree's `trackingLines`, `shortSha`, `commitCountLabel` and four message texts have a second copy
  * here until item 23j deletes the tree.
  * Plan: §4.2, §7.1.1 (the tail), §7.1.2, §7.1.3, §7.2.1, §7.8, §8 E3/E4/E5/E12/E15/E56/E57/E79/
- * E80/E81, §9.4 `unit/viewmodel`, §10.1 item 23b (M6), §13.2 D68.
+ * E80/E81, §9.4 `unit/viewmodel`, §10.1 items 23b and 23d (M6), §13.2 D68, D70.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
 import { layoutGraph } from './graph';
-import type { GraphInput, GraphRow, LayerRow, TrunkRow, WorkingTreeRow } from './graph';
+import type { BehindTrunk, GraphInput, GraphRow, LayerRow, TrunkRow, WorkingTreeRow } from './graph';
 import type { GsLogChange, GsLogDown, GsLogEntry } from './gsLog';
 import type { Enrichment, PrExtras, RepoState, ReviewDecision } from './model';
 
@@ -67,7 +68,7 @@ export interface ViewModelInput {
    * the one line that moves.
    */
   readonly showOnlyThisStack: boolean;
-  /** The trunk row's two counts, 23d's one extra spawn; `null` until 23d exists, or when nothing was measured. */
+  /** The trunk row's two counts — core/graph.ts's `readBehindTrunk`, two `rev-list --count`s (item 23d); `null` when nothing was measured. */
   readonly behindTrunk: BehindTrunk | null;
   /**
    * Plan §7.8's gh tier by branch name — M7's core/prstatus.ts fills it from `gh pr list --json`;
@@ -78,18 +79,6 @@ export interface ViewModelInput {
    * and `baseDrift` the moment it is filled (§10 M6).
    */
   readonly extras: ReadonlyMap<string, PrExtras>;
-}
-
-/**
- * How far behind the trunk ref two things are, as 23d measures them with one `rev-list --count`
- * each: `origin` is the commits on `trunk` that HEAD's history lacks (`rev-list --count <trunk>
- * ^HEAD` — trunk has moved on since HEAD's stack forked; the mockup's `↓5`), `local` the commits the
- * local trunk branch lacks (`rev-list --count <trunk> ^<branch>` — a `git pull` is due; `local ↓3`).
- * Either may be 0; 23d passes 0 for `local` when there is no local trunk branch.
- */
-export interface BehindTrunk {
-  readonly origin: number;
-  readonly local: number;
 }
 
 /**

@@ -9,8 +9,8 @@
  *
  * Layer: VS Code side (plan §4.1) — strings only, no `vscode` import, so the extension-host tests
  * can read them without the bundle's twin. Depends on: nothing. Depended on by: src/extension.ts
- * (the listener), test/ext/commands.test.ts (the manifest cases). Plan: §7.2.1, §7.11, §13.2
- * D60, D62.
+ * (the listener), test/ext/commands.test.ts (the manifest cases), test/ext/views.test.ts (the
+ * smartlog's `view/title` entries, item 23d). Plan: §7.2.1, §7.11, §13.2 D60, D62.
  */
 
 // see primer §4 (const) and §36 (export const: a shared constant)

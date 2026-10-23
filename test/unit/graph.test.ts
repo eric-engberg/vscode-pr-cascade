@@ -1,19 +1,20 @@
 /**
  * test/unit/graph.test.ts — core/graph.ts as a specification: the three git commands spelled and
- * their texts handed back as they are, the three parsers, and plan E78 — every stack in the
- * repository laid out in lanes — as a table of shapes against hand-written texts.
+ * their texts handed back as they are, the three parsers, plan E78 — every stack in the
+ * repository laid out in lanes — as a table of shapes against hand-written texts, and (item 23d)
+ * the trunk row's two `rev-list --count`s: their argv, the two spawns saved, git's "no" as 0, and E17 let through.
  *
  * Layer: test, unit (plan §9.1 layer 1; Vitest, no git, no VS Code). Depends on:
- * src/core/graph.ts, test/helpers/fakeGit.ts (for readGraphInput's three commands and E17 only;
- * the parsers and the layout take texts, so the rest needs no runner). What real git prints for
- * these shapes, and the agreement with computeStack, is test/git/graph.git.test.ts. Plan: §7.1.1,
- * §7.2.1, §8 E78 (E3/E5/E6/E14/E15/E16 as they read in the graph), §9.4 `unit/graph`, §10.1 item
- * 23a (M6), §13.2 D67.
+ * src/core/graph.ts, test/helpers/fakeGit.ts (for readGraphInput's three commands, E17 and
+ * readBehindTrunk only; the parsers and the layout take texts, so the rest needs no runner). What
+ * real git prints for these shapes, and the agreement with computeStack, is
+ * test/git/graph.git.test.ts. Plan: §7.1.1, §7.2.1, §8 E78 (E3/E5/E6/E14/E15/E16 as they read in
+ * the graph), §9.4 `unit/graph`, §10.1 items 23a and 23d (M6), §13.2 D67, D70.
  */
 
 // see primer §1 (import / export)
 import { describe, expect, it } from 'vitest';
-import { REFS_ARGS, dagArgs, layoutGraph, parseDag, parseRefs, parseTrunkTip, readGraphInput, trunkTipArgs } from '../../src/core/graph';
+import { REFS_ARGS, behindArgs, dagArgs, layoutGraph, parseDag, parseRefs, parseTrunkTip, readBehindTrunk, readGraphInput, trunkTipArgs } from '../../src/core/graph';
 import type { GraphLayout, GraphRow, NodeKind } from '../../src/core/graph';
 import { FakeGitRunner } from '../helpers/fakeGit';
 
@@ -147,6 +148,101 @@ describe('readGraphInput', () => {
 
     // act and assert
     await expect(readGraphInput(git, ROOT, TRUNK)).rejects.toBe(failure);
+  });
+});
+
+describe("readBehindTrunk — the trunk row's two counts (plan §7.1.1 `↓n · local ↓m`, item 23d)", () => {
+  // The fake's keys for the two commands, from the exported argv.
+  const HEAD_KEY = behindArgs(TRUNK, 'HEAD').join(' ');
+  const MAIN_KEY = behindArgs(TRUNK, 'refs/heads/main').join(' ');
+
+  it("spells both argv — rev-list --count <trunk> ^HEAD, and the same against refs/heads/<branch>: the full ref, so a tag of the branch's name is never the one counted — and reads each count as a number, newline and all", async () => {
+    // arrange
+    const git = new FakeGitRunner(
+      new Map([
+        [HEAD_KEY, '5\n'],
+        [MAIN_KEY, '3\n'],
+      ]),
+    );
+
+    // act
+    const behind = await readBehindTrunk(git, ROOT, TRUNK, 'main');
+
+    // assert: the argv spelled out, not built from the helper, so the helper is pinned too
+    expect(behind).toStrictEqual({ origin: 5, local: 3 });
+    expect(git.calls).toStrictEqual([
+      { args: ['rev-list', '--count', 'origin/main', '^HEAD'], cwd: ROOT },
+      { args: ['rev-list', '--count', 'origin/main', '^refs/heads/main'], cwd: ROOT },
+    ]);
+  });
+
+  it('answers 0 and 0 on a trunk nobody is behind', async () => {
+    // arrange
+    const git = new FakeGitRunner(
+      new Map([
+        [HEAD_KEY, '0\n'],
+        [MAIN_KEY, '0\n'],
+      ]),
+    );
+
+    // act
+    const behind = await readBehindTrunk(git, ROOT, TRUNK, 'main');
+
+    // assert
+    expect(behind).toStrictEqual({ origin: 0, local: 0 });
+  });
+
+  it('asks nothing for the local count, and answers 0 for it, when there is no local trunk branch', async () => {
+    // arrange: `null` is trunkBranchFor's answer when `origin/main` has no `main` beside it
+    const git = new FakeGitRunner(new Map([[HEAD_KEY, '2\n']]));
+
+    // act
+    const behind = await readBehindTrunk(git, ROOT, TRUNK, null);
+
+    // assert: one spawn, not two
+    expect(behind).toStrictEqual({ origin: 2, local: 0 });
+    expect(git.calls).toStrictEqual([{ args: ['rev-list', '--count', 'origin/main', '^HEAD'], cwd: ROOT }]);
+  });
+
+  it('asks nothing for the local count, and answers 0 for it, when trunk is that branch itself — prCascade.trunk set to `main`: `main ^main` is 0 by definition', async () => {
+    // arrange
+    const git = new FakeGitRunner(new Map([[behindArgs('main', 'HEAD').join(' '), '1\n']]));
+
+    // act
+    const behind = await readBehindTrunk(git, ROOT, 'main', 'main');
+
+    // assert
+    expect(behind).toStrictEqual({ origin: 1, local: 0 });
+    expect(git.calls).toStrictEqual([{ args: ['rev-list', '--count', 'main', '^HEAD'], cwd: ROOT }]);
+  });
+
+  it("answers 0 when git says no — an unborn HEAD's `bad revision '^HEAD'` is an answer (tryRun's null), not a failed load", async () => {
+    // arrange: the fake's Error means "git ran and exited non-zero", which tryRun turns into null
+    const git = new FakeGitRunner(
+      new Map<string, string | Error>([
+        [HEAD_KEY, new Error("fatal: bad revision '^HEAD'")],
+        [MAIN_KEY, '2\n'],
+      ]),
+    );
+
+    // act
+    const behind = await readBehindTrunk(git, ROOT, TRUNK, 'main');
+
+    // assert
+    expect(behind).toStrictEqual({ origin: 0, local: 2 });
+  });
+
+  it('lets a rejection tryRun does not swallow through unchanged — a git that cannot run (E17) is a failed load, never a 0', async () => {
+    // arrange: nothing is canned, so the fake throws from tryRun — the way the real runner does
+    // when git is missing (test/git/git.git.test.ts): a throw, never a null
+    const git = new FakeGitRunner(new Map());
+
+    // act
+    const result = readBehindTrunk(git, ROOT, TRUNK, 'main');
+
+    // assert: no catch in countBehind; the first spawn is the one that fails
+    await expect(result).rejects.toThrow('no canned output');
+    expect(git.calls.length).toBe(1);
   });
 });
 

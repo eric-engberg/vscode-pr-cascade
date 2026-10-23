@@ -8,16 +8,20 @@
  * in a sentence), core/git.ts, trunk.ts, stack.ts, changes.ts, uri.ts (the scheme name),
  * debounce.ts (the refresh), command.ts, backends/gitspice.ts (the readiness probe; `enrich` on
  * every load, `track` from Track Stack, item 20b, and `push` from Push Whole Stack, item 21b),
- * poll.ts, readinessFix.ts (`readyMessage`, `trunkBranchFor`), vscode/gitApi.ts (the built-in Git
- * extension: repositories, events, the status signal, the git executable), vscode/config.ts,
- * contextKeys.ts (the names of the context keys the listener sets), tree.ts, statusbar.ts,
- * content.ts, commands.ts, terminal.ts, login.ts (the git-spice setup flow, `chooseRepository`).
- * Depended on by: VS Code itself, test/ext/* and test/ext-parent/*. Plan: §4.1, §6, §7.1.0 (the
- * status bar), §7.2 (`prCascade.setUpGitSpice`, D58; `prCascade.trackStack`, D60;
- * `prCascade.pushStack`, D62), §7.2.1 (the `…` menu entries, their context keys and `enablement`),
- * §7.7 (tracking before a push), §7.8 (the local tier on every load), §7.13.1, §7.14, §7.14.2 (the
- * digest behind `enrich`), §8 E3/E12/E56/E76/E83, §9.1 (what activate returns), §10.1 items 6, M2
- * 9, M3 11, M4 12a, 12b, 14, M5 19b, 20b, 21b; §13.2 D52, D58, D60, D62.
+ * poll.ts, readinessFix.ts (`readyMessage`, `trunkBranchFor`), graph.ts and viewmodel.ts (the
+ * smartlog's picture per repository and refresh, M6 item 23d), webview/protocol.ts (the message
+ * it is posted in; types), vscode/gitApi.ts (the built-in Git extension: repositories, events, the
+ * status signal, the git executable, the change lists), vscode/config.ts, contextKeys.ts (the
+ * names of the context keys the listener sets), tree.ts (and its `loadFailureNotice`), statusbar.ts,
+ * views/base.ts and views/smartlog.ts (the smartlog webview view), content.ts, commands.ts,
+ * terminal.ts, login.ts (the git-spice setup flow, `chooseRepository`). Depended on by: VS Code
+ * itself, test/ext/* and test/ext-parent/*. Plan: §4.1, §6, §7.1.0 (the status bar), §7.1.1 and
+ * §7.1.3 (the smartlog: one model, the protocol's host half), §7.2 (`prCascade.setUpGitSpice`,
+ * D58; `prCascade.trackStack`, D60; `prCascade.pushStack`, D62), §7.2.1 (the `…` menu entries,
+ * their context keys and `enablement`), §7.7 (tracking before a push), §7.8 (the local tier on
+ * every load), §7.11, §7.13.1, §7.14, §7.14.2 (the digest behind `enrich`; the change lists),
+ * §8 E3/E12/E17/E56/E76/E79/E81/E82/E83, §9.1 (what activate returns), §10.1 items 6, M2 9, M3 11,
+ * M4 12a, 12b, 14, M5 19b, 20b, 21b, M6 23d; §13.2 D52, D58, D60, D62, D70.
  */
 
 // see primer §1 (import / export), §2 (the vscode module) and §9 (`import type`)
@@ -31,24 +35,31 @@ import { RealCommandRunner } from './core/command';
 import type { CommandRunner } from './core/command';
 import { debounce } from './core/debounce';
 import { RealGitRunner } from './core/git';
-import type { ChangedFile, EnrichmentCause, RepoState, StackLayer } from './core/model';
+import { readBehindTrunk, readGraphInput } from './core/graph';
+import type { BehindTrunk, GraphInput } from './core/graph';
+import type { ChangedFile, EnrichmentCause, PrExtras, RepoState, StackLayer } from './core/model';
 import { DEFAULT_POLL } from './core/poll';
 import { readyMessage, trunkBranchFor } from './core/readinessFix';
 import { computeStack } from './core/stack';
 import { detectTrunk } from './core/trunk';
 import { STACK_DIFF_SCHEME } from './core/uri';
+import { buildStackViewModel } from './core/viewmodel';
+import type { StackViewModel } from './core/viewmodel';
 import { openDiff } from './vscode/commands';
 import { readSettings } from './vscode/config';
 import type { PrCascadeSettings } from './vscode/config';
 import { HAS_UNTRACKED_KEY, REBASE_IN_PROGRESS_KEY } from './vscode/contextKeys';
 import { StackDiffContentProvider } from './vscode/content';
-import { GitExtensionAdapter, GitUnavailableError, gitExecutable, realGitExtensionHost, sortRepositoryRoots } from './vscode/gitApi';
+import { GitExtensionAdapter, GitUnavailableError, gitExecutable, realGitExtensionHost, sortRepositoryRoots, workingTreeFileCount } from './vscode/gitApi';
 import type { GitApi } from './vscode/gitApi';
 import { chooseRepository, machineFacts, ReadinessFlows } from './vscode/login';
-import type { FlowDeps, ReadinessHost, ReadyOutcome } from './vscode/login';
+import type { FlowDeps, NotificationSeverity, ReadinessHost, ReadyOutcome } from './vscode/login';
 import { StackStatusBar } from './vscode/statusbar';
 import type { TerminalHost } from './vscode/terminal';
-import { StackTreeProvider, type StackNode } from './vscode/tree';
+import { loadFailureNotice, StackTreeProvider, type StackNode } from './vscode/tree';
+import { StackWebviewProvider } from './vscode/views/base';
+import { SMARTLOG_VIEW } from './vscode/views/smartlog';
+import type { HostNotice, ModelMessage } from './webview/protocol';
 
 /**
  * How long the view waits after the last "a git status completed" event, or the last click
@@ -94,6 +105,13 @@ export interface ExtensionApi {
    * every use, and from whose `commands` `backendFor` builds the backend — not a copy.
    */
   readinessDeps?: ReadinessDeps;
+  /**
+   * The smartlog view's provider (M6 item 23d) — present only under `ExtensionMode.Test` (plan
+   * §9.1, §13.4): the model it holds (`current`) and posts (`onDidPost`), its visibility, and
+   * `handleMessage`, the path a view's message takes — what test/ext/views.test.ts drives, since
+   * the view's own page cannot be read from the extension host.
+   */
+  smartlog?: StackWebviewProvider;
 }
 
 /**
@@ -114,12 +132,29 @@ const realTerminalHost: TerminalHost = {
   onDidClose: vscode.window.onDidCloseTerminal,
 };
 
+/**
+ * VS Code's notification for a severity (vscode/login.ts `ReadinessHost.prompt`): the toast at the
+ * bottom right, in the colour asked for, with `buttons` as its actions — `error` since item 23d,
+ * for a command the smartlog asked for that VS Code refused. A `switch` with every case returning
+ * rather than a conditional inside a conditional (SonarCloud S3358), and the compiler holds it
+ * complete: a fourth severity would fail to compile here.
+ */
+// see primer §82 (`switch` over an exact-string union, every case returning) and §16 (spread into a call)
+function showNotification(severity: NotificationSeverity, message: string, buttons: readonly string[]): Thenable<string | undefined> {
+  switch (severity) {
+    case 'warning':
+      return vscode.window.showWarningMessage(message, ...buttons);
+    case 'error':
+      return vscode.window.showErrorMessage(message, ...buttons);
+    case 'information':
+      return vscode.window.showInformationMessage(message, ...buttons);
+  }
+}
+
 /** VS Code itself, as vscode/login.ts asks for it (primer §73): notifications, the quick pick, the browser, the terminals, the disk. */
-// see primer §73 (showWarningMessage with buttons, showQuickPick, env.openExternal), §16 (spread
-// into a call) and §28 (`existsSync`, handed on as a function, §33)
+// see primer §73 (showWarningMessage with buttons, showQuickPick, env.openExternal) and §28 (`existsSync`, handed on as a function, §33)
 const realReadinessHost: ReadinessHost = {
-  prompt: (severity, message, buttons) =>
-    severity === 'warning' ? vscode.window.showWarningMessage(message, ...buttons) : vscode.window.showInformationMessage(message, ...buttons),
+  prompt: showNotification,
   pick: (labels, placeHolder) => vscode.window.showQuickPick(labels, { placeHolder }),
   openExternal: (url) => vscode.env.openExternal(vscode.Uri.parse(url)),
   terminals: realTerminalHost,
@@ -195,7 +230,26 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
     () => readSettings().statusBar,
   );
   context.subscriptions.push(statusBar);
-  // The one listener on a load's states feeds four things from the same load (plan §7.1.0 "the
+
+  // The smartlog view (M6 item 23d, plan §7.1.1): a page of ours that VS Code draws in the
+  // Explorer, fed by the listener below — the same load as the tree and the status bar, never a
+  // second one. The provider (vscode/views/base.ts) gets `dist/webview/` as a Uri — the one folder
+  // its page may load from, where esbuild.mjs put the bundle and the codicons — and three functions:
+  // `run` is `executeCommand` with the string arguments a view sends (E79), `log` the Output
+  // channel, `notify` an error notification through the readiness host — the seam the tests read —
+  // for a command VS Code refused or that threw (E17 parity with a click in the tree). Registered
+  // under the id the manifest contributes, with no options: `retainContextWhenHidden` stays off
+  // (§7.1.3), and the provider posts the model again on every show.
+  // see primer §88 (a webview view and `registerWebviewViewProvider`) and §89 (`Uri.joinPath` over `context.extensionUri`)
+  const distUri = vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview');
+  const smartlog = new StackWebviewProvider(SMARTLOG_VIEW, distUri, {
+    run: (command, args) => vscode.commands.executeCommand(command, ...args),
+    log: (line) => output.appendLine(line),
+    notify: (message) => void readinessDeps.host.prompt('error', message, []),
+  });
+  context.subscriptions.push(smartlog, vscode.window.registerWebviewViewProvider(SMARTLOG_VIEW.id, smartlog));
+
+  // The one listener on a load's states feeds five things from the same load (plan §7.1.0 "the
   // same refresh cycle", D52): the status bar; `lastStates`, which Track Stack and Push Whole
   // Stack pick their repository from; the context key `prCascade.hasUntracked`, which is what
   // shows "Track Stack with git-spice" in the view's `…` menu exactly while a repository has a
@@ -211,13 +265,19 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
   // (test/ext/commands.test.ts): a key's value cannot be read back. `setContext` is a built-in
   // command, the one way an extension writes such a key; its Thenable is nobody's to await
   // (primer §63).
-  // see primer §74 (a context key: `executeCommand('setContext', key, value)`, a menu's `when` and a command's `enablement`)
+  // see primer §74 (a context key: `executeCommand('setContext', key, value)`, a menu's `when` and a command's `enablement`) and §54 (destructuring: the states out of the load's result, vscode/tree.ts `LoadResult`)
   context.subscriptions.push(
-    provider.onDidLoadStates((states) => {
+    provider.onDidLoadStates(({ states, failure }) => {
       statusBar.update(states);
       lastStates = states;
       void vscode.commands.executeCommand('setContext', HAS_UNTRACKED_KEY, states.some(hasUntracked));
       void vscode.commands.executeCommand('setContext', REBASE_IN_PROGRESS_KEY, states.some((state) => state.rebaseInProgress));
+      // And the smartlog's model (item 23d): the pictures this load built beside its states, or
+      // its failure as the one notice, numbered — `lastSeq` rises by one per model and is stamped
+      // here, so the smartlog and 23i's graph get one object with one number (E81). Synchronous,
+      // so this event stays the one point every extension-host test drains a refresh through.
+      lastSeq += 1;
+      smartlog.update(modelMessage(lastSeq, states, failure));
     }),
   );
 
@@ -310,12 +370,12 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
   void provider.getChildren();
 
   output.appendLine('PR Cascade active');
-  // The status bar wrapper, the view handle and the setup flow's seams exist only for the tests,
-  // and this object is readable by every extension in the window — so they are handed out only
-  // under the test harness (plan §13.4; primer §68): no other extension can put a fake runner
-  // into ours. `{ provider, refresh }` is what plan §9.1 fixed, in every mode.
+  // The status bar wrapper, the view handle, the setup flow's seams and the smartlog's provider
+  // exist only for the tests, and this object is readable by every extension in the window — so
+  // they are handed out only under the test harness (plan §13.4; primer §68): no other extension
+  // can put a fake runner into ours. `{ provider, refresh }` is what plan §9.1 fixed, in every mode.
   // see primer §16 (object literals: shorthand keys) and §48 (the conditional expression)
-  return context.extensionMode === vscode.ExtensionMode.Test ? { provider, refresh, statusBar, treeView, readinessDeps } : { provider, refresh };
+  return context.extensionMode === vscode.ExtensionMode.Test ? { provider, refresh, statusBar, treeView, readinessDeps, smartlog } : { provider, refresh };
 }
 
 /**
@@ -353,7 +413,7 @@ interface ConnectedGit {
 async function connectedGit(gitExtension: GitExtensionAdapter): Promise<ConnectedGit> {
   const connection = await gitExtension.connection();
   if (connection.kind === 'unavailable') {
-    throw new GitUnavailableError(connection.message);
+    throw new GitUnavailableError(connection.reason, connection.message);
   }
   const settings = readSettings();
   const git = new RealGitRunner(gitExecutable(settings.gitPath, connection.api.git.path));
@@ -378,19 +438,88 @@ function repositoryRoots(api: GitApi): string[] {
 }
 
 /**
- * The whole read pipeline, run once per refresh: the repositories the Git extension has
- * open (plan §6, §7.14), then `loadRepoState` for each. One RepoState per repository, in the
- * order of plan §6 — by the workspace folder each belongs to, then by path. A failure anywhere
- * in here — git missing (E17), a command exiting non-zero, the Git extension unusable (E82) —
- * rejects, and the provider turns that into one row (vscode/tree.ts, topLevelNodes).
+ * One repository's picture (core/viewmodel.ts) per state of a load, and the notices for the
+ * repositories whose picture could not be read, kept beside the states array the load returned:
+ * `loadRepoStates` builds them and files them here under that very array, and the
+ * `onDidLoadStates` listener in `activate` looks them up by the array the tree hands back — the
+ * same object, so the pictures always belong to the states they are posted with, whichever of two
+ * overlapping loads finished last (the tree fires only the newest). A `WeakMap` because its keys
+ * are objects and an entry goes when its key does: an overtaken load's array is never fired and
+ * never looked up, and nothing here has to forget it. The tree's loader contract stays
+ * `() => Promise<RepoState[]>`; in 23j, with the tree gone, the load and its pictures are one
+ * function's and this map goes.
  */
-// see primer §6 (async / await), §22 (for ... of) and §25 (arrays: push, a typed empty array)
+// see primer §9 (interface), §14 (readonly) and §90 (`WeakMap`: a Map whose keys are objects — a value attached to an array handed to someone else)
+interface ViewModels {
+  readonly repos: StackViewModel[];
+  readonly notices: HostNotice[];
+}
+const viewModelsOf = new WeakMap<readonly RepoState[], ViewModels>();
+
+/** The §6 row for a window with no repository, the tree's text, as the one notice of an empty load that succeeded. */
+const NO_REPOSITORY_NOTICE: HostNotice = { kind: 'noRepository', repo: null, text: 'No git repository in this workspace', severity: 'information' };
+
+/** M7's gh tier by branch name (core/viewmodel.ts `ViewModelInput.extras`): empty until core/prstatus.ts fills it. */
+// see primer §14 (`ReadonlyMap`) and §31 (type arguments on `new Map`)
+const NO_EXTRAS: ReadonlyMap<string, PrExtras> = new Map<string, PrExtras>();
+
+/**
+ * The `seq` of the last model built — rising by one per model, stamped by the listener in
+ * `activate` once per load, in the order the loads were announced, which is the order they are
+ * posted in — so both views get one object with one number (E81) and a view's `command` can be
+ * matched against it (E79, vscode/views/route.ts). 0 before the first load, which no view sees.
+ */
+// see primer §4 (`let`: counted up by the listener)
+let lastSeq = 0;
+
+/**
+ * The message the smartlog (and 23i's graph) is posted after one load (src/webview/protocol.ts
+ * `ModelMessage`): the failure as the one notice and no repository when the load failed; else the
+ * pictures the load built beside its states — with §6's "no repository" notice in front when it
+ * found none — and the notices of the repositories whose picture could not be read. `activeRepo`
+ * is `null` until 23e draws the repository headers (D70).
+ */
+// see primer §30 (`??`: the default the compiler asks for — `WeakMap.get` answers `ViewModels | undefined`, though `loadRepoStates` files the pictures under the array before returning it and the tree fires that very array, so a fired load always has its entry; this codebase does not write `!`) and §16 (arrays: spread)
+function modelMessage(seq: number, states: readonly RepoState[], failure: HostNotice | null): ModelMessage {
+  if (failure !== null) {
+    return { type: 'model', seq, repos: [], activeRepo: null, notices: [failure] };
+  }
+  const built = viewModelsOf.get(states) ?? { repos: [], notices: [] };
+  const notices = states.length === 0 ? [NO_REPOSITORY_NOTICE, ...built.notices] : built.notices;
+  return { type: 'model', seq, repos: built.repos, activeRepo: null, notices };
+}
+
+/**
+ * The whole read pipeline, run once per refresh: the repositories the Git extension has
+ * open (plan §6, §7.14), then for each `loadRepoState` and — since item 23d — `loadRepoView`,
+ * its picture for the smartlog, filed beside the states (`viewModelsOf`) for the listener that
+ * posts it. One RepoState per repository, in the order of plan §6 — by the workspace folder each
+ * belongs to, then by path. A failure of `loadRepoState` anywhere in here — git missing (E17), a
+ * command exiting non-zero, the Git extension unusable (E82) — rejects, and the provider turns that
+ * into one row and one notice (vscode/tree.ts, topLevelNodes); a failure of the picture's extra
+ * reads alone is caught per repository — the tree keeps that repository's rows, the view gets a
+ * notice in its place and every other repository's picture (D70; isolating the load itself is
+ * 23j's). The clock is read once, so every age in one post counts from the same second.
+ */
+// see primer §6 (async / await), §22 (for ... of), §25 (arrays: push, a typed empty array), §18 (try / catch) and §27 (`Math.floor`: milliseconds to whole seconds)
 async function loadRepoStates(output: vscode.OutputChannel, gitExtension: GitExtensionAdapter): Promise<RepoState[]> {
   const connected = await connectedGit(gitExtension);
+  const now = Math.floor(Date.now() / 1000);
   const states: RepoState[] = [];
+  const repos: StackViewModel[] = [];
+  const notices: HostNotice[] = [];
   for (const root of repositoryRoots(connected.api)) {
-    states.push(await loadRepoState(output, connected, root));
+    const state = await loadRepoState(output, connected, root);
+    states.push(state);
+    try {
+      repos.push(await loadRepoView(connected, state, now));
+    } catch (error) {
+      const notice = loadFailureNotice(error, root);
+      output.appendLine(`${root}: ${notice.text}`);
+      notices.push(notice);
+    }
   }
+  viewModelsOf.set(states, { repos, notices });
   return states;
 }
 
@@ -436,8 +565,11 @@ async function loadRepoState(output: vscode.OutputChannel, connected: ConnectedG
  * tracks (its own trunk line counts — git-spice knows it), and whether `gs log` ran or the
  * §7.14.2 memo answered — the one place a user sees the pre-filter at work; one line per line
  * of the answer that could not be read, with the reminder that the layers such an answer does
- * not list are left unknown (E57); or why there is no information at all. Nothing when `enrich`
- * was not asked (no trunk, no layers). Core never logs; this is where its answer is written down.
+ * not list are left unknown (E57); or why there is no information at all. With HEAD on trunk
+ * there is no layer to count, and the line says how many lines `gs log` printed instead — the
+ * other stacks' lines, which the views draw (item 23d; git-spice's own trunk line is one of
+ * them). Nothing when `enrich` was not asked (no trunk). Core never logs; this is where its
+ * answer is written down.
  */
 // see primer §59 (narrowing on `kind`), §25 (arrays: `filter`, `length`) and §48 (the conditional expression)
 function logEnrichment(output: vscode.OutputChannel, state: RepoState): void {
@@ -449,15 +581,45 @@ function logEnrichment(output: vscode.OutputChannel, state: RepoState): void {
     output.appendLine(`${state.root}: no git-spice tracking info — ${enrichment.reason}`);
     return;
   }
-  const known = state.layers.filter((layer) => layer.tracking !== null && layer.tracking !== undefined).length;
   const memo = enrichment.ranGsLog ? '' : ' (unchanged — gs log not run)';
-  output.appendLine(`${state.root}: git-spice tracks ${known} of ${state.layers.length} layer(s)${memo}`);
+  if (state.layers.length === 0) {
+    output.appendLine(`${state.root}: not on a stack; gs log lists ${enrichment.byName.size} line(s)${memo}`);
+  } else {
+    const known = state.layers.filter((layer) => layer.tracking !== null && layer.tracking !== undefined).length;
+    output.appendLine(`${state.root}: git-spice tracks ${known} of ${state.layers.length} layer(s)${memo}`);
+  }
   for (const bad of enrichment.malformed) {
     output.appendLine(`${state.root}: gs log line ${bad.line} skipped: ${bad.problem}`);
   }
   if (enrichment.malformed.length > 0) {
     output.appendLine(`${state.root}: layers it did not list are left unknown`);
   }
+}
+
+/**
+ * One repository's picture for the views (core/viewmodel.ts `buildStackViewModel`), from the state
+ * `loadRepoState` built and the reads the model's header lists for this item: core/graph.ts's
+ * three texts and the trunk row's two counts — none without a trunk (E4), when the model draws its
+ * one message and no row — with the local trunk branch asked the way the setup flow asks it
+ * (`trunkBranchFor`, item 19a); the Git extension's three change lists for the working-tree row
+ * (`workingTreeFileCount` — 0 for a repository it closed between the roots and here, and before its
+ * first status has run); the clock the caller read once. Five to seven read-only spawns, about
+ * 100 ms, beside loadRepoState's. `showOnlyThisStack` is `false` until 23f brings §7.2.1's toggle;
+ * `extras` is M7's gh tier, empty until core/prstatus.ts fills it (D68; §7.1.3 `ViewModelInput`).
+ */
+// see primer §54 (destructuring), §10 (`GraphInput | null`), §48 (the conditional expression), §25 (arrays: `find`) and §16 (object literals: shorthand keys)
+async function loadRepoView(connected: ConnectedGit, state: RepoState, now: number): Promise<StackViewModel> {
+  const { api, git } = connected;
+  let graph: GraphInput | null = null;
+  let behindTrunk: BehindTrunk | null = null;
+  if (state.trunk !== null) {
+    graph = await readGraphInput(git, state.root, state.trunk);
+    const trunkBranch = await trunkBranchFor(git, state.root, state.trunk);
+    behindTrunk = await readBehindTrunk(git, state.root, state.trunk, trunkBranch.kind === 'local' ? trunkBranch.branch : null);
+  }
+  const repository = api.repositories.find((candidate) => candidate.rootUri.fsPath === state.root);
+  const workingTreeFiles = repository === undefined ? 0 : workingTreeFileCount(repository.state);
+  return buildStackViewModel({ state, graph, workingTreeFiles, now, showOnlyThisStack: false, behindTrunk, extras: NO_EXTRAS });
 }
 
 /**
@@ -739,12 +901,13 @@ function untrackedRepositories(host: ReadinessHost): string[] {
  * may show `not tracked` for a branch already tracked, and re-tracking it would silently move
  * its base. Then, in order: a paused rebase is refused with the view's own sentence (E12 —
  * git-spice would not refuse, verified 0.31.2; the greyed-out menu entry is `enablement`, item 21b);
- * no layers → nothing to track (the one state with no `enrichment`, so its reason is never
- * read); not enriched → its sentence; every layer tracked → a sentence; else `track`, with the
- * trunk's local branch asked of git the way the setup flow asks it (`trunkBranchFor`, item
- * 19a), and one sentence from the result — core's own, as a warning, when it stopped short.
+ * no layers → nothing to track (whatever `enrich` found about the other stacks, item 23d, there
+ * is nothing here to track); not enriched → its sentence; every layer tracked → a sentence; else
+ * `track`, with the trunk's local branch asked of git the way the setup flow asks it
+ * (`trunkBranchFor`, item 19a), and one sentence from the result — core's own, as a warning, when
+ * it stopped short.
  */
-// see primer §70 (`?.` on `enrichment`, absent only on the no-layers path above) and §28 (`basename`)
+// see primer §70 (`?.` on `enrichment`: the type allows its absence — a state with no trunk, which a fresh load with layers never is) and §28 (`basename`)
 async function trackIn(output: vscode.OutputChannel, gitExtension: GitExtensionAdapter, root: string): Promise<TrackResult | undefined> {
   const host = readinessDeps.host;
   const folder = path.basename(root);
@@ -845,14 +1008,14 @@ function stackedRepositories(host: ReadinessHost): string[] {
  * load (E83's reason: a `gs branch track`, a fetch or a rebase since then is seen by no watcher —
  * and `push`'s own refusals read the fresh load's `gs log` lines). Then, in order: a paused rebase
  * is refused with the view's own sentence (E12; `enablement` greys the entry too, but it does not
- * stop `executeCommand`); no layers → nothing to push (the one state with no `enrichment`); a
- * detached HEAD → `stack submit` acts on HEAD's branch, and git-spice would only say `in detached
- * HEAD state` (E3); not enriched → its sentence, the setup command named where it would help; then
- * the `null` layers tracked first (§7.7's preflight — an untracked layer between tracked ones
- * git-spice skips silently, an untracked HEAD it refuses; a `track` problem ends it, pushing
- * nothing); then `push`, and `reportPush` says how it went.
+ * stop `executeCommand`); no layers → nothing to push (whatever `enrich` found about the other
+ * stacks, item 23d); a detached HEAD → `stack submit` acts on HEAD's branch, and git-spice would
+ * only say `in detached HEAD state` (E3); not enriched → its sentence, the setup command named
+ * where it would help; then the `null` layers tracked first (§7.7's preflight — an untracked
+ * layer between tracked ones git-spice skips silently, an untracked HEAD it refuses; a `track`
+ * problem ends it, pushing nothing); then `push`, and `reportPush` says how it went.
  */
-// see primer §70 (`?.` on `enrichment`, absent only on the no-layers path above) and §28 (`basename`)
+// see primer §70 (`?.` on `enrichment`: the type allows its absence — a state with no trunk, which a fresh load with layers never is) and §28 (`basename`)
 async function pushIn(output: vscode.OutputChannel, gitExtension: GitExtensionAdapter, root: string): Promise<PushResult | undefined> {
   const host = readinessDeps.host;
   const folder = path.basename(root);
