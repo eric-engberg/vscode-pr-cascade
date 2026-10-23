@@ -56,10 +56,10 @@ describe('extension activation', () => {
     const api = await extension.activate();
 
     // assert: the two things plan §9.1 requires — a provider VS Code could ask for rows,
-    // and the refresh the toolbar button ends in (after its debounce, plan §7.14.2). Three more
-    // members, `statusBar`, `treeView` and `readinessDeps`, are there in test mode only (plan
-    // §13.4; primer §68) and are test/ext/statusbar.test.ts's and test/ext/login.test.ts's
-    // business.
+    // and the refresh the toolbar button ends in (after its debounce, plan §7.14.2). Four more
+    // members, `statusBar`, `treeView`, `readinessDeps` and `smartlog` (item 23d), are there in
+    // test mode only (plan §13.4; primer §68) and are test/ext/statusbar.test.ts's,
+    // test/ext/login.test.ts's and test/ext/views.test.ts's business.
     assert.strictEqual(typeof api.provider.getChildren, 'function');
     assert.strictEqual(typeof api.provider.getTreeItem, 'function');
     assert.strictEqual(typeof api.refresh, 'function');
@@ -78,6 +78,17 @@ describe('extension activation', () => {
     // wants a Promise — an async arrow that awaits it hands one over.
     await assert.doesNotReject(async () => {
       await vscode.commands.executeCommand('prCascade.focus');
+    });
+  });
+
+  it('registers the smartlog view in the Explorer: VS Code accepts the `prCascade.smartlog.focus` command it creates for that contributed view too (plan §7.11, item 23d)', async () => {
+    // arrange: package.json "contributes.views.explorer" declares a `webview` view with id
+    // prCascade.smartlog; the `.focus` command exists exactly when the view was contributed.
+
+    // act + assert: resolves rather than rejecting with "command not found" (the Explorer opens
+    // on the smartlog, expanded)
+    await assert.doesNotReject(async () => {
+      await vscode.commands.executeCommand('prCascade.smartlog.focus');
     });
   });
 

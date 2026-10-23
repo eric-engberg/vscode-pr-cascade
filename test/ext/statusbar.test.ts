@@ -88,7 +88,8 @@ function nextEvent<T>(event: vscode.Event<T>, deadlineMs: number): Promise<T> {
  * Puts the Stack view on or off screen and waits until the extension host knows it. VS Code
  * reports a view's visibility asynchronously, so a command's own Promise resolving is not
  * enough — the `TreeView` says when (primer §67). `prCascade.focus` shows the view; switching
- * the side bar to the Explorer hides every Source Control view, this one included.
+ * the side bar to the Explorer hides every Source Control view, this one included — and may show
+ * the smartlog view there (item 23d), which starts no load of its own on becoming visible.
  */
 async function showStackView(shown: boolean): Promise<void> {
   if (treeView.visible === shown) {

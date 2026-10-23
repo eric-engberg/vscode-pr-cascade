@@ -6,29 +6,114 @@
  * the current model posted on resolve, each model while showing, nothing while hidden and the same
  * object again on show (E79); one model object to two views (E81); a view's message through the
  * wiring to the registered command, every refusal logged and run nothing, a refused command
- * reported as failed; dispose and a second resolve. Then, from the wiring commit, live through
- * the handle `activate()` returns in test mode.
+ * reported as failed; dispose and a second resolve. Then live, through the handle `activate()`
+ * returns in test mode: the view resolved by its `.focus` command and the manifest that contributes
+ * it; the real shell in the real view; the fixture's rows top-first in the model; `seq` up by one
+ * per refresh with the post delivered; nothing posted while hidden and the current model again on
+ * show; a view's message to a command the test registers, the stale and foreign ones refused, an
+ * unregistered id reported with VS Code's own words and one error notification.
  *
  * Layer: test, extension host (plan §9.1 layer 3; Mocha inside VS Code, `npm run test:ext`).
- * Depends on: the running extension (its `extensionUri`), src/vscode/views/base.ts,
- * src/vscode/views/shell.ts and src/vscode/views/smartlog.ts imported directly,
- * src/webview/protocol.ts (`ModelMessage`, a type). Depended on by: nothing. Plan: §7.1.1,
- * §7.1.3 "Protocol" and "Security", §7.11, §8 E79/E81/E82, §9.1 layer 3, §9.4 `ext/views`, §10.1
- * item 23d (M6), §13.2 D70.
+ * Depends on: the running extension (what activate() returns in test mode — `smartlog`,
+ * `provider`, `refresh`, `readinessDeps`), src/vscode/views/base.ts, src/vscode/views/shell.ts
+ * and src/vscode/views/smartlog.ts imported directly, src/webview/protocol.ts (`ModelMessage`, a
+ * type), test/helpers/fakeReadinessHost.ts, the fixture workspace. Depended on by: nothing. Plan:
+ * §7.1.1, §7.1.3 "Protocol" and "Security", §7.11, §8 E17/E79/E81/E82, §9.1 layer 3, §9.4
+ * `ext/views`, §10.1 item 23d (M6), §13.2 D70.
  */
 
 // see primer §1 (import / export) and §9 (`import type`)
 import * as assert from 'node:assert';
+import * as path from 'node:path';
 import { before, describe, it } from 'mocha';
 import * as vscode from 'vscode';
+import type { ViewRow } from '../../src/core/viewmodel';
+import type { ExtensionApi, ReadinessDeps } from '../../src/extension';
+import type { StackTreeProvider } from '../../src/vscode/tree';
 import { StackWebviewProvider } from '../../src/vscode/views/base';
-import type { Handled, ViewHost } from '../../src/vscode/views/base';
+import type { Delivery, Handled, ViewHost } from '../../src/vscode/views/base';
 import { shellHtml } from '../../src/vscode/views/shell';
 import { SMARTLOG_VIEW } from '../../src/vscode/views/smartlog';
 import type { ModelMessage } from '../../src/webview/protocol';
+import { fakeReadinessHost } from '../helpers/fakeReadinessHost';
 
 // `dist/webview/` of the extension under test, as src/extension.ts builds it — taken in `before`.
 let distUri: vscode.Uri;
+
+/** The repository root: the workspace folder named `repo` (the other folder is its empty `nested` subfolder). */
+// see primer §25 (arrays: find) and §30 (`??`)
+function repositoryRoot(): string {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  const repo = folders.find((folder) => path.basename(folder.uri.fsPath) === 'repo');
+  if (repo === undefined) {
+    throw new Error('the fixture workspace has no folder named repo');
+  }
+  return repo.uri.fsPath;
+}
+
+/**
+ * A Promise that resolves the next time `event` fires, or rejects after `deadlineMs` naming
+ * the wait — so a test that expects an event and gets none fails with its cause and still
+ * runs its `finally`. Set up before whatever should fire the event (primer §42).
+ */
+// see primer §42 (waiting for an event with new Promise), §62 (declaring a type parameter on a function) and §58 (setTimeout and clearTimeout)
+function nextEvent<T>(event: vscode.Event<T>, deadlineMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      subscription.dispose();
+      reject(new Error(`no event within ${deadlineMs} ms`));
+    }, deadlineMs);
+    const subscription = event((value) => {
+      clearTimeout(timer);
+      subscription.dispose();
+      resolve(value);
+    });
+  });
+}
+
+/**
+ * `thenable`'s value within `deadlineMs`, or a rejection naming `what`: for a Thenable VS Code may
+ * never settle — a `postMessage` queued behind a page still loading, at 1.85.0 (vscode/views/base.ts).
+ */
+// see primer §60 (`Thenable`) and §63 (`.then` with both continuations)
+function withDeadline<T>(thenable: Thenable<T>, deadlineMs: number, what: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${what} did not settle within ${deadlineMs} ms`)), deadlineMs);
+    thenable.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
+
+/** A row's name as the plain-text view prints it: the branch or trunk ref, the working tree's label, the elided mark. */
+// see primer §82 (`switch` over a tagged union)
+function rowName(row: ViewRow): string {
+  switch (row.kind) {
+    case 'layer':
+    case 'trunk':
+      return row.name;
+    case 'workingTree':
+      return 'Uncommitted changes';
+    case 'elided':
+      return '┆';
+  }
+}
+
+/** The parts of the manifest the live block reads: VS Code hands `packageJSON` out as `any`, and this puts it under a written type. */
+// see primer §9 (interface: shapes nested inline) and §42 (`packageJSON`)
+interface ViewsManifest {
+  contributes: {
+    views: { explorer: unknown[] };
+    menus: { 'view/title': { command: string; when?: string }[] };
+  };
+}
 
 /** A model with `seq` and nothing in it: the provider reads `seq` and passes the rest on untouched. */
 // see primer §16 (object literals: spread — the overrides last)
@@ -397,6 +482,241 @@ describe('the smartlog webview view (plan §7.1.1, §7.1.3, E79, E81)', () => {
       assert.strictEqual(subject.resolves, 2);
       assert.deepStrictEqual(second.posted, [latest]);
       assert.strictEqual(subject.view, second.view);
+    });
+  });
+
+  // The real view, through the handle `activate()` returns in test mode (plan §9.1; primer §68).
+  // Two rules of the real VS Code every case here respects. The Explorer starts every contributed
+  // view collapsed, and a collapsed view is not resolved — `prCascade.smartlog.focus` expands it;
+  // and the smartlog is hidden with `workbench.action.closeSidebar`, never by showing the Source
+  // Control container: a tree view that received a refresh while hidden replays it when shown, and
+  // that extra load would move `seq` under an assertion.
+  describe('live, through the handle activate() returns in test mode', () => {
+    let smartlog: StackWebviewProvider;
+    let treeProvider: StackTreeProvider;
+    let refresh: () => void;
+    let deps: ReadinessDeps;
+
+    /**
+     * Puts the smartlog on or off screen and waits until the provider says so — its own
+     * `onDidChangeVisibility`, which fires at resolve too (VS Code sends no event for the first
+     * show, vscode/views/base.ts). `.focus` opens the Explorer on the view, expanded; closing the
+     * side bar hides it.
+     */
+    async function showSmartlog(shown: boolean): Promise<void> {
+      if (smartlog.visible === shown) {
+        return;
+      }
+      const changed = nextEvent(smartlog.onDidChangeVisibility, 5_000);
+      await vscode.commands.executeCommand(shown ? `${SMARTLOG_VIEW.id}.focus` : 'workbench.action.closeSidebar');
+      await changed;
+      assert.strictEqual(smartlog.visible, shown, 'the smartlog did not change visibility as asked');
+    }
+
+    before(async () => {
+      const extension = vscode.extensions.getExtension<ExtensionApi>('local.vscode-pr-cascade');
+      assert.ok(extension, 'the extension was not loaded');
+      const api = await extension.activate();
+      assert.ok(api.smartlog, 'activate() returned no smartlog — the extension host is not in ExtensionMode.Test');
+      assert.ok(api.readinessDeps, 'activate() returned no readinessDeps');
+      smartlog = api.smartlog;
+      treeProvider = api.provider;
+      refresh = api.refresh;
+      deps = api.readinessDeps;
+      await showSmartlog(true);
+      // A model to work with: the one the startup load built, or a fresh one if none has landed yet.
+      if (smartlog.current === undefined) {
+        const loaded = nextEvent(treeProvider.onDidLoadStates, 10_000);
+        refresh();
+        await loaded;
+      }
+    });
+
+    it("is resolved once by prCascade.smartlog.focus — VS Code's command for the contributed view, which also expands it in the Explorer — and stays resolved across hide and show: the page is rebuilt, the provider is not asked again", async () => {
+      // arrange: `before` showed it
+      assert.strictEqual(smartlog.resolves, 1);
+      assert.ok(smartlog.view, 'no view resolved');
+      assert.strictEqual(smartlog.view.viewType, SMARTLOG_VIEW.id);
+
+      try {
+        // act
+        await showSmartlog(false);
+        await showSmartlog(true);
+
+        // assert
+        assert.strictEqual(smartlog.resolves, 1);
+      } finally {
+        await showSmartlog(true);
+      }
+    });
+
+    it('declares the view in the manifest word for word, its id the one SMARTLOG_VIEW spells, and names both views in the three view/title entries (plan §7.11; §7.1.1 title-bar actions)', () => {
+      // arrange
+      const extension = vscode.extensions.getExtension('local.vscode-pr-cascade');
+      assert.ok(extension, 'the extension was not loaded');
+      const manifest = extension.packageJSON as ViewsManifest;
+
+      // assert: the Explorer entry as plan §7.11 writes it, plus the container's title after a
+      // drag; and every title-bar entry naming the smartlog beside the tree
+      assert.deepStrictEqual(manifest.contributes.views.explorer, [
+        { type: 'webview', id: SMARTLOG_VIEW.id, name: 'Stack', icon: '$(layers)', contextualTitle: 'PR Cascade', visibility: 'visible' },
+      ]);
+      for (const command of ['prCascade.refresh', 'prCascade.pushStack', 'prCascade.trackStack']) {
+        const entry = manifest.contributes.menus['view/title'].find((candidate) => candidate.command === command);
+        assert.ok(entry?.when?.includes(`view == ${SMARTLOG_VIEW.id}`), `${command}'s view/title entry does not name the smartlog: ${entry?.when}`);
+      }
+    });
+
+    it("wrote the §7.1.3 shell into the real view: webview.html is shellHtml over the real cspSource and the real asWebviewUri of the two files under dist/webview — https URIs on VS Code's resource host", () => {
+      // arrange
+      const view = smartlog.view;
+      assert.ok(view, 'no view resolved');
+      const { webview } = view;
+      const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'smartlog.js')).toString();
+      const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'codicon.css')).toString();
+
+      // assert
+      assert.strictEqual(webview.html, shellHtml({ cspSource: webview.cspSource, nonce: nonceOf(webview.html), scriptUri, styleUri }));
+      assert.ok(scriptUri.startsWith('https://') && scriptUri.endsWith('/dist/webview/smartlog.js'), scriptUri);
+      assert.ok(webview.cspSource.includes('vscode-cdn.net'), webview.cspSource);
+    });
+
+    it("carries the fixture's rows top-first, trunk last — retry-metrics, add-retries, api-refactor, origin/main — one repository, no notice, no active repository, a clean tree and a trunk nobody is behind", async () => {
+      // arrange: a fresh load, so no earlier file's state is read
+      const loaded = nextEvent(treeProvider.onDidLoadStates, 10_000);
+      refresh();
+      await loaded;
+
+      // act
+      const current = smartlog.current;
+
+      // assert
+      assert.ok(current, 'no model built');
+      assert.strictEqual(current.type, 'model');
+      assert.deepStrictEqual(current.notices, []);
+      assert.strictEqual(current.activeRepo, null);
+      assert.strictEqual(current.repos.length, 1);
+      const [repo] = current.repos;
+      assert.strictEqual(repo.repo, repositoryRoot());
+      assert.deepStrictEqual(repo.messages, []);
+      assert.deepStrictEqual(repo.rows.map(rowName), ['retry-metrics', 'add-retries', 'api-refactor', 'origin/main']);
+      const [top] = repo.rows;
+      assert.ok(top.kind === 'layer' && top.node === 'filled', 'the top layer is HEAD and should be filled');
+      const trunk = repo.rows[repo.rows.length - 1];
+      assert.ok(trunk.kind === 'trunk' && trunk.indicators.length === 0, 'the trunk row should carry no indicator');
+    });
+
+    it('raises seq by one on refresh() and delivers the post — postMessage resolves true for a view that has been showing (E79; not asserted on the first post after a show, which VS Code 1.85 never settles)', async () => {
+      // arrange
+      await showSmartlog(true);
+      const before = smartlog.current?.seq ?? 0;
+      const posted = nextEvent(smartlog.onDidPost, 10_000);
+
+      // act
+      refresh();
+      const delivery = await posted;
+
+      // assert
+      assert.strictEqual(delivery.message.seq, before + 1);
+      assert.strictEqual(smartlog.current, delivery.message);
+      assert.strictEqual(await withDeadline(delivery.delivered, 10_000, 'the post'), true);
+    });
+
+    it("posts nothing while hidden — refresh() still loads and the current model moves on (D52's path) — and re-posts that model, the same object with the same seq, when shown again (E79)", async () => {
+      try {
+        // arrange: hidden, and a listener for anything posted meanwhile
+        await showSmartlog(false);
+        const postsWhileHidden: Delivery[] = [];
+        const listening = smartlog.onDidPost((delivery) => postsWhileHidden.push(delivery));
+        const loaded = nextEvent(treeProvider.onDidLoadStates, 10_000);
+
+        // act: a load while hidden, then the show
+        refresh();
+        await loaded;
+        listening.dispose();
+        const current = smartlog.current;
+        assert.ok(current, 'no model built');
+        const posted = nextEvent(smartlog.onDidPost, 10_000);
+        await showSmartlog(true);
+        const delivery = await posted;
+
+        // assert
+        assert.deepStrictEqual(postsWhileHidden, []);
+        assert.strictEqual(delivery.message, current);
+      } finally {
+        await showSmartlog(true);
+      }
+    });
+
+    it("runs the registered command a `command` message names, with the message's arguments, when its seq is the current model's (E79)", async () => {
+      // arrange: a command of ours, registered by the test, that records what it is called with
+      const recorded: unknown[][] = [];
+      const registration = vscode.commands.registerCommand('prCascade.__test.record', (...args: unknown[]) => {
+        recorded.push(args);
+      });
+      try {
+        const seq = smartlog.current?.seq ?? 0;
+
+        // act
+        const handled = await smartlog.handleMessage({ type: 'command', seq, command: 'prCascade.__test.record', args: [repositoryRoot(), 'add-retries'] });
+
+        // assert
+        assert.strictEqual(handled.kind, 'run');
+        assert.deepStrictEqual(recorded, [[repositoryRoot(), 'add-retries']]);
+      } finally {
+        registration.dispose();
+      }
+    });
+
+    it("drops a `command` whose seq is older than the current model's, and refuses one ahead of it — nothing runs (E79)", async () => {
+      // arrange
+      const recorded: unknown[][] = [];
+      const registration = vscode.commands.registerCommand('prCascade.__test.record', (...args: unknown[]) => {
+        recorded.push(args);
+      });
+      try {
+        const seq = smartlog.current?.seq ?? 0;
+        assert.ok(seq >= 1, 'at least one model has been built by now');
+
+        // act
+        const stale = await smartlog.handleMessage({ type: 'command', seq: seq - 1, command: 'prCascade.__test.record', args: [] });
+        const ahead = await smartlog.handleMessage({ type: 'command', seq: seq + 1, command: 'prCascade.__test.record', args: [] });
+
+        // assert
+        assert.strictEqual(stale.kind, 'stale');
+        assert.strictEqual(ahead.kind, 'rejected');
+        assert.deepStrictEqual(recorded, []);
+      } finally {
+        registration.dispose();
+      }
+    });
+
+    it("refuses a command id outside prCascade. — a test-registered zzTest.record is never run — and reports a prCascade. id nobody registered as failed, with VS Code's own \"not found\" and one error notification through the readiness host (E17 parity)", async () => {
+      // arrange: a foreign command that would record if run, and a fake host in the seams
+      const recorded: unknown[][] = [];
+      const registration = vscode.commands.registerCommand('zzTest.record', (...args: unknown[]) => {
+        recorded.push(args);
+      });
+      const host = fakeReadinessHost();
+      const realHost = deps.host;
+      deps.host = host;
+      try {
+        const seq = smartlog.current?.seq ?? 0;
+
+        // act
+        const foreign = await smartlog.handleMessage({ type: 'command', seq, command: 'zzTest.record', args: [] });
+        const unknownId = await smartlog.handleMessage({ type: 'command', seq, command: 'prCascade.__test.nothing', args: [] });
+
+        // assert
+        assert.strictEqual(foreign.kind, 'rejected');
+        assert.deepStrictEqual(recorded, []);
+        const why = "prCascade.__test.nothing failed: command 'prCascade.__test.nothing' not found";
+        assert.deepStrictEqual(unknownId, { kind: 'failed', command: 'prCascade.__test.nothing', why });
+        assert.deepStrictEqual(host.asked, [{ severity: 'error', message: why, buttons: [] }]);
+      } finally {
+        deps.host = realHost;
+        registration.dispose();
+      }
     });
   });
 });

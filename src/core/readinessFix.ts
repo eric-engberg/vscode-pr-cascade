@@ -7,8 +7,10 @@
  * message, running the command in a terminal and waiting for the step to pass are item 19b's
  * (src/vscode/login.ts), which is why this file can be tested to the letter without VS Code.
  *
- * Also here: `trunkBranchFor`, the one question asked of git before an init offer — which
- * *local* branch `gs repo init --trunk` can be given — and `readyMessage`.
+ * Also here: `trunkBranchFor`, the question asked of git before an init offer — which *local*
+ * branch `gs repo init --trunk` can be given — and, since item 23d, on every load, for the trunk
+ * row's `local ↓m` (src/extension.ts hands its answer to core/graph.ts's readBehindTrunk); and
+ * `readyMessage`.
  *
  * Rules every sentence follows (D57): plain sentences with no "PR Cascade:" prefix (VS Code
  * already names the extension on every notification) and the British spelling of the rest of

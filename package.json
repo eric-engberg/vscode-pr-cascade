@@ -48,6 +48,16 @@
           "name": "Stack",
           "icon": "$(layers)"
         }
+      ],
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "prCascade.smartlog",
+          "name": "Stack",
+          "icon": "$(layers)",
+          "contextualTitle": "PR Cascade",
+          "visibility": "visible"
+        }
       ]
     },
     "commands": [
@@ -84,17 +94,17 @@
       "view/title": [
         {
           "command": "prCascade.refresh",
-          "when": "view == prCascade",
+          "when": "view == prCascade || view == prCascade.smartlog",
           "group": "navigation@1"
         },
         {
           "command": "prCascade.pushStack",
-          "when": "view == prCascade",
+          "when": "view == prCascade || view == prCascade.smartlog",
           "group": "2_stack@1"
         },
         {
           "command": "prCascade.trackStack",
-          "when": "view == prCascade && prCascade.hasUntracked",
+          "when": "(view == prCascade || view == prCascade.smartlog) && prCascade.hasUntracked",
           "group": "2_stack@8"
         }
       ]
