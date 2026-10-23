@@ -9,6 +9,13 @@ in `package.json`, and a release's tag is that version with a `v` in front.
 
 ### Added
 
+- A second **Stack** view, at the bottom of the Explorer, drawn by the extension's own page rather
+  than a native tree: every stack in the repository, not only the one you are on, and the trunk
+  they stand on, with what git-spice knows about each branch. VS Code shows it collapsed until you
+  expand it once. For now each row is one line of plain text — the branch, its marks, its age; the
+  picture comes in the next versions, and the Source Control view stays until the new one matches
+  it. Refresh, Push Whole Stack and Track Stack sit in its title bar as they do in the tree's.
+
 - **PR Cascade: Set Up git-spice** in the Command Palette: checks that git-spice is installed
   and new enough, that the repository is initialised for it, that its remote is a GitHub or
   GitLab repository git-spice recognises, and that you are logged in — and offers the fix for

@@ -1763,11 +1763,12 @@ with a string: one name, shared, so the code that builds a URI and the code that
 the content provider for it cannot spell the scheme differently. A string has nothing to
 mutate, so only the first paragraph above applies to it.
 
-## 37. Promise.all
+## 37. Promise.all and Promise.race
 
 *First seen in `src/core/discovery.ts` (`discoverRepoRoots`; deleted in M4 item 12a, the
-example stays). No live use today — the pattern is still the one to reach for when several
-git processes may run at once.*
+example stays). No live use of `Promise.all` today — the pattern is still the one to reach for
+when several git processes may run at once. `Promise.race`: `test/ext/webviewFacts.test.ts`
+(`settledOr`, M6 item 23d).*
 
 ```ts
 const probes = candidates.map((candidate) => git.tryRun(['rev-parse', '--show-toplevel'], candidate));
@@ -1796,6 +1797,23 @@ discard the rest, `Promise.allSettled` (not used yet) reports every outcome sepa
 The types: `probes` is `Promise<string | null>[]`, a list of Promises; `Promise.all`
 turns it inside out into `Promise<(string | null)[]>`, a Promise of a list; `await`
 unwraps that to `(string | null)[]`.
+
+**`Promise.race(list)`** is `Promise.all`'s opposite number: one Promise that settles the moment
+the *first* member settles, with that member's value — or, if the first to settle rejects, its
+rejection; the rest are ignored (their work still runs, as with `Promise.all`). It is the shape
+for "this value, or the word `timeout` after n ms":
+
+```ts
+const timeout = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), deadlineMs));
+return Promise.race([Promise.resolve(thenable), timeout]);
+```
+
+`timeout` is a `new Promise` (§15) that a `setTimeout` (§58) resolves, and `Promise.resolve(thenable)`
+is §60's form — it follows VS Code's `Thenable` rather than wrapping it — so the list holds real
+Promises. The type is the union of the members': `Promise<T | 'timeout'>`. §58's `settleTabs` and
+`webviewFacts.test.ts`'s own `withDeadline` are the same race written by hand, each side cancelling
+the other; `race` is the one-call form when the loser needs no cancelling — here a timer that
+resolves a Promise nobody will await.
 
 ## 38. while loops and a queue
 
@@ -2982,7 +3000,8 @@ two side by side and lets whichever happens first end the wait: the listener, or
 timer's callback. Each cancels the other (`clearTimeout`, `dispose`) before resolving, so
 nothing is left to fire into a later test. A second `resolve` would be ignored anyway — a
 Promise settles once (§15) — but a leftover listener or timer is still a leak, and
-cancelling is the habit.
+cancelling is the habit. The built-in for this shape is `Promise.race` (§37), when neither
+side needs cancelling.
 
 One thing about the order of the two `const`s: the listener names `timer`, which is
 declared on the line *after* it. That is allowed because the listener's body does not run
@@ -4392,3 +4411,117 @@ element per line rather than one text node with newlines in it: under the browse
 normal` a text node's newlines collapse to spaces, so the DOM carries the structure (one `<div>` per line — a
 block element, which the browser starts on a new line) and a stylesheet, when 23e brings one, carries the
 looks. 23e adds `classList`, `dataset` and the keyboard here when it draws the rail.
+
+## 88. A webview view: `WebviewViewProvider`, `resolveWebviewView`, `webview.options` and `html`, `asWebviewUri`, `cspSource`, `postMessage`, `onDidReceiveMessage`
+
+*First seen in `src/vscode/views/base.ts` (`StackWebviewProvider`, M6 item 23d); registered in `src/extension.ts`.*
+
+```ts
+export class StackWebviewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
+  resolveWebviewView(webviewView: vscode.WebviewView): void {
+    const { webview } = webviewView;
+    webview.options = { enableScripts: true, localResourceRoots: [this.distUri] };
+    webview.html = shellHtml({ cspSource: webview.cspSource, nonce: newNonce(), scriptUri: …, styleUri: … });
+  }
+}
+context.subscriptions.push(vscode.window.registerWebviewViewProvider(SMARTLOG_VIEW.id, smartlog));
+```
+
+§67's tree view is drawn by VS Code from rows the extension hands over; a **webview view** is a web page the
+extension writes, drawn by the Chromium inside VS Code in a side-bar pane. The manifest contributes it like any
+view (`"type": "webview"` in `contributes.views`), and the extension registers an object that fills it:
+`registerWebviewViewProvider(id, provider)` — the `id` is the manifest's, and the provider is anything with a
+`resolveWebviewView` method, which is what `implements vscode.WebviewViewProvider` (§13) promises the compiler.
+VS Code calls `resolveWebviewView` when the view first shows — not when the extension starts, and not while the
+pane is collapsed, which is how the Explorer starts every contributed view — and hands over a **`WebviewView`**:
+`visible`, `onDidChangeVisibility` (collapsed, expanded, the side bar switched or closed), `onDidDispose` (the user
+unchecked the view in the container's menu), and `webview`, the page itself. Two facts about that first call shape
+`base.ts`: the view is visible from the moment it arrives, and no visibility event follows the first show (VS Code's
+`extHostWebviewView.ts` constructs it visible and fires only on a change), so the first post is made inside
+`resolveWebviewView` and the provider fires an event of its own there. And the call comes once per pane: hiding and
+showing the view tears the page down and rebuilds it — with `retainContextWhenHidden` off, the page's scripts start
+over and know nothing — but the provider is not asked again; only after a dispose does a new `WebviewView` arrive.
+
+The **`Webview`** has four members the host uses. `options` is set first — `enableScripts` (off by default: a page
+with no scripts), and `localResourceRoots`, the only folders of the extension the page may load files from; each
+setter is a message to the window, and a change of options after the html reloads the page, hence the order.
+`html` is the whole page as a string; VS Code's bootstrap parses it, prepends its own API script and styles, and
+loads it into a frame — `host.ts`'s `acquireVsCodeApi` (§84) is what that script defines. Nothing in the page can
+name a file on disk: `asWebviewUri(uri)` turns a local `Uri` into the `https://…vscode-cdn.net/…` form the frame may
+fetch — only under a resource root — and `cspSource` is the matching source for the page's Content Security
+Policy. A **CSP** is the `<meta http-equiv="Content-Security-Policy">` line in `views/shell.ts`: a list of what the
+page may load from where — `default-src 'none'` refuses everything not named; `script-src 'nonce-…'` admits exactly
+the `<script>` tags that carry the same **nonce**, a random string made fresh for the page (§89), so a script
+smuggled into the page's text would not run; `style-src` and `font-src` admit the codicon stylesheet and its font
+from VS Code's host. The policy is defence in depth: the shell interpolates four host-made strings and no data,
+and `render.ts` writes text with `textContent` (§87), so there is nothing to smuggle — the CSP says so to the
+browser as well.
+
+Messages both ways. `webview.postMessage(message)` delivers a plain object to the page — a `message` event on its
+`window`, §85 — and answers a **`Thenable<boolean>`** (§60): `true` when the message reached the page, `false` when
+the view is hidden (the page is torn down; nothing receives it). One caveat decides how `base.ts` treats that
+answer: a post made while the page is still loading is queued and arrives, but at VS Code 1.85 the queue never
+settles its promises (`webviewElement.ts`), so src never awaits a post — `void` it and move on; the tests get the
+Thenable through `onDidPost` and await it with a deadline. `webview.onDidReceiveMessage` fires with whatever the
+page posted, typed `any` by VS Code: `base.ts` takes it as `unknown` and `route.ts` checks it field by field (§51,
+§86) before anything is done with it (E79) — data from a page is data. The test's twin is
+`vscode.window.createWebviewPanel(…)`: the same `Webview` inside an editor tab rather than a side-bar pane, which
+`test/ext/webviewFacts.test.ts` loads with a probe to read the page's side of these facts, since a view's page cannot
+be read from the extension host.
+
+## 89. `node:crypto`'s `randomBytes(…).toString('hex')`, and `Uri.joinPath` over `context.extensionUri`
+
+*First seen in `src/vscode/views/shell.ts` (`newNonce`) and `src/extension.ts` (`distUri`, M6 item 23d).*
+
+```ts
+import { randomBytes } from 'node:crypto';
+export function newNonce(): string {
+  return randomBytes(16).toString('hex');
+}
+
+const distUri = vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview');
+```
+
+`node:crypto` is Node's built-in module for cryptography — hashes, ciphers, random numbers that an attacker cannot
+predict. `randomBytes(16)` asks the operating system for sixteen random bytes (128 bits) and returns a `Buffer`, Node's
+byte array; `.toString('hex')` spells each byte as two hexadecimal digits, so the result is 32 characters of `0`–`9`
+and `a`–`f`. That is the shape a CSP nonce wants (§88): unguessable, and made of characters that need no quoting
+inside an HTML attribute or a policy string. `Math.random()` would be the wrong tool — it is fast and spread evenly,
+not unpredictable — which is the whole difference between the two modules. A `.mjs` script would write
+`crypto.randomBytes` the same way; the `node:` prefix (§39) says the import is Node's own and never a package.
+
+`vscode.Uri.joinPath(base, ...segments)` appends path segments to a `Uri` (§42, §55) the way `path.join` does for a
+string path, keeping the scheme and authority: `context.extensionUri` is where VS Code installed (or, under F5, is
+running) the extension, and `joinPath(…, 'dist', 'webview')` names the folder esbuild wrote the view's bundle and the
+codicons into. A `Uri` and not a string, because that is what `asWebviewUri` and `localResourceRoots` take — and
+because the extension may one day be installed somewhere that is not a plain folder (a remote, a virtual file
+system), where a string path would be wrong and a `Uri` still right. `...segments` is a rest parameter (§54's
+other half): any number of strings, each one path segment.
+
+## 90. `WeakMap`: a Map whose keys are objects, and whose entries go when the key does
+
+*First seen in `src/extension.ts` (`viewModelsOf`, M6 item 23d).*
+
+```ts
+const viewModelsOf = new WeakMap<readonly RepoState[], ViewModels>();
+viewModelsOf.set(states, { repos, notices });   // in loadRepoStates, beside `return states`
+const built = viewModelsOf.get(states) ?? { repos: [], notices: [] };   // in the onDidLoadStates listener
+```
+
+A `Map` (§19) takes any value as a key and holds its entries until `delete` or `clear`. A **`WeakMap`** takes only
+objects as keys — an array, an object literal, a class instance; never a string or a number — and holds an entry only
+as long as something else still holds the key: once the key object is unreachable, the entry is gone with it, and
+nothing has to remember to remove it. It has `get`, `set`, `has` and `delete`, and nothing else — no `size`, no
+iteration — because what it holds depends on the garbage collector, which runs when it likes.
+
+What it is for here: attaching a value to an object that someone else owns and hands around. `loadRepoStates` is
+the tree's loader, and the tree's contract is `() => Promise<RepoState[]>` — the array of states and nothing more.
+The pictures built for the smartlog belong to that very array (the same load, the same moment), and the tree hands
+the array back in its `onDidLoadStates` event; filing the pictures *under the array* means the listener finds exactly
+the pictures of the states it was given — an overtaken load's array is never fired, so its pictures are never looked
+up, and when that array is dropped its entry goes too. A `Map` keyed by the repository root would answer with the
+wrong load's picture when two loads overlap; a module variable "the last built" would rely on the order two
+asynchronous functions resume in. Identity is the key: `viewModelsOf.get(states)` finds an entry only for the
+object `set` was given, never for an equal-looking copy — which is what makes it exact. The `??` (§30) is for the
+compiler: `get` is typed `ViewModels | undefined`, though a fired array always has its entry — `loadRepoStates` files
+it before returning, and the tree fires the array it was handed.
